@@ -6,7 +6,7 @@ export interface EmailConfig {
 }
 
 export const emailConfig: EmailConfig = {
-  apiKey: process.env.RESEND_API_KEY ||'re_98NqC47x_LZnaXGQ2QCsjnnwWSQmt6Tys',
+  apiKey: process.env.RESEND_API_KEY ||'',
   from: process.env.EMAIL_FROM || '',
   replyTo: process.env.EMAIL_REPLY_TO || '',
 };
