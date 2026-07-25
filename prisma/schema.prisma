@@ -1,0 +1,3486 @@
+// ============================================================
+// BILSCORE PLATFORM - COMPLETE PRISMA SCHEMA WITH SECURITY
+// Version: 4.5
+// Database: MySQL 8.0+
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  END_USER
+  RETAILER
+  AGENT
+  ADMIN
+  SUPER_ADMIN
+  DEVELOPER
+}
+
+enum KYCStatus {
+  PENDING
+  SUBMITTED
+  VERIFIED
+  REJECTED
+}
+
+enum ChannelType {
+  WHATSAPP
+  MOBILE_APP
+  USSD
+  SMS
+  TELEGRAM
+  MESSENGER
+  API
+}
+
+enum Language {
+  EN
+  PIDGIN
+  HAUSA
+  YORUBA
+  IGBO
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+  RESERVE
+  RELEASE
+  TRANSFER_SENT
+  TRANSFER_RECEIVED
+  ADMIN_ADJUSTMENT
+  LOAN_DISBURSEMENT
+  LOAN_REPAYMENT
+  API_PURCHASE
+  BULK_PURCHASE
+  QR_PAYMENT
+  WALLET_FUNDING
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+enum VtuType {
+  AIRTIME
+  DATA
+  ELECTRICITY_INSTANT
+  ELECTRICITY_PREORDER
+  CABLE_TV
+  EDUCATION
+  INSURANCE
+}
+
+enum VtuVendor {
+  VTPASS
+  QUICKTELLER
+  MONIEPOINT
+  FLUTTERWAVE_VTU
+}
+
+enum MeterType {
+  HOME
+  OFFICE
+  FARM
+}
+
+enum TokenType {
+  ELECTRICITY
+}
+
+enum TokenStatus {
+  STORED
+  DELIVERED
+  EXPIRED
+  REFUNDED
+  INVALIDATED
+}
+
+enum DeliveryChannel {
+  WHATSAPP
+  MOBILE_PUSH
+  USSD
+  SMS
+  EMAIL
+  WEBHOOK
+}
+
+enum SubscriptionType {
+  ELECTRICITY
+  CABLE_TV
+}
+
+enum PreOrderStatus {
+  PENDING
+  PROCESSING
+  PURCHASED
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+enum LoanType {
+  STARTER
+  STANDARD
+  PREMIUM
+  EMERGENCY
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  DISBURSED
+  ACTIVE
+  COMPLETED
+  DEFAULTED
+  CANCELLED
+  RESTRUCTURED
+}
+
+enum RepaymentType {
+  AUTO
+  MANUAL
+  LUMP_SUM
+  ADMIN_ADJUSTMENT
+  REFUND
+}
+
+enum AdjustmentType {
+  EXTENSION
+  REDUCTION
+  INCREASE
+  PAUSE
+  RESUME
+  WRITE_OFF
+  FREEZE_WALLET
+  UNFREEZE_WALLET
+}
+
+enum NotificationType {
+  DISBURSEMENT
+  REMINDER_7_DAYS
+  REMINDER_14_DAYS
+  REMINDER_21_DAYS
+  REMINDER_30_DAYS
+  OVERDUE_ALERT
+  FINAL_WARNING
+  COMPLETION
+  WALLET_FROZEN
+  WALLET_UNFROZEN
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRY
+  DLQ
+}
+
+enum JobType {
+  VTU_TRANSACTION
+  WHATSAPP_MESSAGE
+  USSD_SESSION
+  SUBSCRIPTION_PROCESSING
+  PRE_ORDER_PROCESSING
+  LOAN_PROCESSING
+  NOTIFICATION
+  SCHEDULED_JOB
+  TARIFF_CHECK
+  VENDOR_HEALTH_CHECK
+  TOKEN_EXPIRY_CHECK
+  LOAN_REMINDER
+  LOAN_DELINQUENCY_CHECK
+  USSD_CLEANUP
+  API_REQUEST
+  WEBHOOK_DELIVERY
+  BULK_OPERATION
+  QR_PAYMENT
+  OTP_DELIVERY
+  WALLET_FUNDING
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+  DEGRADED
+  DOWN
+}
+
+enum VendorAuthType {
+  API_KEY
+  HMAC
+  OAUTH2
+  BASIC
+  BEARER_TOKEN
+  CUSTOM
+}
+
+enum CircuitBreakerState {
+  CLOSED
+  OPEN
+  HALF_OPEN
+}
+
+enum DisCo {
+  IKEJA
+  EKO
+  ABUJA
+  KANO
+  PHCN
+  IBADAN
+  BENIN
+  ENUGU
+  JOS
+  PORT_HARCOURT
+}
+
+enum NetworkProvider {
+  MTN
+  GLO
+  AIRTEL
+  NINEMOBILE
+}
+
+enum UssdSessionStatus {
+  ACTIVE
+  TIMEOUT
+  COMPLETED
+  CANCELLED
+  ERROR
+}
+
+enum DeveloperAccountType {
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum DeveloperStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum WebhookEvent {
+  TRANSACTION_COMPLETED
+  TRANSACTION_FAILED
+  PREORDER_DELIVERED
+  PREORDER_FAILED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_FAILED
+  LOAN_DISBURSED
+  LOAN_COMPLETED
+  LOAN_DEFAULTED
+  WALLET_CREDITED
+  WALLET_DEBITED
+  WALLET_FUNDED
+}
+
+enum QRCodeStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  USED
+}
+
+enum QRCodeType {
+  ELECTRICITY
+  CABLE_TV
+  WATER
+  OTHER
+}
+
+enum OTPStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  FAILED
+}
+
+enum PaymentMethod {
+  CARD
+  BANK_TRANSFER
+  WALLET
+  USSD
+}
+
+enum QRPaymentStatus {
+  PENDING
+  OTP_SENT
+  VERIFIED
+  PAID
+  FAILED
+  EXPIRED
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+  TRANSFER
+  FEE
+  SYSTEM
+}
+
+enum WalletFundingStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+enum WalletCategory {
+  FUNDING
+  AIRTIME
+  DATA
+  ELECTRICITY
+  CABLE_TV
+  EDUCATION
+  TRANSFER
+  LOAN_DISBURSEMENT
+  LOAN_REPAYMENT
+  BULK_PURCHASE
+  API_PURCHASE
+  QR_PAYMENT
+  SYSTEM
+  ADMIN_ADJUSTMENT
+}
+
+enum TicketPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TicketUrgency {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TicketImpact {
+  WIDESPREAD
+  LARGE
+  MEDIUM
+  LOW
+  INDIVIDUAL
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  REOPENED
+  ON_HOLD
+  ESCALATED
+  MERGED
+  DUPLICATE
+}
+
+enum TicketChannel {
+  WHATSAPP
+  USSD
+  MOBILE_APP
+  WEB
+  EMAIL
+  SMS
+  PHONE
+  IN_APP_CHAT
+  SOCIAL_MEDIA
+  API
+  QR_PAYMENT
+}
+
+enum TicketSource {
+  CUSTOMER
+  AGENT
+  SYSTEM
+  MONITORING
+  AUTOMATION
+  API
+}
+
+enum TicketType {
+  QUESTION
+  COMPLAINT
+  FEATURE_REQUEST
+  BUG
+  BILLING
+  TECHNICAL
+  REFUND
+  ACCOUNT
+  FRAUD
+  OTHER
+}
+
+enum TicketResolution {
+  FIXED
+  EXPLAINED
+  WORKAROUND
+  NOT_A_BUG
+  CANNOT_REPRODUCE
+  ESCALATED
+  REFUNDED
+  FEATURE
+  OTHER
+}
+
+enum SlaStatus {
+  WITHIN_SLA
+  BREACHED
+  APPROACHING
+  BREACH_IMMINENT
+}
+
+enum SupportAgentStatus {
+  AVAILABLE
+  BUSY
+  AWAY
+  OFFLINE
+  DO_NOT_DISTURB
+  IN_MEETING
+}
+
+enum AgentRole {
+  TIER_1
+  TIER_2
+  TIER_3
+  TEAM_LEAD
+  SUPERVISOR
+  MANAGER
+}
+
+enum SatisfactionRating {
+  VERY_UNSATISFIED
+  UNSATISFIED
+  NEUTRAL
+  SATISFIED
+  VERY_SATISFIED
+}
+
+enum KnowledgeBaseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  UNDER_REVIEW
+}
+
+enum KnowledgeBaseCategory {
+  FAQ
+  TROUBLESHOOTING
+  HOW_TO
+  BILLING
+  SECURITY
+  GENERAL
+  API
+  QUICK_START
+}
+
+// ============================================================
+// CUSTOMER MANAGEMENT ENUMS
+// ============================================================
+
+enum CustomerType {
+  REGULAR
+  PREMIUM
+  VIP
+  WHOLESALE
+}
+
+enum CustomerSegmentType {
+  HIGH_SPENDERS
+  FREQUENT_BUYERS
+  NEW_CUSTOMERS
+  AT_RISK
+  LOYAL
+  CUSTOM
+}
+
+// ============================================================
+// SECURITY ENUMS
+// ============================================================
+
+enum SecurityEventType {
+  LOGIN_ATTEMPT
+  REGISTRATION_ATTEMPT
+  PASSWORD_RESET
+  PIN_VERIFICATION
+  TWO_FACTOR_AUTH
+  SUSPICIOUS_ACTIVITY
+  BLOCKED_IP
+  BLOCKED_USER
+  RATE_LIMIT_EXCEEDED
+  BRUTE_FORCE_ATTEMPT
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  PERMISSION_CHANGED
+  ROLE_CHANGED
+  API_ACCESS
+  SESSION_CREATED
+  SESSION_TERMINATED
+  DEVICE_REGISTERED
+  DEVICE_UNREGISTERED
+}
+
+enum BlockReason {
+  BRUTE_FORCE
+  SUSPICIOUS_ACTIVITY
+  ADMIN_ACTION
+  POLICY_VIOLATION
+  FRAUD_SUSPICION
+  MULTIPLE_FAILURES
+  IP_BLOCKED
+  USER_REQUEST
+  SYSTEM_AUTO
+}
+
+// ============================================================
+// SECURITY TABLES (FIXED)
+// ============================================================
+
+model RegistrationAttempt {
+  id            String    @id @default(uuid())
+  email         String
+  ipAddress     String
+  userAgent     String?
+  attempts      Int       @default(1)
+  firstAttempt  DateTime  @default(now())
+  lastAttempt   DateTime  @updatedAt
+  blockedUntil  DateTime?
+  blockReason   BlockReason?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  securityEvents SecurityEvent[]
+
+  @@unique([email, ipAddress])
+  @@index([email])
+  @@index([ipAddress])
+  @@index([blockedUntil])
+  @@map("registration_attempts")
+}
+
+model AuditLog {
+  id            String    @id @default(uuid())
+  userId        String?
+  action        String
+  entityType    String?
+  entityId      String?
+  oldValues     Json?
+  newValues     Json?
+  ipAddress     String?
+  userAgent     String?
+  channel       ChannelType?
+  metadata      Json?
+  timestamp     DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  // Relations - FIXED: Removed direct securityEvents relation
+  user          User?     @relation("UserAudit", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([timestamp])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model RateLimit {
+  id            String    @id @default(uuid())
+  key           String    @unique
+  requests      Int       @default(0)
+  windowStart   DateTime  @default(now())
+  windowEnd     DateTime
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  securityEvents SecurityEvent[]
+
+  @@index([key])
+  @@index([windowEnd])
+  @@map("rate_limits")
+}
+
+model SecurityEvent {
+  id            String              @id @default(uuid())
+  userId        String?
+  eventType     SecurityEventType
+  ipAddress     String
+  userAgent     String?
+  sessionId     String?             // Single definition
+  location      String?
+  deviceId      String?
+  details       Json?
+  isBlocked     Boolean             @default(false)
+  blockReason   BlockReason?
+  blockedUntil  DateTime?
+  isResolved    Boolean             @default(false)
+  resolvedAt    DateTime?
+  resolvedBy    String?
+  resolutionNotes String?
+  createdAt     DateTime            @default(now())
+
+  // Relations
+  user          User?               @relation("UserSecurityEvents", fields: [userId], references: [id])
+  
+  registrationAttemptId String?
+  registrationAttempt RegistrationAttempt? @relation(fields: [registrationAttemptId], references: [id])
+  
+  rateLimitId   String?
+  rateLimit     RateLimit?          @relation(fields: [rateLimitId], references: [id])
+  
+  session       Session?            @relation(fields: [sessionId], references: [id])
+  
+  blockedIPId   String?
+  blockedIP     BlockedIP?          @relation(fields: [blockedIPId], references: [id])
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([ipAddress])
+  @@index([createdAt])
+  @@index([isBlocked])
+  @@map("security_events")
+}
+
+model BlockedIP {
+  id            String    @id @default(uuid())
+  ipAddress     String    @unique
+  reason        String?
+  blockedBy     String?
+  blockedAt     DateTime  @default(now())
+  expiresAt     DateTime?
+  isActive      Boolean   @default(true)
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations - FIXED: Added opposite relation
+  securityEvents SecurityEvent[]
+
+  @@index([ipAddress])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@map("blocked_ips")
+}
+
+model SecurityAlert {
+  id            String    @id @default(uuid())
+  type          String
+  severity      String    // CRITICAL, HIGH, MEDIUM, LOW
+  message       String
+  details       Json?
+  source        String?   // IP, User, System
+  sourceId      String?
+  isResolved    Boolean   @default(false)
+  resolvedAt    DateTime?
+  resolvedBy    String?
+  notes         String?
+  userId        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User?     @relation(fields: [userId], references: [id])
+
+  @@index([severity])
+  @@index([isResolved])
+  @@index([createdAt])
+  @@map("security_alerts")
+}
+
+// ============================================================
+// CORE TABLES (UPDATED WITH SECURITY RELATIONS)
+// ============================================================
+
+model User {
+  id                    String          @id @default(uuid())
+  email                 String?         @unique
+  username              String?         @unique
+  passwordHash          String?
+  phone                 String          @unique
+  pinHash               String?
+  fullName              String
+  role                  UserRole        @default(END_USER)
+  walletBalance         Decimal         @default(0)
+  hasWallet             Boolean         @default(false)
+  isVerified            Boolean         @default(false)
+  kycStatus             KYCStatus       @default(PENDING)
+  kycData               Json?
+  isWalletFrozen        Boolean         @default(false)
+  walletFrozenAt        DateTime?
+  walletFrozenReason    String?
+  referralCode          String?         @unique
+  referredBy            String?
+  preferredChannel      ChannelType?
+  preferredLanguage     Language        @default(EN)
+  pinAttempts           Int             @default(0)
+  pinLockedUntil        DateTime?
+  lastLoginAt           DateTime?
+
+  // Security fields
+  isLocked              Boolean         @default(false)
+  lockedAt              DateTime?
+  lockedReason          String?
+  loginAttempts         Int             @default(0)
+  lastLoginIP           String?
+  lastLoginUserAgent    String?
+  twoFactorEnabled      Boolean         @default(false)
+  twoFactorSecret       String?
+  lastPasswordChangeAt  DateTime?
+
+  // Developer fields
+  isDeveloper           Boolean         @default(false)
+  developerAccountType  DeveloperAccountType? @default(BASIC)
+  developerStatus       DeveloperStatus? @default(PENDING)
+  companyName           String?
+  developerMonthlyVolume Decimal       @default(0)
+  developerCustomPricing Json?
+
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  channels              Channel[]
+  ussdSessions          UssdSession[]
+  wallet                Wallet?
+  walletTransactions    WalletTransaction[]
+  vtuTransactions       VtuTransaction[]
+  subscriptions         Subscription[]
+  preOrders             PreOrder[]
+  tokenVault            TokenVault[]
+  loans                 RetailerLoan[]
+  repayments            Repayment[]
+  sentTransfers         WalletTransfer[]  @relation("Sender")
+  receivedTransfers     WalletTransfer[]  @relation("Receiver")
+  notifications         UserNotification[]
+  supportTickets        SupportTicket[]   @relation("CustomerTickets")
+  supportReplies        SupportReply[]
+  knowledgeBaseVotes    KnowledgeBaseVote[]
+  supportSatisfaction   SupportSatisfaction[]
+  auditLogs             AuditLog[]        @relation("UserAudit")
+  developer             Developer?
+  apiKeys               ApiKey[]
+  qrCodes               QRCode[]
+  qrPayments            QRPayment[]
+  referredReferrals     Referral[]        @relation("Referrer")
+  refereeReferrals      Referral[]        @relation("Referee")
+  sessions              Session[]
+  loanNotifications     LoanNotification[]
+  ussdLogs              UssdLog[]
+  supportAgent          SupportAgent?
+  chatSessions          SupportChatSession[]
+  knowledgeBaseAuthor   KnowledgeBase[]   @relation("Author")
+  knowledgeBaseReviewer KnowledgeBase[]   @relation("Reviewer")
+  knowledgeBaseRevisions KnowledgeBaseRevision[]
+  knowledgeBaseAttachments KnowledgeBaseAttachment[]
+  supportReplyReactions SupportReplyReaction[]
+  uploaderAttachments   SupportAttachment[] @relation("Uploader")
+  supportAutomationExecutions SupportAutomationExecution[]
+
+  savedMeters           SavedMeter[]
+  savedDecoders         SavedDecoder[]
+
+  // Customer management relations
+  customers             Customer[]
+  customerTransactions  CustomerTransaction[]
+  customerNotes         CustomerNote[]
+  customerCommunications CustomerCommunication[]
+  customerSegments      CustomerSegment[]
+  customerDiscounts     CustomerDiscount[]
+  commissionSettings    CommissionSetting[]
+  customerAnalytics     CustomerAnalytics[]
+
+  // Security relations - FIXED: Removed blockedIPs direct relation
+  // Users are linked to BlockedIP through SecurityEvents
+  securityEvents        SecurityEvent[]    @relation("UserSecurityEvents")
+  securityAlerts        SecurityAlert[]
+
+  @@map("users")
+}
+
+// ============================================================
+// REMAINING MODELS (UNCHANGED)
+// ============================================================
+
+model Channel {
+  id                String        @id @default(uuid())
+  userId            String
+  channelType       ChannelType
+  channelIdentifier String        @unique
+  channelUsername   String?
+  isVerified        Boolean       @default(false)
+  linkedAt          DateTime      @default(now())
+  lastSeen          DateTime      @default(now())
+  simCarrier        String?
+  simExpiry         DateTime?
+  metadata          Json?
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id])
+
+  @@unique([userId, channelType])
+  @@map("channels")
+}
+
+// ============================================================
+// WALLET TABLES
+// ============================================================
+
+model Wallet {
+  id                String          @id @default(uuid())
+  userId            String          @unique
+  accountNumber     String          @unique
+  bankName          String          @default("PALMPAY")
+  accountName       String
+  walletBalance     Decimal         @default(0)
+  ledgerBalance     Decimal         @default(0)
+  currency          String          @default("NGN")
+  isActive          Boolean         @default(true)
+  isFrozen          Boolean         @default(false)
+  frozenAt          DateTime?
+  frozenReason      String?
+  kycLevel          Int             @default(1)
+  dailyLimit        Decimal         @default(0)
+  monthlyLimit      Decimal         @default(0)
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Relations
+  user              User            @relation(fields: [userId], references: [id])
+  transactions      WalletTransaction[]
+  fundingHistory    WalletFunding[]
+
+  @@index([userId])
+  @@index([accountNumber])
+  @@map("wallets")
+}
+
+model WalletFunding {
+  id                String                @id @default(uuid())
+  walletId          String
+  amount            Decimal
+  reference         String                @unique
+  provider          String                @default("PALMPAY")
+  providerReference String?
+  status            WalletFundingStatus   @default(PENDING)
+  metadata          Json?
+  createdAt         DateTime              @default(now())
+  completedAt       DateTime?
+
+  // Relations
+  wallet            Wallet                @relation(fields: [walletId], references: [id])
+  walletTransaction WalletTransaction?    @relation("WalletFundingTransaction")
+
+  @@index([walletId])
+  @@index([reference])
+  @@index([status])
+  @@map("wallet_fundings")
+}
+
+model WalletTransaction {
+  id                String                @id @default(uuid())
+  walletId          String
+  userId            String
+  type              WalletTransactionType
+  amount            Decimal
+  balanceBefore     Decimal
+  balanceAfter      Decimal
+  reference         String                @unique
+  description       String
+  status            TransactionStatus     @default(PENDING)
+  category          WalletCategory?
+  channel           ChannelType?
+  metadata          Json?
+  createdAt         DateTime              @default(now())
+
+  // Relations
+  wallet            Wallet                @relation(fields: [walletId], references: [id])
+  user              User                  @relation(fields: [userId], references: [id])
+  
+  vtuTransactionId  String?               @unique
+  vtuTransaction    VtuTransaction?       @relation("WalletToVtu", fields: [vtuTransactionId], references: [id])
+  
+  repaymentId       String?               @unique
+  loanRepayment     Repayment?            @relation("WalletToRepayment", fields: [repaymentId], references: [id])
+  
+  loanDisbursementId String?              @unique
+  loanDisbursement  RetailerLoan?         @relation("WalletToLoan", fields: [loanDisbursementId], references: [id])
+  
+  qrPaymentId       String?               @unique
+  qrPayment         QRPayment?            @relation("WalletToQR", fields: [qrPaymentId], references: [id])
+  
+  fundingId         String?               @unique
+  walletFunding     WalletFunding?        @relation("WalletFundingTransaction", fields: [fundingId], references: [id])
+  
+  debitTransferId   String?               @unique
+  debitTransfer     WalletTransfer?       @relation("DebitTransfer", fields: [debitTransferId], references: [id])
+  
+  creditTransferId  String?               @unique
+  creditTransfer    WalletTransfer?       @relation("CreditTransfer", fields: [creditTransferId], references: [id])
+
+  @@index([walletId])
+  @@index([userId])
+  @@index([reference])
+  @@index([createdAt])
+  @@index([category])
+  @@map("wallet_transactions")
+}
+
+model WalletTransfer {
+  id              String        @id @default(uuid())
+  senderId        String
+  receiverId      String
+  amount          Decimal
+  fee             Decimal       @default(0)
+  totalDebited    Decimal
+  reference       String        @unique
+  description     String?
+  status          TransactionStatus @default(PENDING)
+  channel         ChannelType?
+  createdAt       DateTime      @default(now())
+  completedAt     DateTime?
+
+  // Relations
+  sender          User          @relation("Sender", fields: [senderId], references: [id])
+  receiver        User          @relation("Receiver", fields: [receiverId], references: [id])
+
+  debitTransaction WalletTransaction? @relation("DebitTransfer")
+  creditTransaction WalletTransaction? @relation("CreditTransfer")
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([reference])
+  @@map("wallet_transfers")
+}
+
+// ============================================================
+// CUSTOMER MANAGEMENT TABLES
+// ============================================================
+
+model Customer {
+  id                    String          @id @default(uuid())
+  userId                String
+  phone                 String
+  email                 String?
+  fullName              String?
+  address               String?
+  city                  String?
+  state                 String?
+  country               String          @default("Nigeria")
+  dateOfBirth           DateTime?
+  gender                String?
+  customerType          CustomerType    @default(REGULAR)
+  isFavorite            Boolean         @default(false)
+  isActive              Boolean         @default(true)
+  tags                  Json
+  notes                 String?
+  totalTransactions     Int             @default(0)
+  totalSpent            Decimal         @default(0)
+  totalCommissionEarned Decimal         @default(0)
+  lastTransactionAt     DateTime?
+  firstTransactionAt    DateTime?
+  lastInteractionAt     DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+  transactions          CustomerTransaction[]
+  communications        CustomerCommunication[]
+  notesHistory          CustomerNote[]
+  devices               CustomerDevice[]
+  segmentMembers        CustomerSegmentMember[]
+  loyaltyPoints         CustomerLoyaltyPoint?
+  loyaltyTransactions   CustomerLoyaltyTransaction[]
+  discounts             CustomerDiscount[]
+
+  @@unique([userId, phone])
+  @@index([userId])
+  @@index([phone])
+  @@index([isFavorite])
+  @@index([createdAt])
+  @@index([lastTransactionAt])
+  @@map("customers")
+}
+
+model CustomerTransaction {
+  id                    String          @id @default(uuid())
+  customerId            String
+  userId                String
+  vtuTransactionId      String?         @unique
+  transactionType       VtuType
+  amount                Decimal
+  serviceFee            Decimal         @default(0)
+  totalAmount           Decimal
+  product               String
+  phoneNumber           String?
+  meterNumber           String?
+  network               NetworkProvider?
+  planName              String?
+  customerPhoneProvided String?
+  customerNameProvided  String?
+  commissionAmount      Decimal         @default(0)
+  commissionRate        Decimal         @default(0)
+  commissionPaid        Boolean         @default(false)
+  commissionPaidAt      DateTime?
+  status                TransactionStatus @default(SUCCESS)
+  notes                 String?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+  vtuTransaction        VtuTransaction? @relation("VtuToCustomer", fields: [vtuTransactionId], references: [id])
+
+  @@index([customerId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([transactionType])
+  @@index([status])
+  @@map("customer_transactions")
+}
+
+model CustomerNote {
+  id                    String          @id @default(uuid())
+  customerId            String
+  userId                String
+  note                  String
+  type                  String          @default("GENERAL")
+  isPinned              Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+  @@index([userId])
+  @@map("customer_notes")
+}
+
+model CustomerCommunication {
+  id                    String          @id @default(uuid())
+  customerId            String
+  userId                String
+  channel               ChannelType
+  type                  String
+  subject               String?
+  message               String
+  status                String          @default("SENT")
+  reference             String?
+  sentAt                DateTime        @default(now())
+  deliveredAt           DateTime?
+  readAt                DateTime?
+  repliedAt             DateTime?
+  metadata              Json?
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+  @@index([userId])
+  @@index([sentAt])
+  @@map("customer_communications")
+}
+
+model CustomerDevice {
+  id                    String          @id @default(uuid())
+  customerId            String
+  deviceId              String?         @unique
+  deviceType            String
+  deviceName            String?
+  osType                String?
+  osVersion             String?
+  appVersion            String?
+  pushToken             String?
+  lastSeenAt            DateTime?
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([deviceId])
+  @@map("customer_devices")
+}
+
+model CustomerLoyaltyPoint {
+  id                    String          @id @default(uuid())
+  customerId            String          @unique
+  points                Int             @default(0)
+  tier                  String          @default("BRONZE")
+  pointsToNextTier      Int             @default(100)
+  lifetimePoints        Int             @default(0)
+  lastActivityAt        DateTime?
+  expiresAt             DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  transactions          CustomerLoyaltyTransaction[]
+
+  @@map("customer_loyalty_points")
+}
+
+model CustomerLoyaltyTransaction {
+  id                    String          @id @default(uuid())
+  customerId            String
+  loyaltyPointId        String?
+  points                Int
+  type                  String          @default("EARN")
+  source                String
+  description           String?
+  reference             String?
+  transactionId         String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  loyaltyPoints         CustomerLoyaltyPoint? @relation(fields: [loyaltyPointId], references: [id])
+
+  @@index([customerId])
+  @@index([createdAt])
+  @@map("customer_loyalty_transactions")
+}
+
+model CustomerSegment {
+  id                    String          @id @default(uuid())
+  userId                String
+  name                  String
+  description           String?
+  criteria              Json
+  color                 String?
+  type                  CustomerSegmentType @default(CUSTOM)
+  isActive              Boolean         @default(true)
+  isSystem              Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+  members               CustomerSegmentMember[]
+
+  @@unique([userId, name])
+  @@map("customer_segments")
+}
+
+model CustomerSegmentMember {
+  id                    String          @id @default(uuid())
+  segmentId             String
+  customerId            String
+  addedAt               DateTime        @default(now())
+  removedAt             DateTime?
+  isActive              Boolean         @default(true)
+
+  // Relations
+  segment               CustomerSegment @relation(fields: [segmentId], references: [id])
+  customer              Customer        @relation(fields: [customerId], references: [id])
+
+  @@unique([segmentId, customerId])
+  @@map("customer_segment_members")
+}
+
+model CustomerDiscount {
+  id                    String          @id @default(uuid())
+  customerId            String
+  userId                String
+  discountType          String
+  discountValue         Decimal
+  description           String?
+  minPurchase           Decimal?
+  maxDiscount           Decimal?
+  validFrom             DateTime        @default(now())
+  validUntil            DateTime
+  isActive              Boolean         @default(true)
+  isUsed                Boolean         @default(false)
+  usedAt                DateTime?
+  transactionId         String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+  @@map("customer_discounts")
+}
+
+model CommissionSetting {
+  id                    String          @id @default(uuid())
+  userId                String
+  transactionType       VtuType
+  commissionType        String          @default("PERCENTAGE")
+  commissionValue       Decimal         @default(0)
+  minAmount             Decimal?
+  maxAmount             Decimal?
+  isActive              Boolean         @default(true)
+  effectiveFrom         DateTime        @default(now())
+  effectiveUntil        DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@unique([userId, transactionType])
+  @@index([userId])
+  @@map("commission_settings")
+}
+
+model CustomerAnalytics {
+  id                    String          @id @default(uuid())
+  userId                String
+  totalCustomers        Int             @default(0)
+  newCustomers          Int             @default(0)
+  activeCustomers       Int             @default(0)
+  favoriteCustomers     Int             @default(0)
+  churnedCustomers      Int             @default(0)
+  returningCustomers    Int             @default(0)
+  totalTransactions     Int             @default(0)
+  totalRevenue          Decimal         @default(0)
+  averageTransactionValue Decimal       @default(0)
+  highestTransaction    Decimal         @default(0)
+  totalCommissionEarned Decimal         @default(0)
+  averageCommission     Decimal         @default(0)
+  highValueCustomers    Int             @default(0)
+  regularCustomers      Int             @default(0)
+  oneTimeCustomers      Int             @default(0)
+  wholesaleCustomers    Int             @default(0)
+  topCustomers          Json?
+  date                  DateTime        @default(now())
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@map("customer_analytics")
+}
+
+// ============================================================
+// QR CODE ACTIVATION & PAYMENT TABLES
+// ============================================================
+
+model QRCode {
+  id                String          @id @default(uuid())
+  qrId              String          @unique
+  serviceType       QRCodeType      @default(ELECTRICITY)
+  disco             DisCo?
+  meterNumber       String?
+  decoderNumber     String?
+  decoderProvider   String?
+  customerName      String?
+  customerAddress   String?
+  agentId           String?
+  userId            String?
+  category          String?
+  status            QRCodeStatus    @default(ACTIVE)
+  expiryDays        Int             @default(30)
+  expiresAt         DateTime
+  signature         String
+  scanCount         Int             @default(0)
+  paymentCount      Int             @default(0)
+  totalRevenue      Decimal         @default(0)
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Relations
+  user              User?           @relation(fields: [userId], references: [id])
+  scans             QRScanLog[]
+  payments          QRPayment[]
+  sessions          QRPaymentSession[]
+
+  @@index([qrId])
+  @@index([status])
+  @@index([agentId])
+  @@index([userId])
+  @@map("qr_codes")
+}
+
+model QRScanLog {
+  id                String          @id @default(uuid())
+  qrId              String
+  ipAddress         String
+  userAgent         String?
+  location          String?
+  deviceInfo        String?
+  sessionId         String?
+  isSuspicious      Boolean         @default(false)
+  suspicionReason   String?
+  createdAt         DateTime        @default(now())
+
+  // Relations
+  qrCode            QRCode          @relation(fields: [qrId], references: [id])
+  session           QRPaymentSession? @relation(fields: [sessionId], references: [id])
+
+  @@index([qrId])
+  @@index([createdAt])
+  @@map("qr_scan_logs")
+}
+
+model QRPaymentSession {
+  id                String          @id @default(uuid())
+  qrId              String
+  sessionToken      String          @unique
+  phoneNumber       String
+  otpCode           String?
+  otpStatus         OTPStatus       @default(PENDING)
+  otpAttempts       Int             @default(0)
+  otpSentAt         DateTime?
+  otpVerifiedAt     DateTime?
+  otpExpiresAt      DateTime?
+  amount            Decimal
+  paymentMethod     PaymentMethod?
+  status            QRPaymentStatus @default(PENDING)
+  ipAddress         String?
+  userAgent         String?
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  expiresAt         DateTime
+
+  // Relations
+  qrCode            QRCode          @relation(fields: [qrId], references: [id])
+  payment           QRPayment?
+  scans             QRScanLog[]
+  otpLogs           OTPLog[]
+
+  @@index([qrId])
+  @@index([sessionToken])
+  @@index([phoneNumber])
+  @@index([status])
+  @@map("qr_payment_sessions")
+}
+
+model QRPayment {
+  id                String          @id @default(uuid())
+  qrId              String
+  sessionId         String          @unique
+  userId            String?
+  amount            Decimal
+  serviceFee        Decimal         @default(0)
+  totalAmount       Decimal
+  paymentMethod     PaymentMethod
+  status            TransactionStatus @default(PENDING)
+  reference         String          @unique
+  metadata          Json?
+  completedAt       DateTime?
+  createdAt         DateTime        @default(now())
+
+  // Relations
+  qrCode            QRCode          @relation(fields: [qrId], references: [id])
+  session           QRPaymentSession @relation(fields: [sessionId], references: [id])
+  user              User?           @relation(fields: [userId], references: [id])
+  
+  vtuTransactionId  String?         @unique
+  vtuTransaction    VtuTransaction? @relation("QRToVtu", fields: [vtuTransactionId], references: [id])
+  
+  walletTransactionId String?       @unique
+  walletTransaction WalletTransaction? @relation("WalletToQR")
+
+  @@index([qrId])
+  @@index([reference])
+  @@index([status])
+  @@map("qr_payments")
+}
+
+model OTPLog {
+  id                String          @id @default(uuid())
+  phoneNumber       String
+  otpCode           String
+  purpose           String
+  sessionId         String?
+  attempts          Int             @default(0)
+  status            OTPStatus       @default(PENDING)
+  sentAt            DateTime        @default(now())
+  verifiedAt        DateTime?
+  expiresAt         DateTime
+  ipAddress         String?
+  metadata          Json?
+
+  // Relations
+  session           QRPaymentSession? @relation(fields: [sessionId], references: [id])
+
+  @@index([phoneNumber])
+  @@index([sessionId])
+  @@index([status])
+  @@map("otp_logs")
+}
+
+// ============================================================
+// USSD SESSIONS & LOGS
+// ============================================================
+
+model UssdSession {
+  id                String            @id @default(uuid())
+  sessionId         String            @unique
+  userId            String?
+  phoneNumber       String
+  currentMenu       String
+  menuHistory       Json
+  step              Int               @default(0)
+  data              Json
+  language          Language          @default(EN)
+  status            UssdSessionStatus @default(ACTIVE)
+  lastActivityAt    DateTime          @default(now())
+  expiresAt         DateTime
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  user              User?             @relation(fields: [userId], references: [id])
+  logs              UssdLog[]
+
+  @@index([sessionId])
+  @@index([phoneNumber])
+  @@index([status])
+  @@map("ussd_sessions")
+}
+
+model UssdLog {
+  id                String            @id @default(uuid())
+  sessionId         String
+  phoneNumber       String
+  userId            String?
+  request           String
+  response          String
+  menu              String
+  duration          Int
+  isError           Boolean           @default(false)
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime          @default(now())
+
+  // Relations
+  session           UssdSession       @relation(fields: [sessionId], references: [id])
+  user              User?             @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
+  @@index([phoneNumber])
+  @@index([createdAt])
+  @@map("ussd_logs")
+}
+
+model UssdMenu {
+  id                String            @id @default(uuid())
+  menuId            String            @unique
+  parentMenuId      String?
+  name              String
+  description       String?
+  messageTemplate   String
+  options           Json
+  action            String?
+  requiresAuth      Boolean           @default(false)
+  isActive          Boolean           @default(true)
+  order             Int               @default(0)
+  language          Language          @default(EN)
+  metadata          Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([parentMenuId])
+  @@index([menuId])
+  @@index([language])
+  @@map("ussd_menus")
+}
+
+// ============================================================
+// VENDOR MANAGEMENT TABLES
+// ============================================================
+
+model Vendor {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  code                  String          @unique
+  type                  VtuVendor
+  apiBaseUrl            String
+  authType              VendorAuthType  @default(API_KEY)
+  authConfig            Json?
+  status                VendorStatus    @default(ACTIVE)
+  priority              Int             @default(1)
+  successRate           Decimal         @default(0)
+  avgResponseTime       Int             @default(0)
+  failureCount          Int             @default(0)
+  consecutiveFailures   Int             @default(0)
+  lastCheckAt           DateTime?       @default(now())
+  lastSuccessAt         DateTime?
+  lastFailureAt         DateTime?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  services              VendorService[]
+  endpoints             VendorApiEndpoint[]
+  transformers          VendorTransformer[]
+  failoverRules         VendorFailoverRule[]
+  circuitBreakers       CircuitBreaker[]
+  healthChecks          VendorHealthCheck[]
+  dailyMetrics          VendorDailyMetric[]
+  transactionAttempts   VtuTransactionAttempt[]
+  productProviders      ProductProvider[]
+  vendorSelectionLogs   VendorSelectionLog[]    @relation("SelectedVendorLog")
+  
+  selectedTransactions  VtuTransaction[]        @relation("SelectedVendor")
+  vendorTransactions    VtuTransaction[]        @relation("VendorTransactions")
+
+  @@map("vendors")
+}
+
+model VendorService {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType
+  isActive              Boolean         @default(true)
+  priority              Int             @default(1)
+  basePrice             Decimal?
+  markup                Decimal         @default(0)
+  minAmount             Decimal?
+  maxAmount             Decimal?
+  metadata              Json?
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, serviceType])
+  @@index([serviceType])
+  @@index([isActive])
+  @@map("vendor_services")
+}
+
+model VendorApiEndpoint {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType
+  endpoint              String
+  method                String          @default("POST")
+  requestMapping        Json?
+  responseMapping       Json?
+  errorMapping          Json?
+  timeoutMs             Int             @default(30000)
+  retryableErrors       Json?
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, serviceType])
+  @@map("vendor_api_endpoints")
+}
+
+model VendorTransformer {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType
+  transformType         String
+  script                String?
+  mapping               Json
+  isActive              Boolean         @default(true)
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, serviceType, transformType])
+  @@map("vendor_transformers")
+}
+
+model VendorFailoverRule {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType?
+  failureThreshold      Int             @default(3)
+  errorRateThreshold    Decimal         @default(0.1)
+  timeWindowMs          Int             @default(60000)
+  maxRetries            Int             @default(3)
+  retryDelayMs          Int             @default(1000)
+  backoffMultiplier     Decimal         @default(2.0)
+  fallbackVendorId      String?
+  fallbackAfterMs       Int             @default(5000)
+  circuitBreakerEnabled Boolean         @default(true)
+  circuitBreakerThreshold Int           @default(5)
+  circuitBreakerTimeoutMs Int           @default(60000)
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@map("vendor_failover_rules")
+}
+
+model CircuitBreaker {
+  id                    String                @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType?
+  state                 CircuitBreakerState   @default(CLOSED)
+  failureCount          Int                   @default(0)
+  successCount          Int                   @default(0)
+  lastFailureAt         DateTime?
+  lastSuccessAt         DateTime?
+  openedAt              DateTime?
+  resetTimeoutMs        Int                   @default(60000)
+
+  // Relations
+  vendor                Vendor                @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, serviceType])
+  @@index([state])
+  @@map("circuit_breakers")
+}
+
+model VendorHealthCheck {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  serviceType           VtuType?
+  status                VendorStatus
+  responseTime          Int
+  isSuccess             Boolean
+  errorMessage          String?
+  uptimePercentage      Decimal         @default(100)
+  errorRate             Decimal         @default(0)
+  avgResponseTime       Int             @default(0)
+  minResponseTime       Int             @default(0)
+  maxResponseTime       Int             @default(0)
+  requestCount          Int             @default(0)
+  successCount          Int             @default(0)
+  failureCount          Int             @default(0)
+  checkedAt             DateTime        @default(now())
+  metadata              Json?
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@index([checkedAt])
+  @@index([serviceType])
+  @@map("vendor_health_checks")
+}
+
+model VendorDailyMetric {
+  id                    String          @id @default(uuid())
+  vendorId              String
+  date                  DateTime
+  serviceType           VtuType?
+  totalRequests         Int             @default(0)
+  successfulRequests    Int             @default(0)
+  failedRequests        Int             @default(0)
+  totalRevenue          Decimal         @default(0)
+  avgResponseTime       Int             @default(0)
+  uptimeSeconds         Int             @default(0)
+  downtimeSeconds       Int             @default(0)
+  availability          Decimal         @default(100)
+  errorCodes            Json?
+
+  // Relations
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, date, serviceType])
+  @@index([vendorId])
+  @@index([date])
+  @@map("vendor_daily_metrics")
+}
+
+model VendorSelectionLog {
+  id                    String          @id @default(uuid())
+  transactionId         String?
+  serviceType           VtuType
+  userId                String
+  candidates            Json
+  selectedVendorId      String
+  selectionReason       String
+  vendorStates          Json
+  selectionTimeMs       Int
+
+  // Relations
+  selectedVendor        Vendor          @relation("SelectedVendorLog", fields: [selectedVendorId], references: [id])
+
+  createdAt             DateTime        @default(now())
+
+  @@index([transactionId])
+  @@index([serviceType])
+  @@index([createdAt])
+  @@map("vendor_selection_logs")
+}
+
+// ============================================================
+// VTU TRANSACTIONS
+// ============================================================
+
+model VtuTransaction {
+  id                    String                @id @default(uuid())
+  userId                String
+  transactionType       VtuType
+  product               String
+  amount                Decimal
+  serviceFee            Decimal               @default(0)
+  totalDebited          Decimal
+
+  selectedVendorId      String?
+  vendorPriorityUsed    Int?
+  fallbackAttempts      Int                   @default(0)
+  failedVendors         Json?
+
+  vendor                VtuVendor?
+  vendorReference       String?
+  status                TransactionStatus     @default(PENDING)
+  retryCount            Int                   @default(0)
+  maxRetries            Int                   @default(3)
+
+  meterNumber           String?
+  meterType             MeterType?
+  meterName             String?
+  phoneNumber           String?
+  network               NetworkProvider?
+  networkPlan           String?
+  token                 String?
+  tokenValidUntil       DateTime?
+  scheduledFor          DateTime?
+  deliveredAt           DateTime?
+  isBulkPurchase        Boolean               @default(false)
+  bulkQuantity          Int?
+  channel               ChannelType?
+  apiKeyId              String?
+  qrPaymentId           String?               @unique
+  metadata              Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  user                  User                  @relation(fields: [userId], references: [id])
+  
+  selectedVendor        Vendor?               @relation("SelectedVendor", fields: [selectedVendorId], references: [id])
+  
+  walletTransactionId   String?               @unique
+  walletTransaction     WalletTransaction?    @relation("WalletToVtu")
+  
+  subscriptionId        String?
+  subscription          Subscription?         @relation(fields: [subscriptionId], references: [id])
+  
+  qrPayment             QRPayment?            @relation("QRToVtu")
+  
+  vendorId              String?
+  vendorInfo            Vendor?               @relation("VendorTransactions", fields: [vendorId], references: [id])
+  
+  preOrder              PreOrder?
+  tokenVault            TokenVault?
+  apiKey                DeveloperApiKey?      @relation(fields: [apiKeyId], references: [id])
+  attempts              VtuTransactionAttempt[]
+  
+  customerTransaction   CustomerTransaction?  @relation("VtuToCustomer")
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([selectedVendorId])
+  @@map("vtu_transactions")
+}
+
+model VtuTransactionAttempt {
+  id                    String                @id @default(uuid())
+  transactionId         String
+  vendorId              String
+  attemptNumber         Int                   @default(1)
+  requestPayload        Json?
+  endpoint              String?
+  method                String?
+  responsePayload       Json?
+  responseStatus        Int?
+  status                TransactionStatus     @default(PENDING)
+  responseTime          Int?
+  startedAt             DateTime              @default(now())
+  completedAt           DateTime?
+  errorCode             String?
+  errorMessage          String?
+  errorType             String?
+  isRetryable           Boolean               @default(true)
+  vendorStateAtAttempt  Json?
+
+  // Relations
+  transaction           VtuTransaction        @relation(fields: [transactionId], references: [id])
+  vendor                Vendor                @relation(fields: [vendorId], references: [id])
+
+  @@index([transactionId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("vtu_transaction_attempts")
+}
+
+// ============================================================
+// ELECTRICITY PRE-ORDER & SUBSCRIPTION
+// ============================================================
+
+model PreOrder {
+  id                    String            @id @default(uuid())
+  userId                String
+  disCo                 DisCo
+  meterNumber           String
+  meterType             MeterType         @default(HOME)
+  meterName             String?
+  amount                Decimal
+  serviceFee            Decimal           @default(0)
+  totalDebited          Decimal
+  deliveryDate          DateTime
+  status                PreOrderStatus    @default(PENDING)
+  transactionId         String?           @unique
+  tokenVaultId          String?
+  isCancelled           Boolean           @default(false)
+  metadata              Json? 
+  cancelledAt           DateTime?
+  cancellationReason    String?
+  channel               ChannelType?
+  apiKeyId              String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  user                  User              @relation(fields: [userId], references: [id])
+  transaction           VtuTransaction?   @relation(fields: [transactionId], references: [id])
+  apiKey                DeveloperApiKey?  @relation(fields: [apiKeyId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([deliveryDate])
+  @@map("pre_orders")
+}
+
+model Subscription {
+  id                    String            @id @default(uuid())
+  userId                String
+  type                  SubscriptionType  @default(ELECTRICITY)
+  disCo                 DisCo?
+  meterNumber           String?
+  meterType             MeterType         @default(HOME)
+  meterName             String?
+  decoderNumber         String?
+  decoderType           String?
+  packageName           String?
+  amount                Decimal
+  serviceFee            Decimal           @default(0)
+  renewalDay            Int
+  isActive              Boolean           @default(true)
+  isPaused              Boolean           @default(false)
+  pausedAt              DateTime?
+  nextRenewalDate       DateTime
+  lastRenewalDate       DateTime?
+  channel               ChannelType?
+  apiKeyId              String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  user                  User              @relation(fields: [userId], references: [id])
+  transactions          VtuTransaction[]
+  apiKey                DeveloperApiKey?  @relation(fields: [apiKeyId], references: [id])
+
+  @@index([userId])
+  @@index([nextRenewalDate])
+  @@map("subscriptions")
+}
+
+// ============================================================
+// TOKEN VAULT
+// ============================================================
+
+model TokenVault {
+  id                    String          @id @default(uuid())
+  userId                String
+  transactionId         String          @unique
+  token                 String
+  tokenType             TokenType       @default(ELECTRICITY)
+  meterNumber           String
+  disCo                 DisCo
+  amount                Decimal
+  validFrom             DateTime
+  validUntil            DateTime
+  status                TokenStatus     @default(STORED)
+  scheduledFor          DateTime
+  deliveredAt           DateTime?
+  deliveryChannel       DeliveryChannel?
+  isRefunded            Boolean         @default(false)
+  refundedAt            DateTime?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+  vtuTransaction        VtuTransaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([userId])
+  @@index([scheduledFor])
+  @@index([status])
+  @@map("token_vault")
+}
+
+// ============================================================
+// RETAILER LOAN SYSTEM
+// ============================================================
+
+model LoanProduct {
+  id                    String   @id @default(uuid())
+  name                  String
+  type                  LoanType @default(STARTER)
+  minAmount             Decimal
+  maxAmount             Decimal
+  defaultAmount         Decimal
+  repaymentRate         Decimal
+  durationDays          Int
+  interestRate          Decimal  @default(0)
+  requiresKYC           Boolean  @default(true)
+  minTransactions       Int?
+  minWalletAge          Int?
+  isActive              Boolean  @default(true)
+  eligibilityRules      Json?
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  loans                 RetailerLoan[]
+
+  @@map("loan_products")
+}
+
+model RetailerLoan {
+  id                    String        @id @default(uuid())
+  userId                String
+  productId             String
+  amount                Decimal
+  amountPaid            Decimal       @default(0)
+  amountRemaining       Decimal
+  repaymentRate         Decimal
+  durationDays          Int
+  interestRate          Decimal
+  interestAccrued       Decimal       @default(0)
+  totalDue              Decimal
+  status                LoanStatus    @default(PENDING)
+
+  appliedAt             DateTime      @default(now())
+  appliedChannel        ChannelType?
+  approvedAt            DateTime?
+  approvedBy            String?
+  disbursedAt           DateTime?
+  disbursedChannel      ChannelType?
+  dueDate               DateTime?
+  completedAt           DateTime?
+
+  lastRepaymentAt       DateTime?
+  daysOverdue           Int           @default(0)
+  delinquencyStage      String?
+  freezeWallet          Boolean       @default(false)
+  freezeReason          String?
+
+  walletTransactionId   String?       @unique
+  metadata              Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  // Relations
+  user                  User          @relation(fields: [userId], references: [id])
+  product               LoanProduct   @relation(fields: [productId], references: [id])
+  repayments            Repayment[]
+  adjustments           LoanAdjustment[]
+  walletTransaction     WalletTransaction? @relation("WalletToLoan")
+  loanNotifications     LoanNotification[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("retailer_loans")
+}
+
+model Repayment {
+  id                    String          @id @default(uuid())
+  loanId                String
+  userId                String
+  amount                Decimal
+  type                  RepaymentType   @default(AUTO)
+  sourceSale            String?
+  sourceSaleAmount      Decimal?
+  walletTransactionId   String?         @unique
+  channel               ChannelType?
+  notes                 String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  loan                  RetailerLoan    @relation(fields: [loanId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+  walletTx              WalletTransaction? @relation("WalletToRepayment")
+
+  @@index([loanId])
+  @@index([userId])
+  @@map("repayments")
+}
+
+model LoanAdjustment {
+  id                    String          @id @default(uuid())
+  loanId                String
+  adminId               String
+  type                  AdjustmentType
+  amount                Decimal
+  previousValue         String?
+  newValue              String?
+  reason                String
+  notes                 String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  loan                  RetailerLoan    @relation(fields: [loanId], references: [id])
+
+  @@index([loanId])
+  @@map("loan_adjustments")
+}
+
+model LoanNotification {
+  id                    String          @id @default(uuid())
+  loanId                String
+  userId                String
+  type                  NotificationType
+  sentAt                DateTime        @default(now())
+  deliveryChannel       DeliveryChannel
+  delivered             Boolean         @default(false)
+  deliveredAt           DateTime?
+  metadata              Json?
+
+  // Relations
+  loan                  RetailerLoan    @relation(fields: [loanId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([loanId])
+  @@index([userId])
+  @@map("loan_notifications")
+}
+
+// ============================================================
+// PRODUCT CATALOG
+// ============================================================
+
+model ProductCatalog {
+  id                    String          @id @default(uuid())
+  name                  String
+  type                  VtuType
+  category              String
+  provider              String?
+  planName              String?
+  price                 Decimal
+  serviceFee            Decimal         @default(0)
+  vendorPrice           Decimal?
+  vendorId              String?
+  isActive              Boolean         @default(true)
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  productProviders      ProductProvider[]
+
+  @@index([type])
+  @@index([isActive])
+  @@map("product_catalog")
+}
+
+model ProductProvider {
+  id                    String          @id @default(uuid())
+  productId             String
+  vendorId              String
+  vendorPrice           Decimal
+  ourPrice              Decimal
+  serviceFee            Decimal         @default(0)
+  minAmount             Decimal?
+  maxAmount             Decimal?
+  isActive              Boolean         @default(true)
+  priority              Int             @default(1)
+  vendorProductCode     String?
+  vendorPlanCode        String?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  product               ProductCatalog  @relation(fields: [productId], references: [id])
+  vendor                Vendor          @relation(fields: [vendorId], references: [id])
+
+  @@unique([productId, vendorId])
+  @@index([isActive])
+  @@map("product_providers")
+}
+
+// ============================================================
+// QUEUE & JOB SYSTEM
+// ============================================================
+
+model Job {
+  id                    String          @id @default(uuid())
+  type                  JobType
+  status                JobStatus       @default(PENDING)
+  payload               Json
+  idempotencyKey        String?         @unique
+  priority              Int             @default(0)
+  attempts              Int             @default(0)
+  maxAttempts           Int             @default(3)
+  errorMessage          String?
+  stackTrace            String?
+  scheduledFor          DateTime?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  jobLogs               JobLog[]
+
+  @@index([status])
+  @@index([type])
+  @@index([scheduledFor])
+  @@map("jobs")
+}
+
+model JobLog {
+  id                    String          @id @default(uuid())
+  jobId                 String
+  attemptNumber         Int
+  status                JobStatus
+  message               String?
+  errorMessage          String?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  job                   Job             @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+  @@map("job_logs")
+}
+
+// ============================================================
+// NOTIFICATIONS SYSTEM
+// ============================================================
+
+model UserNotification {
+  id                    String          @id @default(uuid())
+  userId                String
+  type                  String
+  title                 String
+  body                  String
+  data                  Json?
+  priority              String          @default("NORMAL")
+  status                String          @default("PENDING")
+  channel               DeliveryChannel
+  readAt                DateTime?
+  sentAt                DateTime?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@map("user_notifications")
+}
+
+// ============================================================
+// DISCO & TARIFF MANAGEMENT
+// ============================================================
+
+model DisCoInfo {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  code                  DisCo           @unique
+  apiBaseUrl            String
+  apiKey                String?
+  status                VendorStatus    @default(ACTIVE)
+  currentTariff         Json?
+  tariffLastUpdated     DateTime?
+  supportsKCT           Boolean         @default(false)
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  tariffHistory         TariffHistory[]
+
+  @@map("disco_info")
+}
+
+model TariffHistory {
+  id                    String          @id @default(uuid())
+  disCoId               String
+  tariffData            Json
+  effectiveFrom         DateTime
+  effectiveTo           DateTime?
+  isCurrent             Boolean         @default(false)
+  detectedAt            DateTime        @default(now())
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  disCo                 DisCoInfo       @relation(fields: [disCoId], references: [id])
+
+  @@index([disCoId])
+  @@index([isCurrent])
+  @@map("tariff_history")
+}
+
+// ============================================================
+// SYSTEM CONFIGURATION
+// ============================================================
+
+model SystemConfig {
+  id                    String          @id @default(uuid())
+  key                   String          @unique
+  value                 Json
+  description           String?
+  isEditable            Boolean         @default(true)
+  updatedBy             String?
+  updatedAt             DateTime        @updatedAt
+  createdAt             DateTime        @default(now())
+
+  @@map("system_config")
+}
+
+// ============================================================
+// DAILY METRICS
+// ============================================================
+
+model DailyMetric {
+  id                    String          @id @default(uuid())
+  date                  DateTime        @unique
+  totalUsers            Int             @default(0)
+  newUsers              Int             @default(0)
+  activeUsers           Int             @default(0)
+  totalTransactions     Int             @default(0)
+  totalVolume           Decimal         @default(0)
+  totalRevenue          Decimal         @default(0)
+  successfulTransactions Int           @default(0)
+  failedTransactions    Int             @default(0)
+  totalLoansDisbursed   Decimal         @default(0)
+  totalLoansRepaid      Decimal         @default(0)
+  activeLoans           Int             @default(0)
+  overdueLoans          Int             @default(0)
+  defaultedLoans        Int             @default(0)
+  ussdSessions          Int             @default(0)
+  whatsappMessages      Int             @default(0)
+  mobileAppUsers        Int             @default(0)
+  apiRequests           Int             @default(0)
+  webhookDeliveries     Int             @default(0)
+  qrScans               Int             @default(0)
+  qrPayments            Int             @default(0)
+  qrRevenue             Decimal         @default(0)
+  walletFundingCount    Int             @default(0)
+  walletFundingVolume   Decimal         @default(0)
+  walletTransfers       Int             @default(0)
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([date])
+  @@map("daily_metrics")
+}
+
+// ============================================================
+// REFERRAL SYSTEM
+// ============================================================
+
+model Referral {
+  id                    String          @id @default(uuid())
+  referrerId            String
+  refereeId             String          @unique
+  referralCode          String          @unique
+  status                String          @default("PENDING")
+  rewardAmount          Decimal         @default(0)
+  rewardPaid            Boolean         @default(false)
+  rewardPaidAt          DateTime?
+  channel               ChannelType?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  referrer              User            @relation("Referrer", fields: [referrerId], references: [id])
+  referee               User            @relation("Referee", fields: [refereeId], references: [id])
+
+  @@index([referrerId])
+  @@index([referralCode])
+  @@map("referrals")
+}
+
+// ============================================================
+// BULK OPERATIONS
+// ============================================================
+
+model BulkOperation {
+  id                    String          @id @default(uuid())
+  type                  String
+  status                String          @default("PENDING")
+  totalItems            Int             @default(0)
+  processedItems        Int             @default(0)
+  successfulItems       Int             @default(0)
+  failedItems           Int             @default(0)
+  items                 Json
+  errors                Json?
+  initiatedBy           String
+  channel               ChannelType?
+  apiKeyId              String?
+  completedAt           DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  apiKey                DeveloperApiKey? @relation(fields: [apiKeyId], references: [id])
+
+  @@index([status])
+  @@map("bulk_operations")
+}
+
+// ============================================================
+// SMS & EMAIL LOGS
+// ============================================================
+
+model SmsLog {
+  id                    String          @id @default(uuid())
+  userId                String
+  phoneNumber           String
+  message               String
+  status                String          @default("PENDING")
+  provider              String?
+  providerReference     String?
+  sentAt                DateTime?
+  deliveredAt           DateTime?
+  errorMessage          String?
+  createdAt             DateTime        @default(now())
+
+  @@index([userId])
+  @@index([phoneNumber])
+  @@map("sms_logs")
+}
+
+model EmailLog {
+  id                    String          @id @default(uuid())
+  userId                String
+  to                    String
+  subject               String
+  body                  String
+  status                String          @default("PENDING")
+  provider              String?
+  providerReference     String?
+  sentAt                DateTime?
+  deliveredAt           DateTime?
+  errorMessage          String?
+  createdAt             DateTime        @default(now())
+
+  @@index([userId])
+  @@map("email_logs")
+}
+
+// ============================================================
+// USER SESSIONS & AUTH (UPDATED)
+// ============================================================
+
+model Session {
+  id                    String          @id @default(uuid())
+  userId                String
+  token                 String          @unique
+  deviceInfo            String?
+  ipAddress             String?
+  userAgent             String?
+  channel               ChannelType?
+  expiresAt             DateTime
+  isActive              Boolean         @default(true)
+  terminatedAt          DateTime?
+  terminationReason     String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+  securityEvents        SecurityEvent[]
+
+  @@index([userId])
+  @@index([token])
+  @@index([isActive])
+  @@map("sessions")
+}
+
+model ApiKey {
+  id                    String          @id @default(uuid())
+  userId                String
+  name                  String
+  key                   String          @unique
+  hashedKey             String
+  permissions           Json
+  expiresAt             DateTime?
+  lastUsedAt            DateTime?
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ============================================================
+// SYSTEM HEALTH MONITORING
+// ============================================================
+
+model SystemHealth {
+  id                    String          @id @default(uuid())
+  service               String
+  status                String
+  responseTime          Int
+  errorRate             Decimal         @default(0)
+  uptimePercentage      Decimal         @default(100)
+  lastIncidentAt        DateTime?
+  metadata              Json?
+  checkedAt             DateTime        @default(now())
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([service])
+  @@index([checkedAt])
+  @@map("system_health")
+}
+
+// ============================================================
+// USSD SHORTCODE CONFIGURATION
+// ============================================================
+
+model UssdShortcode {
+  id                    String          @id @default(uuid())
+  shortcode             String          @unique
+  provider              String
+  isActive              Boolean         @default(true)
+  defaultMenuId         String
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([shortcode])
+  @@map("ussd_shortcodes")
+}
+
+// ============================================================
+// TRANSLATIONS
+// ============================================================
+
+model Translation {
+  id                    String          @id @default(uuid())
+  key                   String
+  language              Language
+  value                 String
+  module                String
+  context               String?
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@unique([key, language, module])
+  @@index([key])
+  @@index([language])
+  @@map("translations")
+}
+
+// ============================================================
+// DEVELOPER API PLATFORM
+// ============================================================
+
+model Developer {
+  id                    String                @id @default(uuid())
+  userId                String                @unique
+  companyName           String
+  phone                 String?
+  accountType           DeveloperAccountType  @default(BASIC)
+  status                DeveloperStatus       @default(PENDING)
+  monthlyVolume         Decimal               @default(0)
+  customPricing         Json?
+  walletBalance         Decimal               @default(0)
+
+  // Relations
+  user                  User                  @relation(fields: [userId], references: [id])
+  apiKeys               DeveloperApiKey[]
+  webhookSubscriptions  WebhookSubscription[]
+  apiLogs               ApiLog[]
+  webhookLogs           DeveloperWebhookLog[]
+  usageMetrics          DeveloperUsageMetric[]
+  billingRecords        DeveloperBilling[]
+
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@map("developers")
+}
+
+model DeveloperApiKey {
+  id                    String                @id @default(uuid())
+  developerId           String
+  name                  String
+  key                   String                @unique
+  keyPrefix             String
+  isActive              Boolean               @default(true)
+  isSandbox             Boolean               @default(false)
+  ipWhitelist           Json
+  rateLimitPerMin       Int                   @default(50)
+  rateLimitPerHour      Int                   @default(1000)
+  lastUsedAt            DateTime?
+  expiresAt             DateTime?
+  createdAt             DateTime              @default(now())
+
+  // Relations
+  developer             Developer             @relation(fields: [developerId], references: [id])
+  transactions          VtuTransaction[]
+  preOrders             PreOrder[]
+  subscriptions         Subscription[]
+  webhookDeliveries     WebhookDelivery[]
+  bulkOperations        BulkOperation[]
+  apiLogs               ApiLog[]
+
+  @@map("developer_api_keys")
+}
+
+model WebhookSubscription {
+  id                    String                @id @default(uuid())
+  developerId           String
+  url                   String
+  secret                String
+  events                Json
+  isActive              Boolean               @default(true)
+  retryCount            Int                   @default(3)
+  lastTriggeredAt       DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  developer             Developer             @relation(fields: [developerId], references: [id])
+  deliveries            WebhookDelivery[]
+  webhookLogs           DeveloperWebhookLog[]
+
+  @@map("webhook_subscriptions")
+}
+
+model WebhookDelivery {
+  id                    String                @id @default(uuid())
+  subscriptionId        String
+  event                 WebhookEvent
+  payload               Json
+  responseStatus        Int?
+  responseBody          String?
+  attempt               Int                   @default(0)
+  maxAttempts           Int                   @default(3)
+  success               Boolean               @default(false)
+  deliveredAt           DateTime?
+  nextRetryAt           DateTime?
+  errorMessage          String?
+  createdAt             DateTime              @default(now())
+
+  // Relations
+  subscription          WebhookSubscription   @relation(fields: [subscriptionId], references: [id])
+  apiKey                DeveloperApiKey?      @relation(fields: [apiKeyId], references: [id])
+  apiKeyId              String?
+
+  @@index([subscriptionId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("webhook_deliveries")
+}
+
+model ApiLog {
+  id                    String                @id @default(uuid())
+  developerId           String?
+  apiKeyId              String?
+  endpoint              String
+  method                String
+  statusCode            Int
+  requestPayload        Json?
+  responsePayload       Json?
+  ipAddress             String
+  userAgent             String?
+  responseTime          Int
+  isError               Boolean               @default(false)
+  errorMessage          String?
+  errorCode             String?
+  createdAt             DateTime              @default(now())
+
+  // Relations
+  developer             Developer?            @relation(fields: [developerId], references: [id])
+  apiKey                DeveloperApiKey?      @relation(fields: [apiKeyId], references: [id])
+
+  @@index([createdAt])
+  @@index([developerId])
+  @@index([apiKeyId])
+  @@map("api_logs")
+}
+
+model DeveloperWebhookLog {
+  id                    String                @id @default(uuid())
+  developerId           String
+  webhookId             String?
+  event                 WebhookEvent
+  payload               Json
+  responseStatus        Int?
+  responseBody          String?
+  attempt               Int                   @default(0)
+  success               Boolean               @default(false)
+  errorMessage          String?
+  createdAt             DateTime              @default(now())
+
+  // Relations
+  developer             Developer             @relation(fields: [developerId], references: [id])
+  webhook               WebhookSubscription?  @relation(fields: [webhookId], references: [id])
+
+  @@index([developerId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("developer_webhook_logs")
+}
+
+model DeveloperUsageMetric {
+  id                    String                @id @default(uuid())
+  developerId           String
+  date                  DateTime
+  totalRequests         Int                   @default(0)
+  successfulRequests    Int                   @default(0)
+  failedRequests        Int                   @default(0)
+  totalRevenue          Decimal               @default(0)
+  totalTransactions     Int                   @default(0)
+  totalVolume           Decimal               @default(0)
+  webhookDeliveries     Int                   @default(0)
+  webhookSuccesses      Int                   @default(0)
+  avgResponseTime       Int                   @default(0)
+  metadata              Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  developer             Developer             @relation(fields: [developerId], references: [id])
+
+  @@unique([developerId, date])
+  @@index([developerId])
+  @@index([date])
+  @@map("developer_usage_metrics")
+}
+
+model DeveloperBilling {
+  id                    String                @id @default(uuid())
+  developerId           String
+  periodStart           DateTime
+  periodEnd             DateTime
+  totalRequests         Int                   @default(0)
+  totalTransactions     Int                   @default(0)
+  totalVolume           Decimal               @default(0)
+  totalFees             Decimal               @default(0)
+  totalAmount           Decimal               @default(0)
+  status                String                @default("PENDING")
+  invoiceUrl            String?
+  paidAt                DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  developer             Developer             @relation(fields: [developerId], references: [id])
+
+  @@index([developerId])
+  @@index([periodStart])
+  @@index([status])
+  @@map("developer_billing")
+}
+
+// ============================================================
+// SUPPORT MANAGEMENT SYSTEM
+// ============================================================
+
+model SupportTicket {
+  id                    String            @id @default(uuid())
+  ticketNumber          String            @unique
+  userId                String
+  type                  TicketType        @default(OTHER)
+  category              String
+  subCategory           String?
+  priority              TicketPriority    @default(MEDIUM)
+  urgency               TicketUrgency     @default(MEDIUM)
+  impact                TicketImpact      @default(INDIVIDUAL)
+  subject               String
+  description           String
+  status                TicketStatus      @default(NEW)
+  resolutionType        TicketResolution?
+  resolutionNotes       String?
+  assignedTo            String?
+  assignedAt            DateTime?
+  assignedBy            String?
+  escalatedAt           DateTime?
+  escalatedTo           String?
+  escalatedBy           String?
+  escalationReason      String?
+  slaId                 String?
+  firstResponseAt       DateTime?
+  firstResponseSlaBreached Boolean        @default(false)
+  resolutionDeadline    DateTime?
+  resolutionSlaBreached Boolean           @default(false)
+  slaStatus             SlaStatus         @default(WITHIN_SLA)
+  slaBreachNotifiedAt   DateTime?
+  parentTicketId        String?
+  mergedTicketId        String?
+  duplicateOfTicketId   String?
+  channel               TicketChannel     @default(WEB)
+  source                TicketSource      @default(CUSTOMER)
+  apiKeyId              String?
+  qrPaymentId           String?
+  customerName          String?
+  customerPhone         String?
+  customerEmail         String?
+  firstResponseTime     Int?
+  resolutionTime        Int?
+  timeToClose           Int?
+  totalReplies          Int               @default(0)
+  totalInternalNotes    Int               @default(0)
+  satisfactionSentAt    DateTime?
+  satisfactionRating    SatisfactionRating?
+  satisfactionFeedback  String?
+  metadata              Json?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  resolvedAt            DateTime?
+  closedAt              DateTime?
+  reopenedAt            DateTime?
+  reopenedCount         Int               @default(0)
+
+  // Relations
+  user                  User              @relation("CustomerTickets", fields: [userId], references: [id])
+  assignedAgent         SupportAgent?     @relation("AssignedTickets", fields: [assignedTo], references: [id])
+  assignedByAgent       SupportAgent?     @relation("Assigner", fields: [assignedBy], references: [id])
+  escalatedToAgent      SupportAgent?     @relation("EscalatedTo", fields: [escalatedTo], references: [id])
+  escalatedByAgent      SupportAgent?     @relation("EscalatedBy", fields: [escalatedBy], references: [id])
+  sla                   SupportSLA?       @relation(fields: [slaId], references: [id])
+  parentTicket          SupportTicket?    @relation("ParentTicket", fields: [parentTicketId], references: [id])
+  mergedTicket          SupportTicket?    @relation("MergedTicket", fields: [mergedTicketId], references: [id])
+  duplicateOfTicket     SupportTicket?    @relation("DuplicateTicket", fields: [duplicateOfTicketId], references: [id])
+
+  replies               SupportReply[]
+  internalNotes         SupportInternalNote[]
+  auditLogs             SupportAuditLog[]
+  escalations           SupportEscalation[]
+  satisfactionSurvey    SupportSatisfaction?
+  tags                  SupportTicketTag[]
+  attachments           SupportAttachment[]
+  knowledgeBaseLinks    KnowledgeBaseTicketLink[]
+  automations           SupportTicketAutomation[]
+  automationExecutions  SupportAutomationExecution[]
+  childTickets          SupportTicket[]   @relation("ParentTicket")
+  mergedTickets         SupportTicket[]   @relation("MergedTicket")
+  duplicateTickets      SupportTicket[]   @relation("DuplicateTicket")
+  chatSessions          SupportChatSession[]
+
+  @@index([ticketNumber])
+  @@index([userId])
+  @@index([assignedTo])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([resolutionDeadline])
+  @@index([slaStatus])
+  @@index([parentTicketId])
+  @@index([mergedTicketId])
+  @@index([duplicateOfTicketId])
+  @@map("support_tickets")
+}
+
+model SupportAgent {
+  id                    String              @id @default(uuid())
+  userId                String              @unique
+  role                  AgentRole           @default(TIER_1)
+  department            String?
+  specialization        Json
+  status                SupportAgentStatus  @default(OFFLINE)
+  lastOnlineAt          DateTime?
+  currentChatLimit      Int                 @default(5)
+  currentChatCount      Int                 @default(0)
+  maxDailyTickets       Int                 @default(50)
+  skills                Json
+  languages             Json
+  avgResponseTime       Int                 @default(0)
+  avgResolutionTime     Int                 @default(0)
+  ticketsResolved       Int                 @default(0)
+  satisfactionScore     Decimal             @default(0)
+  firstContactResolution Decimal            @default(0)
+  workSchedule          Json?
+  timezone              String              @default("Africa/Lagos")
+  notificationChannels  Json?
+
+  // Relations
+  user                  User                @relation(fields: [userId], references: [id])
+  assignedTickets       SupportTicket[]     @relation("AssignedTickets")
+  assignedByTickets     SupportTicket[]     @relation("Assigner")
+  escalatedToTickets    SupportTicket[]     @relation("EscalatedTo")
+  escalatedByTickets    SupportTicket[]     @relation("EscalatedBy")
+  shifts                AgentShift[]
+  performanceMetrics    AgentPerformance[]
+  chatSessions          SupportChatSession[]
+  notes                 AgentNote[]
+  escalationsFrom       SupportEscalation[] @relation("EscalationFrom")
+  escalationsTo         SupportEscalation[] @relation("EscalationTo")
+  escalationsApproved   SupportEscalation[] @relation("EscalationApprover")
+  internalNotes         SupportInternalNote[]
+  knowledgeBaseLinks    KnowledgeBaseTicketLink[]
+  ticketTags            SupportTicketTag[]
+  macros                SupportMacro[]
+  auditLogs             SupportAuditLog[]
+
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([role])
+  @@map("support_agents")
+}
+
+model AgentShift {
+  id                    String          @id @default(uuid())
+  agentId               String
+  date                  DateTime
+  startTime             DateTime
+  endTime               DateTime
+  breakStart            DateTime?
+  breakEnd              DateTime?
+  isActive              Boolean         @default(true)
+  isOnCall              Boolean         @default(false)
+  notes                 String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  agent                 SupportAgent    @relation(fields: [agentId], references: [id])
+
+  @@unique([agentId, date])
+  @@index([date])
+  @@index([isActive])
+  @@map("agent_shifts")
+}
+
+model SupportReply {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  userId                String
+  message               String
+  isInternal            Boolean         @default(false)
+  isPublic              Boolean         @default(true)
+  isSystem              Boolean         @default(false)
+  messageType           String          @default("TEXT")
+  channel               TicketChannel   @default(WEB)
+  attachments           Json?
+  readByCustomer        Boolean         @default(false)
+  readAt                DateTime?
+  readByAgent           Boolean         @default(false)
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+  reactions             SupportReplyReaction[]
+
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([ticketId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("support_replies")
+}
+
+model SupportReplyReaction {
+  id                    String          @id @default(uuid())
+  replyId               String
+  userId                String
+  reaction              String
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  reply                 SupportReply    @relation(fields: [replyId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@unique([replyId, userId])
+  @@map("support_reply_reactions")
+}
+
+model SupportInternalNote {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  agentId               String
+  note                  String
+  isPinned              Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  agent                 SupportAgent    @relation(fields: [agentId], references: [id])
+
+  @@index([ticketId])
+  @@index([agentId])
+  @@map("support_internal_notes")
+}
+
+model SupportSLA {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  description           String?
+  criticalResponseMins  Int             @default(15)
+  criticalResolutionMins Int           @default(240)
+  highResponseMins      Int             @default(60)
+  highResolutionMins    Int             @default(1440)
+  mediumResponseMins    Int             @default(240)
+  mediumResolutionMins  Int             @default(4320)
+  lowResponseMins       Int             @default(1440)
+  lowResolutionMins     Int             @default(10080)
+  businessHoursOnly     Boolean         @default(true)
+  workingDays           Json
+  workingHoursStart     String          @default("08:00")
+  workingHoursEnd       String          @default("18:00")
+  timezone              String          @default("Africa/Lagos")
+  breachAction          String?
+  escalateAfterBreach   Boolean         @default(true)
+  escalateToRole        AgentRole?      @default(TIER_2)
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  tickets               SupportTicket[]
+
+  @@map("support_slas")
+}
+
+model SupportEscalation {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  escalatedFrom         String
+  escalatedTo           String
+  reason                String
+  urgency               TicketUrgency   @default(MEDIUM)
+  status                String          @default("PENDING")
+  approvedBy            String?
+  approvedAt            DateTime?
+  notes                 String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  fromAgent             SupportAgent    @relation("EscalationFrom", fields: [escalatedFrom], references: [id])
+  toAgent               SupportAgent    @relation("EscalationTo", fields: [escalatedTo], references: [id])
+  approver              SupportAgent?   @relation("EscalationApprover", fields: [approvedBy], references: [id])
+
+  @@index([ticketId])
+  @@index([status])
+  @@map("support_escalations")
+}
+
+model SupportSatisfaction {
+  id                    String                @id @default(uuid())
+  ticketId              String                @unique
+  userId                String
+  rating                SatisfactionRating
+  feedback              String?
+  overallScore          Int?
+  responseTimeScore     Int?
+  knowledgeScore        Int?
+  friendlinessScore     Int?
+  issueResolved         Boolean?
+  channel               TicketChannel         @default(WEB)
+  ipAddress             String?
+  userAgent             String?
+  reminderSent          Boolean               @default(false)
+  reminderSentAt        DateTime?
+  sentAt                DateTime              @default(now())
+  respondedAt           DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  ticket                SupportTicket         @relation(fields: [ticketId], references: [id])
+  user                  User                  @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+  @@index([userId])
+  @@index([rating])
+  @@map("support_satisfactions")
+}
+
+// ============================================================
+// KNOWLEDGE BASE
+// ============================================================
+
+model KnowledgeBase {
+  id                    String                @id @default(uuid())
+  title                 String
+  slug                  String                @unique
+  content               String
+  summary               String?
+  category              KnowledgeBaseCategory @default(GENERAL)
+  subCategory           String?
+  seoTitle              String?
+  seoDescription        String?
+  keywords              Json
+  status                KnowledgeBaseStatus   @default(DRAFT)
+  version               Int                   @default(1)
+  viewCount             Int                   @default(0)
+  helpfulCount          Int                   @default(0)
+  notHelpfulCount       Int                   @default(0)
+  rating                Decimal               @default(0)
+  authorId              String
+  reviewerId            String?
+  reviewedAt            DateTime?
+  publishedAt           DateTime?
+
+  // Relations
+  author                User                  @relation("Author", fields: [authorId], references: [id])
+  reviewer              User?                 @relation("Reviewer", fields: [reviewerId], references: [id])
+  tags                  KnowledgeBaseTag[]
+  votes                 KnowledgeBaseVote[]
+  revisions             KnowledgeBaseRevision[]
+  attachments           KnowledgeBaseAttachment[]
+  ticketLinks           KnowledgeBaseTicketLink[]
+
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([slug])
+  @@index([status])
+  @@index([category])
+  @@index([publishedAt])
+  @@map("knowledge_base")
+}
+
+model KnowledgeBaseTag {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  slug                  String          @unique
+  description           String?
+  color                 String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  articles              KnowledgeBase[]
+
+  @@map("knowledge_base_tags")
+}
+
+model KnowledgeBaseVote {
+  id                    String          @id @default(uuid())
+  articleId             String
+  userId                String
+  isHelpful             Boolean
+  feedback              String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  article               KnowledgeBase   @relation(fields: [articleId], references: [id])
+  user                  User            @relation(fields: [userId], references: [id])
+
+  @@unique([articleId, userId])
+  @@map("knowledge_base_votes")
+}
+
+model KnowledgeBaseRevision {
+  id                    String          @id @default(uuid())
+  articleId             String
+  version               Int
+  content               String
+  summary               String?
+  authorId              String
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  article               KnowledgeBase   @relation(fields: [articleId], references: [id])
+  author                User            @relation(fields: [authorId], references: [id])
+
+  @@index([articleId])
+  @@index([version])
+  @@map("knowledge_base_revisions")
+}
+
+model KnowledgeBaseAttachment {
+  id                    String          @id @default(uuid())
+  articleId             String
+  url                   String
+  filename              String
+  mimeType              String
+  size                  Int
+  uploadedBy            String
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  article               KnowledgeBase   @relation(fields: [articleId], references: [id])
+  uploader              User            @relation(fields: [uploadedBy], references: [id])
+
+  @@index([articleId])
+  @@map("knowledge_base_attachments")
+}
+
+model KnowledgeBaseTicketLink {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  articleId             String
+  addedBy               String
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  article               KnowledgeBase   @relation(fields: [articleId], references: [id])
+  addedByAgent          SupportAgent    @relation(fields: [addedBy], references: [id])
+
+  @@index([ticketId])
+  @@index([articleId])
+  @@map("knowledge_base_ticket_links")
+}
+
+// ============================================================
+// SUPPORT TAGS & AUTOMATION
+// ============================================================
+
+model SupportTag {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  slug                  String          @unique
+  description           String?
+  color                 String?
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  tickets               SupportTicketTag[]
+
+  @@map("support_tags")
+}
+
+model SupportTicketTag {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  tagId                 String
+  addedBy               String
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  tag                   SupportTag      @relation(fields: [tagId], references: [id])
+  addedByAgent          SupportAgent    @relation(fields: [addedBy], references: [id])
+
+  @@unique([ticketId, tagId])
+  @@map("support_ticket_tags")
+}
+
+model SupportAutomationRule {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  description           String?
+  isActive              Boolean         @default(true)
+  priority              Int             @default(1)
+  conditions            Json
+  actions               Json
+  runOnCreate           Boolean         @default(true)
+  runOnUpdate           Boolean         @default(false)
+  runOnStatusChange     Boolean         @default(false)
+  maxExecutionsPerDay   Int             @default(1000)
+  executionCount        Int             @default(0)
+  lastExecutedAt        DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  executions            SupportAutomationExecution[]
+  ticketAutomations     SupportTicketAutomation[]
+
+  @@index([isActive])
+  @@index([priority])
+  @@map("support_automation_rules")
+}
+
+model SupportAutomationExecution {
+  id                    String          @id @default(uuid())
+  ruleId                String
+  ticketId              String
+  userId                String?
+  conditionsMatched     Boolean
+  actionsExecuted       Boolean
+  result                String?
+  errorMessage          String?
+  executedAt            DateTime        @default(now())
+
+  // Relations
+  rule                  SupportAutomationRule @relation(fields: [ruleId], references: [id])
+  ticket                SupportTicket    @relation(fields: [ticketId], references: [id])
+  user                  User?            @relation(fields: [userId], references: [id])
+
+  @@index([ruleId])
+  @@index([ticketId])
+  @@map("support_automation_executions")
+}
+
+model SupportTicketAutomation {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  automationId          String
+  executedAt            DateTime        @default(now())
+  result                String?
+  metadata              Json?
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  automation            SupportAutomationRule @relation(fields: [automationId], references: [id])
+
+  @@unique([ticketId, automationId])
+  @@map("support_ticket_automations")
+}
+
+model SupportMacro {
+  id                    String          @id @default(uuid())
+  name                  String          @unique
+  description           String?
+  subject               String
+  body                  String
+  category              String?
+  placeholders          Json?
+  visibility            String          @default("ALL")
+  createdBy             String
+  useCount              Int             @default(0)
+  lastUsedAt            DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  creator               SupportAgent    @relation(fields: [createdBy], references: [id])
+
+  @@index([category])
+  @@map("support_macros")
+}
+
+model SupportChatSession {
+  id                    String          @id @default(uuid())
+  userId                String
+  agentId               String?
+  ticketId              String?
+  status                String          @default("WAITING")
+  channel               TicketChannel   @default(IN_APP_CHAT)
+  messages              Json?
+  messageCount          Int             @default(0)
+  startTime             DateTime        @default(now())
+  endTime               DateTime?
+  lastMessageAt         DateTime        @default(now())
+  transferCount         Int             @default(0)
+  transferredFrom       String?
+  transferredTo         String?
+  satisfactionRating    SatisfactionRating?
+  satisfactionFeedback  String?
+
+  // Relations
+  user                  User            @relation(fields: [userId], references: [id])
+  agent                 SupportAgent?   @relation(fields: [agentId], references: [id])
+  ticket                SupportTicket?  @relation(fields: [ticketId], references: [id])
+
+  @@index([userId])
+  @@index([agentId])
+  @@index([status])
+  @@map("support_chat_sessions")
+}
+
+model AgentPerformance {
+  id                    String          @id @default(uuid())
+  agentId               String
+  date                  DateTime
+  ticketsAssigned       Int             @default(0)
+  ticketsResolved       Int             @default(0)
+  ticketsReopened       Int             @default(0)
+  ticketsEscalated      Int             @default(0)
+  avgFirstResponseTime  Decimal         @default(0)
+  avgResolutionTime     Decimal         @default(0)
+  avgResponseTime       Decimal         @default(0)
+  satisfactionScore     Decimal         @default(0)
+  firstContactResolution Decimal        @default(0)
+  slaBreaches           Int             @default(0)
+  totalReplies          Int             @default(0)
+  totalInternalNotes    Int             @default(0)
+  totalTimeOnline       Int             @default(0)
+  totalChatsHandled     Int             @default(0)
+  ticketThroughput      Decimal         @default(0)
+  backlogCleared        Int             @default(0)
+
+  // Relations
+  agent                 SupportAgent    @relation(fields: [agentId], references: [id])
+
+  @@unique([agentId, date])
+  @@index([agentId])
+  @@index([date])
+  @@map("agent_performance")
+}
+
+model AgentNote {
+  id                    String          @id @default(uuid())
+  agentId               String
+  title                 String
+  content               String
+  isShared              Boolean         @default(false)
+  tags                  Json
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  agent                 SupportAgent    @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@index([isShared])
+  @@map("agent_notes")
+}
+
+model SupportAttachment {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  url                   String
+  filename              String
+  mimeType              String
+  size                  Int
+  uploadedBy            String
+  isPublic              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  uploader              User            @relation("Uploader", fields: [uploadedBy], references: [id])
+
+  @@index([ticketId])
+  @@map("support_attachments")
+}
+
+model SupportAuditLog {
+  id                    String          @id @default(uuid())
+  ticketId              String
+  agentId               String?
+  action                String
+  field                 String?
+  oldValue              String?
+  newValue              String?
+  notes                 String?
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id])
+  agent                 SupportAgent?   @relation(fields: [agentId], references: [id])
+
+  @@index([ticketId])
+  @@index([agentId])
+  @@index([createdAt])
+  @@map("support_audit_logs")
+}
+
+model SupportAnalytics {
+  id                    String          @id @default(uuid())
+  date                  DateTime        @unique
+  totalTicketsCreated   Int             @default(0)
+  totalTicketsResolved  Int             @default(0)
+  totalTicketsClosed    Int             @default(0)
+  totalReopened         Int             @default(0)
+  criticalTickets       Int             @default(0)
+  highTickets           Int             @default(0)
+  mediumTickets         Int             @default(0)
+  lowTickets            Int             @default(0)
+  slaBreaches           Int             @default(0)
+  slaCompliance         Decimal         @default(100)
+  avgFirstResponseTime  Decimal         @default(0)
+  avgResolutionTime     Decimal         @default(0)
+  avgSatisfaction       Decimal         @default(0)
+  totalSurveysSent      Int             @default(0)
+  totalSurveysResponded Int             @default(0)
+  satisfactionRate      Decimal         @default(0)
+  backlogTotal          Int             @default(0)
+  backlogByStatus       Json?
+  categoryDistribution  Json?
+  topAgents             Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([date])
+  @@map("support_analytics")
+}
+
+// ============================================================
+// SAVED METERS & DECODERS
+// ============================================================
+
+model SavedMeter {
+  id            String    @id @default(uuid())
+  userId        String
+  meterNumber   String
+  disco         String
+  name          String?
+  meterType     String    @default("Prepaid")
+  isDefault     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, meterNumber])
+  @@index([userId])
+  @@index([isDefault])
+  @@map("saved_meters")
+}
+
+model SavedDecoder {
+  id            String    @id @default(uuid())
+  userId        String
+  decoderNumber String
+  provider      String
+  name          String?
+  package       String?
+  isDefault     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, decoderNumber])
+  @@index([userId])
+  @@index([isDefault])
+  @@map("saved_decoders")
+}
