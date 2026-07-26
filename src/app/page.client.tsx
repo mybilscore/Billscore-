@@ -500,119 +500,117 @@ export default function AuthPage() {
     }
   };
 
-// ============================================
-// SIGN UP HANDLER - FIXED to use transactionPin
-// ============================================
-const handleSignUp = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setSignUpLoading(true);
-  setSignUpError("");
-  setPasswordErrors([]);
-  setPinErrors([]);
+  // ============================================
+  // SIGN UP HANDLER
+  // ============================================
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignUpLoading(true);
+    setSignUpError("");
+    setPasswordErrors([]);
+    setPinErrors([]);
 
-  if (!signUpData.username || signUpData.username.length < 3) {
-    setSignUpError("Username must be at least 3 characters");
-    setSignUpLoading(false);
-    return;
-  }
-
-  if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(signUpData.username)) {
-    setSignUpError("Username can only contain letters, numbers, underscore, dot, and hyphen (3-30 characters)");
-    setSignUpLoading(false);
-    return;
-  }
-
-  const passwordValidation = validatePassword(signUpData.password);
-  if (!passwordValidation.isValid) {
-    setPasswordErrors(passwordValidation.errors);
-    setSignUpError("Password does not meet security requirements");
-    setSignUpLoading(false);
-    return;
-  }
-
-  // Validate Transaction PIN
-  const pinValidation = validatePin(signUpData.transactionPin);
-  if (!pinValidation.isValid) {
-    setPinErrors(pinValidation.errors);
-    setSignUpError("Transaction PIN does not meet requirements");
-    setSignUpLoading(false);
-    return;
-  }
-
-  if (signUpData.referralCode) {
-    const referralRegex = /^BIL-[A-Z0-9]{6}$/;
-    if (!referralRegex.test(signUpData.referralCode.toUpperCase())) {
-      setSignUpError("Invalid referral code format. Use BIL-XXXXXX");
+    if (!signUpData.username || signUpData.username.length < 3) {
+      setSignUpError("Username must be at least 3 characters");
       setSignUpLoading(false);
       return;
     }
-    
-    if (referralValid === false) {
-      setSignUpError("Referral code not found. Please check and try again.");
+
+    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(signUpData.username)) {
+      setSignUpError("Username can only contain letters, numbers, underscore, dot, and hyphen (3-30 characters)");
       setSignUpLoading(false);
       return;
     }
-  }
 
-  try {
-    // ✅ FIXED: Use transactionPin from state, not confirmPassword
-    const response = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: signUpData.username,
+    const passwordValidation = validatePassword(signUpData.password);
+    if (!passwordValidation.isValid) {
+      setPasswordErrors(passwordValidation.errors);
+      setSignUpError("Password does not meet security requirements");
+      setSignUpLoading(false);
+      return;
+    }
+
+    const pinValidation = validatePin(signUpData.transactionPin);
+    if (!pinValidation.isValid) {
+      setPinErrors(pinValidation.errors);
+      setSignUpError("Transaction PIN does not meet requirements");
+      setSignUpLoading(false);
+      return;
+    }
+
+    if (signUpData.referralCode) {
+      const referralRegex = /^BIL-[A-Z0-9]{6}$/;
+      if (!referralRegex.test(signUpData.referralCode.toUpperCase())) {
+        setSignUpError("Invalid referral code format. Use BIL-XXXXXX");
+        setSignUpLoading(false);
+        return;
+      }
+      
+      if (referralValid === false) {
+        setSignUpError("Referral code not found. Please check and try again.");
+        setSignUpLoading(false);
+        return;
+      }
+    }
+
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: signUpData.username,
+          email: signUpData.email,
+          password: signUpData.password,
+          pin: signUpData.transactionPin,
+          fullName: signUpData.fullName,
+          phone: signUpData.phone || undefined,
+          userType: "END_USER",
+          preferredChannel: "MOBILE_APP",
+          referralCode: signUpData.referralCode?.toUpperCase() || undefined,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Registration failed");
+      }
+
+      const signInResult = await signIn("credentials", {
         email: signUpData.email,
         password: signUpData.password,
-        pin: signUpData.transactionPin, // ✅ Use transactionPin
-        fullName: signUpData.fullName,
-        phone: signUpData.phone || undefined,
-        userType: "END_USER",
-        preferredChannel: "MOBILE_APP",
-        referralCode: signUpData.referralCode?.toUpperCase() || undefined,
-      }),
-    });
+        redirect: false,
+      });
 
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Registration failed");
-    }
-
-    const signInResult = await signIn("credentials", {
-      email: signUpData.email,
-      password: signUpData.password,
-      redirect: false,
-    });
-
-    if (signInResult?.error) {
-      router.push("/auth?registered=true");
-      setSignUpLoading(false);
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      
-      const sessionRes = await fetch("/api/auth/session");
-      const session = await sessionRes.json();
-
-      if (session?.user) {
-        const { role: userRole } = session.user;
-        if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") {
-          router.push("/admin");
-        } else if (userRole === "DEVELOPER") {
-          router.push("/developer/dashboard");
-        } else {
-          router.push(callbackUrl);
-        }
-      } else {
+      if (signInResult?.error) {
         router.push("/auth?registered=true");
+        setSignUpLoading(false);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        
+        const sessionRes = await fetch("/api/auth/session");
+        const session = await sessionRes.json();
+
+        if (session?.user) {
+          const { role: userRole } = session.user;
+          if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") {
+            router.push("/admin");
+          } else if (userRole === "DEVELOPER") {
+            router.push("/developer/dashboard");
+          } else {
+            router.push(callbackUrl);
+          }
+        } else {
+          router.push("/auth?registered=true");
+        }
+        setSignUpLoading(false);
       }
+    } catch (err: any) {
+      console.error("Registration error:", err);
+      setSignUpError(err.message);
       setSignUpLoading(false);
     }
-  } catch (err: any) {
-    console.error("Registration error:", err);
-    setSignUpError(err.message);
-    setSignUpLoading(false);
-  }
-};
+  };
 
   const handleSignUpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -958,7 +956,7 @@ const handleSignUp = async (e: React.FormEvent) => {
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                 Schedule Bills
+                Schedule Bills
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -970,11 +968,11 @@ const handleSignUp = async (e: React.FormEvent) => {
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
-                Whatsapp Bot
+                WhatsApp Bot
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
                 <Gift className="h-3.5 w-3.5" />
-               Offline USSD
+                Offline USSD
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -987,28 +985,25 @@ const handleSignUp = async (e: React.FormEvent) => {
         </div>
 
         {/* RIGHT SIDE - Auth Form */}
-        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 md:p-8 min-h-screen overflow-y-auto">
-          <div className="w-full max-w-sm py-8">
-            {/* Mobile Logo */}
-            <div className="lg:hidden text-center mb-8">
-              <Link
-                href="/"
-                className="inline-flex items-center justify-center w-16 h-16 bg-[#1e293b] rounded-2xl mb-4 hover:scale-105 transition-transform duration-300"
-              >
-                <img
-                  src="/uploads/log-icon.jpeg"
-                  alt="Bilscore"
-                  className="h-11 w-11 object-cover rounded-lg"
-                />
-              </Link>
-              <h2 className="text-2xl font-bold text-[#1e293b]">bilscore</h2>
-              <p className="text-sm text-gray-400 mt-0.5">Sign in to your account</p>
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-4 md:p-8 min-h-screen overflow-y-auto">
+          <div className="w-full max-w-sm py-4">
+            {/* ✅ UPDATED: Mobile Logo - Clean Version (No Image) */}
+            <div className="lg:hidden mb-6">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <div className="w-10 h-10 bg-[#1e293b] rounded-xl flex items-center justify-center shadow-sm">
+                  <span className="text-white font-bold text-base">B</span>
+                </div>
+                <span className="text-2xl font-bold text-[#1e293b]">bilscore</span>
+              </div>
+              <p className="text-center text-sm text-gray-500">
+                {activeTab === "signin" ? "Welcome back" : "Create your account"}
+              </p>
             </div>
 
             {/* Form Card */}
-            <div className="bg-white rounded-3xl shadow-xl p-8 border border-gray-100">
+            <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 border border-gray-100">
               {/* Toggle */}
-              <div className="flex gap-1.5 mb-8 bg-gray-100 rounded-xl p-1">
+              <div className="flex gap-1.5 mb-6 bg-gray-100 rounded-xl p-1">
                 <button
                   onClick={() => setActiveTab("signin")}
                   className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
@@ -1173,7 +1168,7 @@ const handleSignUp = async (e: React.FormEvent) => {
               )}
 
               {/* ========================================== */}
-              {/* SIGN UP FORM - UPDATED WITH TRANSACTION PIN */}
+              {/* SIGN UP FORM */}
               {/* ========================================== */}
               {activeTab === "signup" && (
                 <form onSubmit={handleSignUp} className="space-y-4">
@@ -1280,7 +1275,7 @@ const handleSignUp = async (e: React.FormEvent) => {
                     )}
                   </div>
 
-                  {/* ✅ Transaction PIN - Replaces Confirm Password */}
+                  {/* Transaction PIN */}
                   <div>
                     <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
                       Transaction PIN <span className="text-rose-500">*</span>
