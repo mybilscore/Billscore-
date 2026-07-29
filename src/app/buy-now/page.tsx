@@ -1,4 +1,5 @@
 // app/buy-now/page.tsx
+
 import BuyNowPage from "./page.client";
 
 export const metadata = {

@@ -3,14 +3,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
-import { SubscriptionType, MeterType, TokenStatus, TransactionStatus, PreOrderStatus, WalletTransactionType,  VtuType,           // ✅ Add this
+import { 
+  SubscriptionType, 
+  MeterType, 
+  TokenStatus, 
+  TransactionStatus, 
+  PreOrderStatus, 
+  WalletTransactionType, 
+  VtuType,
   ChannelType,       
   WalletCategory,    
   TokenType,         
   DeliveryChannel,   
   JobType,           
-  JobStatus } from "@prisma/client";
+  JobStatus,
+  DisCo, // ✅ Import DisCo enum
+} from "@prisma/client";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+
+// ✅ Map string to DisCo enum
+function mapDiscoCode(discoCode: string): DisCo {
+  const discoMap: Record<string, DisCo> = {
+    'IKEJA': DisCo.IKEJA,
+    'EKO': DisCo.EKO,
+    'ABUJA': DisCo.ABUJA,
+    'KANO': DisCo.KANO,
+    'PHCN': DisCo.PHCN,
+    'IBADAN': DisCo.IBADAN,
+    'BENIN': DisCo.BENIN,
+    'ENUGU': DisCo.ENUGU,
+    'JOS': DisCo.JOS,
+    'PORT_HARCOURT': DisCo.PORT_HARCOURT,
+    'PORTHARCOURT': DisCo.PORT_HARCOURT,
+    'KADUNA': DisCo.KADUNA,
+  };
+  
+  const normalized = discoCode?.toUpperCase()?.trim() || '';
+  const mapped = discoMap[normalized];
+  
+  if (!mapped) {
+    console.warn(`⚠️ Unknown DisCo: "${discoCode}", defaulting to ABUJA`);
+    return DisCo.ABUJA;
+  }
+  
+  return mapped;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -116,6 +153,9 @@ export async function POST(request: NextRequest) {
     let vtuTransactionId = null;
     let tokenVaultId = null;
 
+    // ✅ Map discoCode to DisCo enum
+    const discoEnum = mapDiscoCode(discoCode);
+
     // ✅ FOR ELECTRICITY: Purchase token immediately (but don't deduct from wallet yet)
     if (serviceType === "electricity") {
       try {
@@ -149,12 +189,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ✅ Create subscription
+    // ✅ Create subscription with proper DisCo enum
     const subscription = await prisma.subscription.create({
       data: {
         userId: user.id,
         type: serviceType === "electricity" ? SubscriptionType.ELECTRICITY : SubscriptionType.CABLE_TV,
-        disCo: serviceType === "electricity" ? (discoCode as any) : null,
+        disCo: serviceType === "electricity" ? discoEnum : null, // ✅ Use mapped enum
         meterNumber: serviceType === "electricity" ? meterNumber : null,
         meterType: serviceType === "electricity" ? MeterType.HOME : null,
         meterName: serviceType === "electricity" ? `${discoCode} Meter` : null,
@@ -221,7 +261,7 @@ export async function POST(request: NextRequest) {
           token: token,
           tokenType: TokenType.ELECTRICITY,
           meterNumber: meterNumber!,
-          disCo: discoCode as any,
+          disCo: discoEnum, // ✅ Use mapped enum
           amount: amount,
           validFrom: new Date(),
           validUntil: tokenExpiry,
@@ -295,7 +335,7 @@ export async function POST(request: NextRequest) {
       await prisma.preOrder.create({
         data: {
           userId: user.id,
-          disCo: discoCode as any,
+          disCo: discoEnum, // ✅ Use mapped enum
           meterNumber: meterNumber,
           meterType: MeterType.HOME,
           meterName: `${discoCode} Meter`,

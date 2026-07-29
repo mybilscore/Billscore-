@@ -1,21 +1,22 @@
-// app/api/vendors/cable/purchase/route.ts - COMPLETE UPDATED
+// app/api/vendors/cable/purchase/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+import { CacheService } from "~/lib/cache/cache.service";
 import { TransactionStatus, VtuType, CustomerType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+
   try {
     const sessionUser = await requireAuth("/auth/sign-in");
     console.log(`👤 [CABLE API] User authenticated: ${sessionUser.id}`);
 
     const body = await request.json();
     const { smartCardNumber, packageCode, provider, amount, pin } = body;
-
-    console.log(`📝 [CABLE API] Request:`, { smartCardNumber, packageCode, provider, amount, pin: pin ? '***' : 'missing' });
 
     // Validate request
     if (!smartCardNumber || smartCardNumber.length < 10) {
@@ -46,7 +47,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ✅ Validate PIN
     if (!pin || pin.length < 4) {
       return NextResponse.json({
         success: false,
@@ -54,11 +54,18 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get user with wallet and pin info
-    const user = await prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      include: { wallet: true },
-    });
+    // ✅ Get user with cache
+    const userStart = Date.now();
+    let user = await CacheService.getUser(sessionUser.id);
+    
+    if (!user || !user.wallet) {
+      console.log(`📡 [CABLE API] User not in cache, fetching from DB...`);
+      user = await prisma.user.findUnique({
+        where: { id: sessionUser.id },
+        include: { wallet: true },
+      });
+    }
+    console.log(`⏱️ [CABLE API] User fetch took ${Date.now() - userStart}ms`);
 
     if (!user || !user.wallet) {
       return NextResponse.json({
@@ -67,7 +74,13 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
-    // ✅ Check if PIN is locked
+    // ✅ Get balance from cache
+    const balanceStart = Date.now();
+    const cachedBalance = await CacheService.getBalance(sessionUser.id);
+    const walletBalance = cachedBalance?.balance ?? Number(user.wallet.walletBalance || 0);
+    console.log(`⏱️ [CABLE API] Balance check took ${Date.now() - balanceStart}ms`);
+
+    // Check PIN is locked
     if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
       const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
       return NextResponse.json({
@@ -76,7 +89,7 @@ export async function POST(request: NextRequest) {
       }, { status: 403 });
     }
 
-    // ✅ Verify PIN
+    // Verify PIN
     if (!user.pinHash) {
       return NextResponse.json({
         success: false,
@@ -86,7 +99,6 @@ export async function POST(request: NextRequest) {
 
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
-      // Track failed PIN attempts
       const updatedUser = await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -99,12 +111,11 @@ export async function POST(request: NextRequest) {
 
       const attemptsLeft = 5 - (updatedUser.pinAttempts || 0);
       
-      // Lock account after 5 failed attempts
       if (attemptsLeft <= 0) {
         await prisma.user.update({
           where: { id: user.id },
           data: {
-            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000), // Lock for 15 minutes
+            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000),
           },
         });
         return NextResponse.json({
@@ -119,7 +130,7 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // ✅ Reset PIN attempts on success
+    // Reset PIN attempts on success
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -128,9 +139,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const walletBalance = Number(user.wallet.walletBalance);
-    console.log(`💰 [CABLE API] Wallet balance: ${walletBalance}, Amount: ${amount}`);
-
     if (walletBalance < amount) {
       return NextResponse.json({
         success: false,
@@ -138,19 +146,23 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Create or get customer
-    let customer = await prisma.customer.findUnique({
-      where: {
-        userId_phone: {
-          userId: user.id,
-          phone: user.phone,
-        },
-      },
-    });
-
+    // ✅ Get customer with cache
+    const customerStart = Date.now();
+    let customer = await CacheService.getCustomer(user.id, user.phone);
+    
     if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
+      console.log(`📡 [CABLE API] Customer not in cache, checking DB...`);
+      customer = await prisma.customer.findUnique({
+        where: {
+          userId_phone: {
+            userId: user.id,
+            phone: user.phone,
+          },
+        },
+      });
+
+      if (!customer) {
+        customer = await CacheService.createCustomer({
           userId: user.id,
           phone: user.phone,
           fullName: user.fullName,
@@ -161,16 +173,14 @@ export async function POST(request: NextRequest) {
           totalCommissionEarned: 0,
           firstTransactionAt: new Date(),
           tags: [],
-        },
-      });
-      console.log(`👤 [CABLE API] New customer created: ${customer.id}`);
+        });
+        console.log(`👤 [CABLE API] New customer created: ${customer.id}`);
+      }
     }
+    console.log(`⏱️ [CABLE API] Customer fetch took ${Date.now() - customerStart}ms`);
 
-    // ✅ SAVE DECODER TO SAVED DECODERS
+    // Save decoder to saved decoders
     try {
-      console.log(`💾 [CABLE API] Attempting to save decoder: ${smartCardNumber} for ${provider}`);
-      
-      // Check if decoder already exists
       const existingDecoder = await prisma.savedDecoder.findFirst({
         where: {
           userId: user.id,
@@ -179,7 +189,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (!existingDecoder) {
-        const saved = await prisma.savedDecoder.create({
+        await prisma.savedDecoder.create({
           data: {
             userId: user.id,
             decoderNumber: smartCardNumber,
@@ -189,16 +199,16 @@ export async function POST(request: NextRequest) {
             isDefault: false,
           },
         });
-        console.log(`✅ [CABLE API] Saved decoder successfully: ${saved.id} - ${saved.decoderNumber}`);
-      } else {
-        console.log(`ℹ️ [CABLE API] Decoder already exists: ${existingDecoder.id}`);
+        // Invalidate saved decoders cache
+        await CacheService.invalidateSavedDecoders(user.id);
+        console.log(`✅ [CABLE API] Saved decoder: ${smartCardNumber}`);
       }
     } catch (saveError) {
       console.error("❌ [CABLE API] Failed to save decoder:", saveError);
-      // Continue with transaction even if save fails
     }
 
     // Create transaction record
+    const transactionStart = Date.now();
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -223,10 +233,10 @@ export async function POST(request: NextRequest) {
         },
       },
     });
-
-    console.log(`📝 [CABLE API] Transaction created: ${transaction.id}`);
+    console.log(`⏱️ [CABLE API] Transaction creation took ${Date.now() - transactionStart}ms`);
 
     try {
+      const vendorStart = Date.now();
       const vendorService = getVendorService();
       const result = await vendorService.buyCableTV(
         {
@@ -238,8 +248,7 @@ export async function POST(request: NextRequest) {
         },
         user.id
       );
-
-      console.log(`📊 [CABLE API] Vendor result:`, result);
+      console.log(`⏱️ [CABLE API] Vendor call took ${Date.now() - vendorStart}ms`);
 
       if (result.success) {
         let vendorId: string | null = null;
@@ -262,6 +271,7 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        const dbStart = Date.now();
         await prisma.$transaction([
           prisma.wallet.update({
             where: { id: user.wallet!.id },
@@ -325,8 +335,18 @@ export async function POST(request: NextRequest) {
             },
           }),
         ]);
+        console.log(`⏱️ [CABLE API] Database transaction took ${Date.now() - dbStart}ms`);
 
-        console.log(`✅ [CABLE API] Transaction completed successfully!`);
+        // ✅ Invalidate cache
+        await Promise.all([
+          CacheService.invalidateWallet(user.id),
+          CacheService.invalidateUser(user.id),
+          CacheService.invalidateCustomer(user.id, user.phone),
+          CacheService.invalidateSavedDecoders(user.id),
+        ]);
+
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ [CABLE API] Transaction completed in ${totalTime}ms`);
 
         return NextResponse.json({
           success: true,
@@ -340,12 +360,11 @@ export async function POST(request: NextRequest) {
             smartCardNumber: smartCardNumber,
             customerId: customer.id,
             isNewCustomer: customer.totalTransactions === 0,
+            totalTime: totalTime,
             ...result.data,
           },
         });
       } else {
-        console.log(`❌ [CABLE API] Vendor transaction failed:`, result.error);
-        
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {

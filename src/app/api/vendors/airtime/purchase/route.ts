@@ -4,11 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
-import { TransactionStatus, VtuType, CustomerType, NetworkProvider } from "@prisma/client";
+import { CacheService } from "~/lib/cache/cache.service";
+import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor } from "@prisma/client";
 import { compare } from "bcrypt";
 
 // ============================================================
-// NETWORK MAPPING - FIXED
+// NETWORK MAPPING
 // ============================================================
 
 const networkMap: Record<string, NetworkProvider> = {
@@ -22,44 +23,51 @@ const networkMap: Record<string, NetworkProvider> = {
   '9mobile': NetworkProvider.NINEMOBILE,
   'NINEMOBILE': NetworkProvider.NINEMOBILE,
   'ninemobile': NetworkProvider.NINEMOBILE,
-  'ETISALAT': NetworkProvider.NINEMOBILE, // Legacy
-  'etisalat': NetworkProvider.NINEMOBILE, // Legacy
+  'ETISALAT': NetworkProvider.NINEMOBILE,
+  'etisalat': NetworkProvider.NINEMOBILE,
 };
 
 function mapNetwork(networkInput: string): NetworkProvider {
   const normalized = networkInput?.trim() || '';
   const mapped = networkMap[normalized];
-  
   if (!mapped) {
     console.warn(`⚠️ Unknown network: "${networkInput}", defaulting to MTN`);
-    return NetworkProvider.MTN; // Default fallback
+    return NetworkProvider.MTN;
   }
-  
   return mapped;
 }
 
 function normalizePhoneNumber(phone: string): string {
-  // Remove any non-digit characters
   let cleaned = phone.replace(/\D/g, '');
-  
-  // If it starts with 0, keep as is (10 digits)
-  // If it starts with 234, remove 234 and add 0
   if (cleaned.startsWith('234')) {
     cleaned = '0' + cleaned.substring(3);
   }
-  
-  // If it's less than 10 digits, pad or log warning
   if (cleaned.length < 10) {
     console.warn(`⚠️ Phone number too short: ${phone}, padding with zeros`);
     cleaned = cleaned.padStart(10, '0');
   }
-  
-  // If it's more than 11 digits, trim
   if (cleaned.length > 11) {
     cleaned = cleaned.substring(0, 11);
   }
-  
   return cleaned;
+}
+
+function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
+  if (!vendorCode) return null;
+  
+  const normalized = vendorCode.toUpperCase();
+  const vendorMap: Record<string, VtuVendor> = {
+    'VTPASS': VtuVendor.VTPASS,
+    'GIDIGITAL': VtuVendor.GIDIGITAL,
+    'MONIEPOINT': VtuVendor.MONIEPOINT,
+    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
+    'QUICKTELLER': VtuVendor.QUICKTELLER,
+    'BILAL_SADA': VtuVendor.BILAL_SADA,
+    'LEGITDATAWAY': VtuVendor.VTPASS,
+    'BILALSADA': VtuVendor.BILAL_SADA,
+  };
+  
+  return vendorMap[normalized] || null;
 }
 
 // ============================================================
@@ -67,6 +75,8 @@ function normalizePhoneNumber(phone: string): string {
 // ============================================================
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+
   try {
     // 1. Authenticate user
     const sessionUser = await requireAuth("/auth/sign-in");
@@ -84,7 +94,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Normalize phone number
     phoneNumber = normalizePhoneNumber(phoneNumber);
 
     if (!amount || amount < 50) {
@@ -101,11 +110,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ✅ Map network to enum
     const networkEnum = mapNetwork(network);
     console.log(`📡 [AIRTIME API] Network mapped: ${network} → ${networkEnum}`);
 
-    // Validate PIN
     if (!pin || pin.length < 4) {
       return NextResponse.json({
         success: false,
@@ -113,11 +120,18 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 4. Get user with wallet and pin info
-    const user = await prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      include: { wallet: true },
-    });
+    // ✅ 4. Get user with cache
+    const userStart = Date.now();
+    let user = await CacheService.getUser(sessionUser.id);
+    
+    if (!user || !user.wallet) {
+      console.log(`📡 [AIRTIME API] User not in cache, fetching from DB...`);
+      user = await prisma.user.findUnique({
+        where: { id: sessionUser.id },
+        include: { wallet: true },
+      });
+    }
+    console.log(`⏱️ [AIRTIME API] User fetch took ${Date.now() - userStart}ms`);
 
     if (!user || !user.wallet) {
       return NextResponse.json({
@@ -126,7 +140,13 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
-    // Check if PIN is locked
+    // ✅ 5. Get balance from cache
+    const balanceStart = Date.now();
+    const cachedBalance = await CacheService.getBalance(sessionUser.id);
+    const walletBalance = cachedBalance?.balance ?? Number(user.wallet.walletBalance || 0);
+    console.log(`⏱️ [AIRTIME API] Balance check took ${Date.now() - balanceStart}ms`);
+
+    // Check PIN is locked
     if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
       const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
       return NextResponse.json({
@@ -145,7 +165,6 @@ export async function POST(request: NextRequest) {
 
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
-      // Track failed PIN attempts
       const updatedUser = await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -158,12 +177,11 @@ export async function POST(request: NextRequest) {
 
       const attemptsLeft = 5 - (updatedUser.pinAttempts || 0);
       
-      // Lock account after 5 failed attempts
       if (attemptsLeft <= 0) {
         await prisma.user.update({
           where: { id: user.id },
           data: {
-            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000), // Lock for 15 minutes
+            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000),
           },
         });
         return NextResponse.json({
@@ -187,8 +205,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 5. Check balance
-    const walletBalance = Number(user.wallet.walletBalance);
     if (walletBalance < amount) {
       return NextResponse.json({
         success: false,
@@ -196,19 +212,23 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 6. Create or get customer
-    let customer = await prisma.customer.findUnique({
-      where: {
-        userId_phone: {
-          userId: user.id,
-          phone: phoneNumber,
-        },
-      },
-    });
-
+    // ✅ 6. Get customer with cache
+    const customerStart = Date.now();
+    let customer = await CacheService.getCustomer(user.id, phoneNumber);
+    
     if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
+      console.log(`📡 [AIRTIME API] Customer not in cache, checking DB...`);
+      customer = await prisma.customer.findUnique({
+        where: {
+          userId_phone: {
+            userId: user.id,
+            phone: phoneNumber,
+          },
+        },
+      });
+
+      if (!customer) {
+        customer = await CacheService.createCustomer({
           userId: user.id,
           phone: phoneNumber,
           fullName: null,
@@ -219,21 +239,23 @@ export async function POST(request: NextRequest) {
           totalCommissionEarned: 0,
           firstTransactionAt: new Date(),
           tags: [],
-        },
-      });
-      console.log(`👤 [AIRTIME API] New customer created: ${customer.id} (${phoneNumber})`);
+        });
+        console.log(`👤 [AIRTIME API] New customer created: ${customer.id}`);
+      }
     }
+    console.log(`⏱️ [AIRTIME API] Customer fetch took ${Date.now() - customerStart}ms`);
 
-    // 7. Create transaction record - ✅ FIXED: Use networkEnum
+    // 7. Create transaction record
+    const transactionStart = Date.now();
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
         transactionType: VtuType.AIRTIME,
-        product: network, // Store the original network name as product
+        product: network,
         amount: amount,
         totalDebited: amount,
         phoneNumber: phoneNumber,
-        network: networkEnum, // ✅ Use the mapped enum
+        network: networkEnum,
         status: TransactionStatus.PENDING,
         channel: "MOBILE_APP",
         metadata: {
@@ -247,11 +269,13 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+    console.log(`⏱️ [AIRTIME API] Transaction creation took ${Date.now() - transactionStart}ms`);
 
     console.log(`📝 [AIRTIME API] Transaction created: ${transaction.id}`);
 
     try {
       // 8. Get vendor service and purchase
+      const vendorStart = Date.now();
       const vendorService = getVendorService();
       console.log(`🔄 [AIRTIME API] Calling vendor service for airtime purchase...`);
 
@@ -259,26 +283,34 @@ export async function POST(request: NextRequest) {
         {
           phoneNumber: phoneNumber,
           amount: amount,
-          network: network, // Pass the original network name to vendor
+          network: network,
         },
         user.id
       );
+
+      console.log(`⏱️ [AIRTIME API] Vendor call took ${Date.now() - vendorStart}ms`);
 
       console.log(`📊 [AIRTIME API] Vendor result:`, {
         success: result.success,
         error: result.error,
         vendor: result.vendor,
         vendorReference: result.vendorReference,
+        vendorSwitched: result.vendorSwitched,
+        switchedFrom: result.switchedFrom,
       });
 
       if (result.success) {
-        // Get the actual vendor ID from the database
         let vendorId: string | null = null;
+        let vendorEnum = mapVendorToEnum(result.vendor);
+        
+        if (!vendorEnum) {
+          console.warn(`⚠️ Unknown vendor: ${result.vendor}, defaulting to VTPASS`);
+          vendorEnum = VtuVendor.VTPASS;
+        }
+
         if (result.vendor) {
           const vendorRecord = await prisma.vendor.findFirst({
-            where: { 
-              code: result.vendor as string,
-            },
+            where: { code: result.vendor as string },
             select: { id: true },
           });
           if (vendorRecord) {
@@ -298,8 +330,8 @@ export async function POST(request: NextRequest) {
         });
 
         // 10. Deduct from wallet, complete transaction, and create customer transaction
+        const dbStart = Date.now();
         await prisma.$transaction([
-          // Update wallet balance
           prisma.wallet.update({
             where: { id: user.wallet!.id },
             data: {
@@ -308,7 +340,6 @@ export async function POST(request: NextRequest) {
               },
             },
           }),
-          // Create wallet transaction
           prisma.walletTransaction.create({
             data: {
               walletId: user.wallet!.id,
@@ -323,14 +354,13 @@ export async function POST(request: NextRequest) {
               category: "AIRTIME",
             },
           }),
-          // Update VTU transaction
           prisma.vtuTransaction.update({
             where: { id: transaction.id },
             data: {
               status: TransactionStatus.SUCCESS,
               vendorReference: result.vendorReference,
               vendorId: vendorId || undefined,
-              vendor: result.vendor,
+              vendor: vendorEnum,
               token: result.data?.token,
               deliveredAt: new Date(),
               metadata: {
@@ -338,13 +368,14 @@ export async function POST(request: NextRequest) {
                 vendorResponse: result.data,
                 vendorName: result.vendor,
                 vendorReference: result.vendorReference,
+                vendorSwitched: result.vendorSwitched,
+                switchedFrom: result.switchedFrom,
                 responseDescription: result.data?.responseDescription,
                 success: true,
                 pinVerified: true,
               },
             },
           }),
-          // Create customer transaction
           prisma.customerTransaction.create({
             data: {
               customerId: customer.id,
@@ -355,19 +386,29 @@ export async function POST(request: NextRequest) {
               totalAmount: amount,
               product: network,
               phoneNumber: phoneNumber,
-              network: networkEnum, // ✅ Use the mapped enum
+              network: networkEnum,
               status: TransactionStatus.SUCCESS,
               metadata: {
-                vendor: result.vendor,
-                vendorReference: result.vendorReference,
+                vendorName: result.vendor || 'unknown',
+                vendorReference: result.vendorReference || '',
+                vendorSwitched: result.vendorSwitched || false,
+                switchedFrom: result.switchedFrom || [],
                 pinVerified: true,
               },
             },
           }),
         ]);
+        console.log(`⏱️ [AIRTIME API] Database transaction took ${Date.now() - dbStart}ms`);
 
-        console.log(`✅ [AIRTIME API] Transaction completed successfully: ${transaction.id}`);
-        console.log(`👤 [AIRTIME API] Customer ${customer.id} updated: totalTransactions=${customer.totalTransactions + 1}`);
+        // ✅ Invalidate cache
+        await Promise.all([
+          CacheService.invalidateWallet(user.id),
+          CacheService.invalidateUser(user.id),
+          CacheService.invalidateCustomer(user.id, phoneNumber),
+        ]);
+
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ [AIRTIME API] Transaction completed successfully in ${totalTime}ms`);
 
         return NextResponse.json({
           success: true,
@@ -381,6 +422,10 @@ export async function POST(request: NextRequest) {
             customerId: customer.id,
             isNewCustomer: customer.totalTransactions === 0,
             customerName: customer.fullName,
+            vendor: result.vendor,
+            vendorSwitched: result.vendorSwitched,
+            switchedFrom: result.switchedFrom,
+            totalTime: totalTime,
             ...result.data,
           },
         });
@@ -394,7 +439,7 @@ export async function POST(request: NextRequest) {
               ...transaction.metadata,
               error: result.error,
               vendor: result.vendor,
-              vendorError: result.metadata,
+              vendorErrors: result.vendorErrors,
               failedAt: new Date().toISOString(),
               pinVerified: true,
             },
@@ -409,7 +454,6 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
     } catch (error: any) {
-      // 12. Handle any errors
       console.error(`❌ [AIRTIME API] Error during purchase:`, error);
 
       await prisma.vtuTransaction.update({

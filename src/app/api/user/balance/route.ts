@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
-import { TransactionStatus, WalletTransactionType } from "@prisma/client";
+import { CacheService } from "~/lib/cache/cache.service";
 
 export async function GET() {
   console.log("💰 [BALANCE API] Balance check requested");
@@ -12,6 +12,22 @@ export async function GET() {
     const user = await requireAuth("/auth/sign-in");
     console.log(`👤 [BALANCE API] User authenticated: ${user.id}`);
 
+    // ✅ Try cache first
+    const cachedBalance = await CacheService.getBalance(user.id);
+
+    if (cachedBalance) {
+      console.log(`💰 [BALANCE API] From cache - Balance: ${cachedBalance.balance}`);
+      return NextResponse.json({
+        success: true,
+        balance: cachedBalance.balance,
+        hasWallet: true,
+        fromCache: true,
+      });
+    }
+
+    // ✅ Cache miss - fetch from database
+    console.log(`📡 [BALANCE API] Cache miss, fetching from database...`);
+    
     const userData = await prisma.user.findUnique({
       where: { id: user.id },
       include: { wallet: true },
@@ -26,36 +42,12 @@ export async function GET() {
     }
 
     let balance = 0;
-    let reservedAmount = 0;
-    let availableBalance = 0;
     let hasWallet = false;
 
     if (userData.wallet) {
       balance = Number(userData.wallet.walletBalance) || 0;
       hasWallet = true;
       console.log(`💰 [BALANCE API] Wallet balance: ${balance}`);
-
-      // ✅ FIXED: Calculate reserved amount from PENDING SYSTEM transactions
-      // Using JSON_EXTRACT or simple filtering without path
-      const allPendingSystemTx = await prisma.walletTransaction.findMany({
-        where: {
-          userId: user.id,
-          walletId: userData.wallet.id,
-          type: WalletTransactionType.SYSTEM,
-          status: TransactionStatus.PENDING,
-        },
-      });
-
-      // Filter in JavaScript instead of using path in Prisma
-      const reservedTransactions = allPendingSystemTx.filter((tx) => {
-        const metadata = tx.metadata as any;
-        return metadata?.isReserved === true;
-      });
-
-      reservedAmount = reservedTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
-      availableBalance = balance - reservedAmount;
-      
-      console.log(`🔒 [BALANCE API] Reserved: ${reservedAmount}, Available: ${availableBalance}`);
     } else if (userData.hasWallet) {
       balance = Number(userData.walletBalance) || 0;
       hasWallet = true;
@@ -64,14 +56,13 @@ export async function GET() {
       console.log(`⚠️ [BALANCE API] No wallet found for user`);
     }
 
-    console.log(`📤 [BALANCE API] Returning: hasWallet=${hasWallet}, balance=${balance}, reserved=${reservedAmount}, available=${availableBalance}`);
+    console.log(`📤 [BALANCE API] Returning: hasWallet=${hasWallet}, balance=${balance}`);
 
     return NextResponse.json({
       success: true,
       balance,
-      reservedAmount,
-      availableBalance,
       hasWallet,
+      fromCache: false,
     });
 
   } catch (error: any) {

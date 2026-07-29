@@ -1,29 +1,32 @@
-// app/api/vendors/electricity/purchase/route.ts - COMPLETE UPDATED
+// app/api/vendors/electricity/purchase/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+import { CacheService } from "~/lib/cache/cache.service";
 import { TransactionStatus, VtuType, CustomerType, MeterType } from "@prisma/client";
 import { compare } from "bcrypt";
 
+// ✅ Helper to measure performance
+function measure<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  return fn().then(result => {
+    const duration = Date.now() - start;
+    console.log(`⏱️ [PERF] ${name}: ${duration}ms`);
+    return result;
+  });
+}
+
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+
   try {
     const sessionUser = await requireAuth("/auth/sign-in");
     console.log(`👤 [ELECTRICITY API] User authenticated: ${sessionUser.id}`);
 
     const body = await request.json();
     const { meterNumber, meterType, amount, discoCode, discoId, phone, pin } = body;
-
-    console.log(`📝 [ELECTRICITY API] Request:`, { 
-      meterNumber, 
-      meterType, 
-      amount, 
-      discoCode, 
-      discoId, 
-      phone, 
-      pin: pin ? '***' : 'missing' 
-    });
 
     // Validate request
     if (!meterNumber || meterNumber.length < 7) {
@@ -47,7 +50,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ✅ Validate PIN
     if (!pin || pin.length < 4) {
       return NextResponse.json({
         success: false,
@@ -55,41 +57,51 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get user with wallet and pin info
-    const user = await prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      include: { wallet: true },
-    });
+    // ✅ Get user, wallet, and balance in parallel
+    const [user, cachedBalance] = await Promise.all([
+      measure('User fetch', () => CacheService.getUser(sessionUser.id)),
+      measure('Balance fetch', () => CacheService.getBalance(sessionUser.id)),
+    ]);
 
-    if (!user || !user.wallet) {
+    let userData = user;
+    if (!userData || !userData.wallet) {
+      console.log(`📡 [ELECTRICITY API] User not in cache, fetching from DB...`);
+      userData = await measure('User DB fetch', () => prisma.user.findUnique({
+        where: { id: sessionUser.id },
+        include: { wallet: true },
+      }));
+    }
+
+    if (!userData || !userData.wallet) {
       return NextResponse.json({
         success: false,
         error: "User or wallet not found",
       }, { status: 404 });
     }
 
-    // ✅ Check if PIN is locked
-    if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
-      const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
+    const walletBalance = cachedBalance?.balance ?? Number(userData.wallet.walletBalance || 0);
+
+    // Check PIN is locked
+    if (userData.pinLockedUntil && userData.pinLockedUntil > new Date()) {
+      const remainingMinutes = Math.ceil((userData.pinLockedUntil.getTime() - Date.now()) / 60000);
       return NextResponse.json({
         success: false,
         error: `Account locked due to multiple failed PIN attempts. Please try again in ${remainingMinutes} minute(s).`,
       }, { status: 403 });
     }
 
-    // ✅ Verify PIN
-    if (!user.pinHash) {
+    // Verify PIN
+    if (!userData.pinHash) {
       return NextResponse.json({
         success: false,
         error: "You don't have a transaction PIN set. Please set one in your profile.",
       }, { status: 400 });
     }
 
-    const isValidPin = await compare(pin, user.pinHash);
+    const isValidPin = await compare(pin, userData.pinHash);
     if (!isValidPin) {
-      // Track failed PIN attempts
       const updatedUser = await prisma.user.update({
-        where: { id: user.id },
+        where: { id: userData.id },
         data: {
           pinAttempts: {
             increment: 1,
@@ -100,12 +112,11 @@ export async function POST(request: NextRequest) {
 
       const attemptsLeft = 5 - (updatedUser.pinAttempts || 0);
       
-      // Lock account after 5 failed attempts
       if (attemptsLeft <= 0) {
         await prisma.user.update({
-          where: { id: user.id },
+          where: { id: userData.id },
           data: {
-            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000), // Lock for 15 minutes
+            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000),
           },
         });
         return NextResponse.json({
@@ -120,17 +131,14 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // ✅ Reset PIN attempts on success
+    // Reset PIN attempts on success
     await prisma.user.update({
-      where: { id: user.id },
+      where: { id: userData.id },
       data: {
         pinAttempts: 0,
         pinLockedUntil: null,
       },
     });
-
-    const walletBalance = Number(user.wallet.walletBalance);
-    console.log(`💰 [ELECTRICITY API] Wallet balance: ${walletBalance}, Amount: ${amount}`);
 
     if (walletBalance < amount) {
       return NextResponse.json({
@@ -139,76 +147,78 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Create or get customer
-    const customerPhone = phone || user.phone;
-    let customer = await prisma.customer.findUnique({
-      where: {
-        userId_phone: {
-          userId: user.id,
-          phone: customerPhone,
-        },
-      },
-    });
-
+    // ✅ Get customer with cache
+    const customerPhone = phone || userData.phone;
+    let customer = await measure('Customer fetch', () => CacheService.getCustomer(userData.id, customerPhone));
+    
     if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: customerPhone,
-          fullName: user.fullName,
-          email: user.email || null,
-          customerType: CustomerType.REGULAR,
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-      console.log(`👤 [ELECTRICITY API] New customer created: ${customer.id}`);
-    }
-
-    // ✅ SAVE METER TO SAVED METERS
-    try {
-      console.log(`💾 [ELECTRICITY API] Attempting to save meter: ${meterNumber} for ${discoCode}`);
-      
-      // Check if meter already exists
-      const existingMeter = await prisma.savedMeter.findFirst({
-        where: {
-          userId: user.id,
-          meterNumber: meterNumber,
-        },
-      });
-
-      if (!existingMeter) {
-        const saved = await prisma.savedMeter.create({
-          data: {
-            userId: user.id,
-            meterNumber: meterNumber,
-            disco: discoCode,
-            name: `${discoCode} Meter`,
-            meterType: meterType || "Prepaid",
-            isDefault: false,
+      console.log(`📡 [ELECTRICITY API] Customer not in cache, checking DB...`);
+      customer = await measure('Customer DB fetch', async () => {
+        const existing = await prisma.customer.findUnique({
+          where: {
+            userId_phone: {
+              userId: userData.id,
+              phone: customerPhone,
+            },
           },
         });
-        console.log(`✅ [ELECTRICITY API] Saved meter successfully: ${saved.id} - ${saved.meterNumber}`);
-      } else {
-        console.log(`ℹ️ [ELECTRICITY API] Meter already exists: ${existingMeter.id}`);
-      }
-    } catch (saveError) {
-      console.error("❌ [ELECTRICITY API] Failed to save meter:", saveError);
-      // Continue with transaction even if save fails
+
+        if (!existing) {
+          return CacheService.createCustomer({
+            userId: userData.id,
+            phone: customerPhone,
+            fullName: userData.fullName,
+            email: userData.email || null,
+            customerType: CustomerType.REGULAR,
+            totalTransactions: 0,
+            totalSpent: 0,
+            totalCommissionEarned: 0,
+            firstTransactionAt: new Date(),
+            tags: [],
+          });
+        }
+        return existing;
+      });
+      console.log(`👤 [ELECTRICITY API] Customer ready: ${customer.id}`);
     }
 
-    // Map meterType string to MeterType enum
+    // Save meter to saved meters (async, don't wait)
+    const saveMeterPromise = (async () => {
+      try {
+        const existingMeter = await prisma.savedMeter.findFirst({
+          where: {
+            userId: userData.id,
+            meterNumber: meterNumber,
+          },
+        });
+
+        if (!existingMeter) {
+          await prisma.savedMeter.create({
+            data: {
+              userId: userData.id,
+              meterNumber: meterNumber,
+              disco: discoCode,
+              name: `${discoCode} Meter`,
+              meterType: meterType || "Prepaid",
+              isDefault: false,
+            },
+          });
+          await CacheService.invalidateSavedMeters(userData.id);
+          console.log(`✅ [ELECTRICITY API] Saved meter: ${meterNumber}`);
+        }
+      } catch (saveError) {
+        console.error("❌ [ELECTRICITY API] Failed to save meter:", saveError);
+      }
+    })();
+
     const meterTypeEnum = meterType?.toLowerCase() === 'prepaid' 
       ? MeterType.HOME 
       : MeterType.OFFICE;
 
-    // Create transaction record
-    const transaction = await prisma.vtuTransaction.create({
+    // ✅ Create transaction record
+    const transaction = await measure('Transaction creation', () => prisma.vtuTransaction.create({
       data: {
-        userId: user.id,
+        userId: userData.id,
         transactionType: VtuType.ELECTRICITY_INSTANT,
         product: discoCode,
         amount: amount,
@@ -228,11 +238,13 @@ export async function POST(request: NextRequest) {
           pinVerified: true,
         },
       },
-    });
+    }));
 
     console.log(`📝 [ELECTRICITY API] Transaction created: ${transaction.id}`);
 
     try {
+      // ✅ Vendor call
+      const vendorStart = Date.now();
       const vendorService = getVendorService();
       const result = await vendorService.buyElectricity(
         {
@@ -242,10 +254,9 @@ export async function POST(request: NextRequest) {
           meterType: meterType as any,
           phone: customerPhone,
         },
-        user.id
+        userData.id
       );
-
-      console.log(`📊 [ELECTRICITY API] Vendor result:`, result);
+      console.log(`⏱️ [ELECTRICITY API] Vendor call took ${Date.now() - vendorStart}ms`);
 
       if (result.success) {
         let vendorId: string | null = null;
@@ -259,28 +270,32 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        await prisma.customer.update({
-          where: { id: customer.id },
-          data: {
-            totalTransactions: { increment: 1 },
-            totalSpent: { increment: amount },
-            lastTransactionAt: new Date(),
-          },
-        });
-
-        await prisma.$transaction([
+        // ✅ Parallel independent DB operations
+        const dbStart = Date.now();
+        await Promise.all([
+          // Update customer stats
+          prisma.customer.update({
+            where: { id: customer.id },
+            data: {
+              totalTransactions: { increment: 1 },
+              totalSpent: { increment: amount },
+              lastTransactionAt: new Date(),
+            },
+          }),
+          // Update wallet balance
           prisma.wallet.update({
-            where: { id: user.wallet!.id },
+            where: { id: userData.wallet!.id },
             data: {
               walletBalance: {
                 decrement: amount,
               },
             },
           }),
+          // Create wallet transaction
           prisma.walletTransaction.create({
             data: {
-              walletId: user.wallet!.id,
-              userId: user.id,
+              walletId: userData.wallet!.id,
+              userId: userData.id,
               type: "DEBIT",
               amount: amount,
               balanceBefore: walletBalance,
@@ -291,6 +306,7 @@ export async function POST(request: NextRequest) {
               category: "ELECTRICITY",
             },
           }),
+          // Update VTU transaction
           prisma.vtuTransaction.update({
             where: { id: transaction.id },
             data: {
@@ -311,10 +327,11 @@ export async function POST(request: NextRequest) {
               },
             },
           }),
+          // Create customer transaction
           prisma.customerTransaction.create({
             data: {
               customerId: customer.id,
-              userId: user.id,
+              userId: userData.id,
               vtuTransactionId: transaction.id,
               transactionType: VtuType.ELECTRICITY_INSTANT,
               amount: amount,
@@ -330,8 +347,23 @@ export async function POST(request: NextRequest) {
             },
           }),
         ]);
+        console.log(`⏱️ [ELECTRICITY API] Parallel DB operations took ${Date.now() - dbStart}ms`);
 
-        console.log(`✅ [ELECTRICITY API] Transaction completed successfully!`);
+        // ✅ Wait for meter save to complete (background)
+        await saveMeterPromise;
+
+        // ✅ Invalidate cache in parallel
+        const cacheStart = Date.now();
+        await Promise.all([
+          CacheService.invalidateWallet(userData.id),
+          CacheService.invalidateUser(userData.id),
+          CacheService.invalidateCustomer(userData.id, customerPhone),
+          CacheService.invalidateSavedMeters(userData.id),
+        ]);
+        console.log(`⏱️ [ELECTRICITY API] Cache invalidation took ${Date.now() - cacheStart}ms`);
+
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ [ELECTRICITY API] Transaction completed in ${totalTime}ms`);
 
         return NextResponse.json({
           success: true,
@@ -345,12 +377,11 @@ export async function POST(request: NextRequest) {
             token: result.data?.token,
             customerId: customer.id,
             isNewCustomer: customer.totalTransactions === 0,
+            totalTime: totalTime,
             ...result.data,
           },
         });
       } else {
-        console.log(`❌ [ELECTRICITY API] Vendor transaction failed:`, result.error);
-        
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {

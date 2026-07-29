@@ -90,6 +90,8 @@ enum VtuVendor {
   QUICKTELLER
   MONIEPOINT
   FLUTTERWAVE_VTU
+  BILAL_SADA        
+  LEGITDATAWAY
 }
 
 enum MeterType {

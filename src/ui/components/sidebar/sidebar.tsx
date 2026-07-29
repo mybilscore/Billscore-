@@ -148,42 +148,48 @@ export default function Sidebar({
     },
     { 
       title: "Summary", 
-      href: "/dashboard/transactions/summary", 
+      href: "/dashboard/summary/airtime", 
       icon: PieChart 
     },
     { 
-      title: "Wallet Funding", 
-      href: "/dashboard/transactions/funding", 
+      title: "Wallet ", 
+      href: "/dashboard/wallet", 
       icon: Wallet 
     },
     { 
       title: "Airtime", 
-      href: "/dashboard/transactions/airtime", 
+      href: "/dashboard/summary/airtime", 
       icon: Phone 
     },
     { 
       title: "Data", 
-      href: "/dashboard/transactions/data", 
+      href: "/dashboard/summary/data", 
       icon: Wifi 
     },
     { 
       title: "Electricity", 
-      href: "/dashboard/transactions/electricity", 
+      href: "/dashboard/summary/electricity", 
       icon: Zap 
     },
     { 
       title: "Cable TV", 
-      href: "/dashboard/transactions/cable", 
+      href: "/dashboard/summary/cable", 
+      icon: Tv 
+    },
+
+     { 
+      title: "Bill Schedule", 
+      href: "/dashboard/summary/subscriptions", 
       icon: Tv 
     },
     { 
       title: "Bulk Purchases", 
-      href: "/dashboard/transactions/bulk", 
+      href: "", 
       icon: Package 
     },
     { 
       title: "API Purchases", 
-      href: "/dashboard/transactions/api", 
+      href: "", 
       icon: Database 
     },
   ];

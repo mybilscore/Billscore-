@@ -1,4 +1,4 @@
-// app/dashboard/subscriptions/page.client.tsx - UPDATED with better font sizing
+// app/dashboard/subscriptions/page.client.tsx
 
 "use client";
 
@@ -15,7 +15,8 @@ import {
   ArrowRight,
   AlertCircle,
   Loader2,
- ChevronDown,
+  ChevronDown,
+  ChevronUp,
   Calendar,
   Repeat,
   QrCode,
@@ -38,7 +39,11 @@ import {
   StarOff,
   Lock,
   EyeOff,
+  Shield,
 } from "lucide-react";
+
+// ✅ Import QR hash utilities
+import { generateQRUrl } from "~/lib/qr-hash";
 
 // Types
 interface SavedMeter {
@@ -115,7 +120,7 @@ const formatDate = (dateString: string) => {
   return date.toLocaleDateString("en-NG", { month: "short", day: "numeric", year: "numeric" });
 };
 
-// ✅ Service Type Button - Increased font sizes
+// Service Type Button
 const ServiceTypeButton = ({
   type,
   icon,
@@ -153,7 +158,7 @@ const ServiceTypeButton = ({
   );
 };
 
-// ✅ Saved Item Component - Increased font sizes
+// Saved Item Component
 const SavedItem = ({
   item,
   type,
@@ -315,7 +320,7 @@ const QRCodeListView = ({
   );
 };
 
-// QR Code Modal Component
+// ✅ Updated QR Code Modal with reduced height and better organization
 const QRCodeModal = ({
   isOpen,
   onClose,
@@ -346,7 +351,16 @@ const QRCodeModal = ({
     return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   };
 
-  const qrValue = `${getBaseUrl()}/buy-now?identifier=${encodeURIComponent(identifier)}&type=${serviceType.toLowerCase()}`;
+  // ✅ Generate hashed QR URL
+  const qrValue = generateQRUrl(getBaseUrl(), {
+    identifier: identifier,
+    type: serviceType.toLowerCase(),
+    provider: provider,
+  });
+
+  // Extract hash for display
+  const urlParams = new URLSearchParams(qrValue.split('?')[1]);
+  const hashShort = urlParams.get('h')?.substring(0, 8) || '';
 
   const handleCopy = () => {
     navigator.clipboard.writeText(qrValue);
@@ -411,50 +425,72 @@ const QRCodeModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300">
+      <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800"
+          className="absolute right-3 top-3 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800 z-10"
         >
-          <X className="h-5 w-5" />
+          <X className="h-4 w-4" />
         </button>
 
-        <div className="p-6">
-          <div className="text-center mb-6">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#1e293b] shadow-lg">
-              <QrCode className="h-8 w-8 text-white" />
+        <div className="p-4">
+          {/* Header - Compact */}
+          <div className="text-center mb-3">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-[#1e293b] shadow-lg">
+              <QrCode className="h-6 w-6 text-white" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">
               {serviceType} QR Code
             </h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Scan to pay for {provider} {serviceType.toLowerCase()} {identifier}
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {provider} • {identifier}
             </p>
+            <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400">
+              <Shield className="h-3 w-3" />
+              Secured • {hashShort}...
+            </div>
           </div>
 
-          <div ref={qrRef} className="flex justify-center mb-6">
-            <div className="rounded-xl border-2 border-gray-200 bg-white p-4 dark:border-gray-700">
+          {/* QR Code - Smaller */}
+          <div ref={qrRef} className="flex justify-center mb-3">
+            <div className="rounded-xl border-2 border-gray-200 bg-white p-3 dark:border-gray-700">
               <QRCode
                 value={qrValue}
-                size={200}
+                size={160}
                 style={{ height: "auto", maxWidth: "100%", width: "100%" }}
                 viewBox="0 0 256 256"
                 bgColor="#ffffff"
                 fgColor="#1e293b"
               />
-              <div className="mt-3 text-center">
-                <p className="text-sm font-medium text-gray-900 dark:text-white">
+              <div className="mt-2 text-center">
+                <p className="text-xs font-medium text-gray-900 dark:text-white">
                   {businessName}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
                   {serviceType} • {identifier}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="mb-4 rounded-lg bg-gray-50 dark:bg-gray-800 p-3">
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">QR Code URL</p>
+          {/* Details - Compact Grid */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Type</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{serviceType}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Provider</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{provider}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700 col-span-2">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">Identifier</p>
+              <p className="text-sm font-mono font-medium text-gray-900 dark:text-white truncate">{identifier}</p>
+            </div>
+          </div>
+
+          {/* Secure Link - Compact */}
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-2 mb-3">
             <div className="flex items-center gap-2">
               <p className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
                 {qrValue}
@@ -463,90 +499,49 @@ const QRCodeModal = ({
                 onClick={handleCopy}
                 className="flex-shrink-0 text-gray-400 hover:text-[#1e293b] transition-colors"
               >
-                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
             </div>
+            {copied && (
+              <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
+                ✅ Copied!
+              </p>
+            )}
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {serviceType === "Electricity" ? "Meter Number" : "Decoder Number"}
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="font-mono font-medium text-gray-900 dark:text-white">{identifier}</span>
-                <button
-                  onClick={handleCopy}
-                  className="text-gray-400 hover:text-[#1e293b] transition-colors"
-                >
-                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Provider</span>
-              <span className="font-medium text-gray-900 dark:text-white">{provider}</span>
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-col gap-2">
+          {/* Actions - Compact */}
+          <div className="space-y-2">
             <button
               onClick={onQuickOrder}
-              className="w-full rounded-lg bg-[#1e293b] py-3 text-sm font-medium text-white hover:bg-[#0f172a] transition-all flex items-center justify-center gap-2"
+              className="w-full rounded-lg bg-[#1e293b] py-2.5 text-sm font-medium text-white hover:bg-[#0f172a] transition-all flex items-center justify-center gap-2"
             >
               <ShoppingBag className="h-4 w-4" />
-              Quick Order {serviceType === "Electricity" ? "Token" : "Subscription"}
+              Quick Order
             </button>
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <button
                 onClick={handleDownloadQR}
                 disabled={isDownloading}
-                className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="flex-1 rounded-lg border border-gray-200 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
                 {isDownloading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Download className="h-4 w-4" />
+                  <Download className="h-3.5 w-3.5" />
                 )}
                 Download
               </button>
               <button
                 onClick={handleShare}
-                className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2"
+                className="flex-1 rounded-lg border border-gray-200 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-1.5"
               >
-                <Share2 className="h-4 w-4" /> Share
+                <Share2 className="h-3.5 w-3.5" /> Share
               </button>
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
-};
-
-// ✅ Amount Button - Increased font sizes
-const AmountButton = ({
-  amount,
-  isSelected,
-  onClick,
-}: {
-  amount: { label: string; value: number };
-  isSelected: boolean;
-  onClick: () => void;
-}) => {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-lg border-2 p-2.5 text-center transition-all duration-200 ${
-        isSelected
-          ? "border-blue-500 bg-blue-500 text-white shadow-md"
-          : "border-gray-200 bg-white hover:border-[#1e293b]/50 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
-      }`}
-    >
-      <span className={`text-base font-bold ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
-        {amount.label}
-      </span>
-    </button>
   );
 };
 
@@ -881,7 +876,7 @@ const AddDecoderModal = ({
   );
 };
 
-// ✅ Status Message Component - Inline with better font sizing
+// Status Message Component
 const StatusMessage = ({ 
   error, 
   success, 
@@ -927,7 +922,7 @@ const StatusMessage = ({
   return null;
 };
 
-// ✅ Active Schedules Component - Moved to top like recent customers
+// Active Schedules Component
 const ActiveSchedules = ({
   subscriptions,
   isLoading,
@@ -1377,136 +1372,133 @@ export function SubscriptionClient({
     setTransactionId("");
   };
 
- 
-// Complete updated handleCreateSubscription function
-
-const handleCreateSubscription = async () => {
-  if (serviceType === "electricity" && !selectedMeter) {
-    setError("Please select a meter");
-    toast.error("Please select a meter");
-    return;
-  }
-  if (serviceType === "cable" && !selectedDecoder) {
-    setError("Please select a decoder");
-    toast.error("Please select a decoder");
-    return;
-  }
-
-  const amount = selectedAmount || parseInt(customAmount);
-  if (!amount || amount < 100) {
-    setError("Please enter a valid amount (minimum ₦100)");
-    toast.error("Please enter a valid amount (minimum ₦100)");
-    return;
-  }
-
-  if (!deliveryDate) {
-    setError("Please select a delivery date");
-    toast.error("Please select a delivery date");
-    return;
-  }
-
-  setIsLoading(true);
-  setError("");
-  setSuccess(false);
-
-  try {
-    const service = serviceType === "electricity" ? "electricity" : "cable";
-    
-    const payload: any = {
-      serviceType: service,
-      meterNumber: serviceType === "electricity" ? currentMeter?.meterNumber : null,
-      decoderNumber: serviceType === "cable" ? currentDecoder?.decoderNumber : null,
-      discoCode: serviceType === "electricity" ? currentMeter?.disco : null,
-      provider: serviceType === "cable" ? currentDecoder?.provider : null,
-      amount,
-      deliveryDate,
-      paymentOption: "schedule_only",
-    };
-
-    const response = await fetch("/api/vendors/subscription/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      throw new Error(result.error || "Failed to create subscription");
+  const handleCreateSubscription = async () => {
+    if (serviceType === "electricity" && !selectedMeter) {
+      setError("Please select a meter");
+      toast.error("Please select a meter");
+      return;
+    }
+    if (serviceType === "cable" && !selectedDecoder) {
+      setError("Please select a decoder");
+      toast.error("Please select a decoder");
+      return;
     }
 
-    const nextDate = new Date(deliveryDate);
-    nextDate.setMonth(nextDate.getMonth() + 1);
-
-    const newSubscription: Subscription = {
-      id: String(Date.now()),
-      meterNumber: serviceType === "electricity" ? currentMeter?.meterNumber : undefined,
-      decoderNumber: serviceType === "cable" ? currentDecoder?.decoderNumber : undefined,
-      disco: serviceType === "electricity" ? currentMeter?.disco : undefined,
-      provider: serviceType === "cable" ? currentDecoder?.provider : undefined,
-      amount,
-      deliveryDate: deliveryDate,
-      nextRenewalDate: nextDate.toISOString(),
-      type: serviceType === "electricity" ? "ELECTRICITY" : "CABLE_TV",
-    };
-
-    setSubscriptions([...subscriptions, newSubscription]);
-    const txId = result.data?.id || result.data?.transactionId || String(Date.now());
-    setTransactionId(txId);
-    
-    setSuccessData({
-      transactionId: txId,
-      amount,
-      identifier: serviceType === "electricity" ? currentMeter?.meterNumber || "" : currentDecoder?.decoderNumber || "",
-      serviceType: serviceType === "electricity" ? "Electricity" : "Cable TV",
-      provider: serviceType === "electricity" ? currentMeter?.disco || "" : currentDecoder?.provider || "",
-      isScheduled: true,
-    });
-    setSuccess(true);
-
-    // ✅ Show success toast notification based on result
-    const serviceLabel = serviceType === "electricity" ? "Electricity" : "Cable TV";
-    const deliveryLabel = formatDate(deliveryDate);
-    const amountLabel = formatCurrency(amount);
-    
-    if (result.data?.tokenPurchased) {
-      toast.success(`✅ ${serviceLabel} Scheduled with Token!`, {
-        description: `Token: ${result.data.token} • Delivery: ${deliveryLabel} • ${amountLabel}`,
-        duration: 6000,
-        icon: "🔑",
-      });
-    } else if (result.data?.deliveryStatus === "PENDING_PURCHASE") {
-      toast.info(`⏳ ${serviceLabel} Scheduled - Token Pending`, {
-        description: `Delivery: ${deliveryLabel} • ${amountLabel} • We'll purchase token before delivery`,
-        duration: 5000,
-        icon: "⏳",
-      });
-    } else {
-      toast.success(`📅 ${serviceLabel} Scheduled Successfully!`, {
-        description: `Delivery: ${deliveryLabel} • ${amountLabel}`,
-        duration: 5000,
-        icon: "📅",
-      });
+    const amount = selectedAmount || parseInt(customAmount);
+    if (!amount || amount < 100) {
+      setError("Please enter a valid amount (minimum ₦100)");
+      toast.error("Please enter a valid amount (minimum ₦100)");
+      return;
     }
 
-    // Auto-clear success after 5 seconds
-    setTimeout(() => {
-      setSuccess(false);
-    }, 5000);
+    if (!deliveryDate) {
+      setError("Please select a delivery date");
+      toast.error("Please select a delivery date");
+      return;
+    }
 
-    resetForm();
-  } catch (err: any) {
-    setError(err.message || "Failed to create subscription");
-    toast.error("❌ Failed to create subscription", {
-      description: err.message || "Please try again",
-    });
-    setTimeout(() => {
-      setError("");
-    }, 5000);
-  } finally {
-    setIsLoading(false);
-  }
-};
+    setIsLoading(true);
+    setError("");
+    setSuccess(false);
+
+    try {
+      const service = serviceType === "electricity" ? "electricity" : "cable";
+      
+      const payload: any = {
+        serviceType: service,
+        meterNumber: serviceType === "electricity" ? currentMeter?.meterNumber : null,
+        decoderNumber: serviceType === "cable" ? currentDecoder?.decoderNumber : null,
+        discoCode: serviceType === "electricity" ? currentMeter?.disco : null,
+        provider: serviceType === "cable" ? currentDecoder?.provider : null,
+        amount,
+        deliveryDate,
+        paymentOption: "schedule_only",
+      };
+
+      const response = await fetch("/api/vendors/subscription/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to create subscription");
+      }
+
+      const nextDate = new Date(deliveryDate);
+      nextDate.setMonth(nextDate.getMonth() + 1);
+
+      const newSubscription: Subscription = {
+        id: String(Date.now()),
+        meterNumber: serviceType === "electricity" ? currentMeter?.meterNumber : undefined,
+        decoderNumber: serviceType === "cable" ? currentDecoder?.decoderNumber : undefined,
+        disco: serviceType === "electricity" ? currentMeter?.disco : undefined,
+        provider: serviceType === "cable" ? currentDecoder?.provider : undefined,
+        amount,
+        deliveryDate: deliveryDate,
+        nextRenewalDate: nextDate.toISOString(),
+        type: serviceType === "electricity" ? "ELECTRICITY" : "CABLE_TV",
+      };
+
+      setSubscriptions([...subscriptions, newSubscription]);
+      const txId = result.data?.id || result.data?.transactionId || String(Date.now());
+      setTransactionId(txId);
+      
+      setSuccessData({
+        transactionId: txId,
+        amount,
+        identifier: serviceType === "electricity" ? currentMeter?.meterNumber || "" : currentDecoder?.decoderNumber || "",
+        serviceType: serviceType === "electricity" ? "Electricity" : "Cable TV",
+        provider: serviceType === "electricity" ? currentMeter?.disco || "" : currentDecoder?.provider || "",
+        isScheduled: true,
+      });
+      setSuccess(true);
+
+      // Show success toast notification
+      const serviceLabel = serviceType === "electricity" ? "Electricity" : "Cable TV";
+      const deliveryLabel = formatDate(deliveryDate);
+      const amountLabel = formatCurrency(amount);
+      
+      if (result.data?.tokenPurchased) {
+        toast.success(`✅ ${serviceLabel} Scheduled with Token!`, {
+          description: `Token: ${result.data.token} • Delivery: ${deliveryLabel} • ${amountLabel}`,
+          duration: 6000,
+          icon: "🔑",
+        });
+      } else if (result.data?.deliveryStatus === "PENDING_PURCHASE") {
+        toast.info(`⏳ ${serviceLabel} Scheduled - Token Pending`, {
+          description: `Delivery: ${deliveryLabel} • ${amountLabel} • We'll purchase token before delivery`,
+          duration: 5000,
+          icon: "⏳",
+        });
+      } else {
+        toast.success(`📅 ${serviceLabel} Scheduled Successfully!`, {
+          description: `Delivery: ${deliveryLabel} • ${amountLabel}`,
+          duration: 5000,
+          icon: "📅",
+        });
+      }
+
+      // Auto-clear success after 5 seconds
+      setTimeout(() => {
+        setSuccess(false);
+      }, 5000);
+
+      resetForm();
+    } catch (err: any) {
+      setError(err.message || "Failed to create subscription");
+      toast.error("❌ Failed to create subscription", {
+        description: err.message || "Please try again",
+      });
+      setTimeout(() => {
+        setError("");
+      }, 5000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   if (isEnsuringWallet) {
     return (
@@ -1569,7 +1561,7 @@ const handleCreateSubscription = async () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* LEFT COLUMN - Form */}
           <div className="lg:col-span-2 space-y-4">
-            {/* ✅ Active Schedules - MOVED TO TOP */}
+            {/* Active Schedules */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <ActiveSchedules
                 subscriptions={subscriptions}
@@ -1577,7 +1569,7 @@ const handleCreateSubscription = async () => {
               />
             </div>
 
-            {/* Service Type Selection - Increased padding */}
+            {/* Service Type Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-3">
                 Select Service Type
@@ -1608,7 +1600,7 @@ const handleCreateSubscription = async () => {
               </div>
             </div>
 
-            {/* Saved Meters/Decoders - Increased padding */}
+            {/* Saved Meters/Decoders */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -1737,7 +1729,7 @@ const handleCreateSubscription = async () => {
               )}
             </div>
 
-            {/* Amount Selection - Increased padding */}
+            {/* Amount Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-3">Amount</h2>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
@@ -1762,7 +1754,7 @@ const handleCreateSubscription = async () => {
               </div>
             </div>
 
-            {/* ✅ Delivery Date - Increased padding */}
+            {/* Delivery Date */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-3">
                 Delivery Date
@@ -1792,13 +1784,11 @@ const handleCreateSubscription = async () => {
 
           {/* RIGHT COLUMN - Order Summary */}
           <div className="space-y-6">
-            {/* Order Summary - Increased padding */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sticky top-6">
               <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-3">
                 Order Summary
               </h3>
               
-              {/* Status Message - Inline */}
               <StatusMessage 
                 error={error} 
                 success={success} 
@@ -1871,7 +1861,6 @@ const handleCreateSubscription = async () => {
                     </span>
                   </div>
 
-                  {/* Schedule Button */}
                   <button
                     onClick={handleCreateSubscription}
                     disabled={isLoading || 
@@ -1902,3 +1891,29 @@ const handleCreateSubscription = async () => {
     </div>
   );
 }
+
+// Amount Button Component (used in the page)
+const AmountButton = ({
+  amount,
+  isSelected,
+  onClick,
+}: {
+  amount: { label: string; value: number };
+  isSelected: boolean;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg border-2 p-2.5 text-center transition-all duration-200 ${
+        isSelected
+          ? "border-blue-500 bg-blue-500 text-white shadow-md"
+          : "border-gray-200 bg-white hover:border-[#1e293b]/50 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+      }`}
+    >
+      <span className={`text-base font-bold ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
+        {amount.label}
+      </span>
+    </button>
+  );
+};

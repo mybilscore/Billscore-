@@ -1,8 +1,9 @@
-// src/lib/vendors/vendor.factory.ts
+// lib/vendors/vendor.factory.ts
 
 import { BaseVendor } from './base.vendor';
 import { VTPassVendor } from './vtpass.vendor';
 import { LegitDatawayVendor } from './legitdataway.vendor';
+import { BilalSadaVendor } from './bilalsada.vendor';
 import {
   VendorConfig,
   VendorAuthType,
@@ -10,24 +11,29 @@ import {
 } from './types';
 import { VtuType, Vendor as PrismaVendor } from '@prisma/client';
 
+// ✅ Cache for created vendors
+const vendorCache = new Map<string, BaseVendor>();
+
+// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
 export class VendorFactory {
   private static vendors: Map<VtuVendor, typeof BaseVendor> = new Map([
     [VtuVendor.VTPASS, VTPassVendor],
-    // [VtuVendor.QUICKTELLER, QuicktellerVendor],
-    // [VtuVendor.MONIEPOINT, MoniepointVendor],
-    // [VtuVendor.FLUTTERWAVE_VTU, FlutterwaveVendor],
+    [VtuVendor.BILAL_SADA, BilalSadaVendor],
+    // Map LEGITDATAWAY to BilalSadaVendor since it's using the same implementation
   ]);
 
-  // Add a method to use LegitDataway as a simulation vendor
-  static createSimulationVendor(config: VendorConfig): BaseVendor {
-    console.log(`🔧 [VendorFactory] Creating simulation vendor: LegitDataway`);
-    return new LegitDatawayVendor(config);
-  }
-
   static createVendorFromPrisma(vendor: PrismaVendor): BaseVendor {
+    const cacheKey = `${vendor.code}:${vendor.id}`;
+    
+    // ✅ Check cache first
+    if (vendorCache.has(cacheKey)) {
+      console.log(`✅ [VendorFactory] Returning cached vendor: ${vendor.code}`);
+      return vendorCache.get(cacheKey)!;
+    }
+
     console.log(`🔧 [VendorFactory] Creating vendor from Prisma: ${vendor.code}`);
     
-    // Check if this is a simulation vendor
+    // Handle LEGITDATAWAY as a simulation vendor
     if (vendor.code === 'LEGITDATAWAY' || vendor.code === 'SIMULATION') {
       const config: VendorConfig = {
         id: vendor.id,
@@ -43,7 +49,12 @@ export class VendorFactory {
         maxRetries: 3,
         retryDelay: 1000,
       };
-      return new LegitDatawayVendor(config);
+      
+      // Use BilalSadaVendor for LEGITDATAWAY (same implementation)
+      const vendorInstance = new BilalSadaVendor(config);
+      vendorCache.set(cacheKey, vendorInstance);
+      console.log(`✅ [VendorFactory] Cached LEGITDATAWAY vendor as BilalSadaVendor`);
+      return vendorInstance;
     }
     
     const VendorClass = this.vendors.get(vendor.code as VtuVendor);
@@ -67,23 +78,20 @@ export class VendorFactory {
       retryDelay: 1000,
     };
 
-    console.log(`✅ [VendorFactory] Vendor created: ${vendor.code} (${vendor.name})`);
-    return new VendorClass(config);
-  }
-
-  static createVendor(vendorCode: VtuVendor, config: VendorConfig): BaseVendor {
-    console.log(`🔧 [VendorFactory] Creating vendor: ${vendorCode}`);
-    
-    const VendorClass = this.vendors.get(vendorCode);
-    
-    if (!VendorClass) {
-      throw new Error(`Vendor ${vendorCode} not supported`);
-    }
-
-    return new VendorClass(config);
+    const vendorInstance = new VendorClass(config);
+    vendorCache.set(cacheKey, vendorInstance);
+    console.log(`✅ [VendorFactory] Vendor created and cached: ${vendor.code} (${vendor.name})`);
+    return vendorInstance;
   }
 
   static getSupportedVendors(): VtuVendor[] {
+    // biome-ignore lint/complexity/noThisInStatic: <explanation>
     return Array.from(this.vendors.keys());
+  }
+
+  // ✅ Clear cache (for testing)
+  static clearCache() {
+    vendorCache.clear();
+    console.log('🗑️ [VendorFactory] Cache cleared');
   }
 }

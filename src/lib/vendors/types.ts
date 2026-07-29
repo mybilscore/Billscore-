@@ -2,12 +2,7 @@
 
 import { VtuVendor, VtuType, VendorAuthType } from '@prisma/client';
 
-// ✅ Re-export Prisma enums
 export { VtuVendor, VtuType, VendorAuthType };
-
-// ============================================
-// CUSTOM INTERFACES
-// ============================================
 
 export interface VendorConfig {
   id: string;
@@ -33,6 +28,7 @@ export interface VendorRequest<T = any> {
   params?: Record<string, string>;
 }
 
+// ✅ Enhanced with switching info
 export interface VendorResponse<T = any> {
   success: boolean;
   data?: T;
@@ -40,6 +36,8 @@ export interface VendorResponse<T = any> {
   statusCode: number;
   vendor: VtuVendor;
   vendorReference?: string;
+  vendorSwitched?: boolean;      // ✅ New: Was vendor switched?
+  switchedFrom?: VtuVendor[];    // ✅ New: Which vendors failed?
   rawResponse?: any;
   metadata?: Record<string, any>;
 }
