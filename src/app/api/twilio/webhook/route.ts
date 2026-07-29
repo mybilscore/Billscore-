@@ -1,9 +1,7 @@
 // app/api/twilio/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
- import twilio from "twilio";
-
 import { prisma } from "~/lib/db";
-import { compare } from "bcrypt";
+import { hash } from "bcrypt";
 import { 
   TransactionStatus, 
   VtuType, 
@@ -15,47 +13,21 @@ import {
   VtuVendor,
 } from "@prisma/client";
 
-const VoiceResponse = twilio.twiml.VoiceResponse;
-
 // ============================================================
-// NETWORK MAPPING
+// XML RESPONSE BUILDER
 // ============================================================
 
-const networkMap: Record<string, NetworkProvider> = {
-  'MTN': NetworkProvider.MTN,
-  'mtn': NetworkProvider.MTN,
-  'GLO': NetworkProvider.GLO,
-  'glo': NetworkProvider.GLO,
-  'AIRTEL': NetworkProvider.AIRTEL,
-  'airtel': NetworkProvider.AIRTEL,
-  '9MOBILE': NetworkProvider.NINEMOBILE,
-  '9mobile': NetworkProvider.NINEMOBILE,
-  'NINEMOBILE': NetworkProvider.NINEMOBILE,
-  'ninemobile': NetworkProvider.NINEMOBILE,
-};
-
-function mapNetwork(networkInput: string): NetworkProvider {
-  const normalized = networkInput?.trim() || '';
-  const mapped = networkMap[normalized];
-  if (!mapped) {
-    console.warn(`⚠️ Unknown network: "${networkInput}", defaulting to MTN`);
-    return NetworkProvider.MTN;
-  }
-  return mapped;
-}
-
-function normalizePhoneNumber(phone: string): string {
-  let cleaned = phone.replace(/\D/g, '');
-  if (cleaned.startsWith('234')) {
-    cleaned = '0' + cleaned.substring(3);
-  }
-  if (cleaned.length < 10) {
-    cleaned = cleaned.padStart(10, '0');
-  }
-  if (cleaned.length > 11) {
-    cleaned = cleaned.substring(0, 11);
-  }
-  return cleaned;
+function buildTwilioResponse(message: string): string {
+  const escapedMessage = message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>${escapedMessage}</Message>
+</Response>`;
 }
 
 // ============================================================
@@ -77,7 +49,7 @@ export async function POST(request: NextRequest) {
     console.log(`  To: ${whatsappTo}`);
     console.log(`  Body: ${body}`);
 
-    // Find user by phone number
+    // ✅ STEP 1: Check if user is registered by phone number
     let user = await prisma.user.findFirst({
       where: { phone: whatsappFrom },
       include: { wallet: true },
@@ -85,50 +57,60 @@ export async function POST(request: NextRequest) {
 
     let responseMessage = "";
 
-    // If user not found, prompt to register or handle registration
+    // ✅ STEP 2: If user NOT registered, handle registration flow
     if (!user) {
       const upperBody = body.toUpperCase().trim();
       
-      if (upperBody === "REGISTER" || upperBody === "SIGNUP") {
-        responseMessage = await handleRegistration(whatsappFrom);
+      // Check if user wants to register
+      if (upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
+        responseMessage = await handleUserRegistration(whatsappFrom);
       } else {
-        responseMessage = `👋 Welcome to Bilscore! 
+        // Offer registration
+        responseMessage = `👋 Welcome to Bilscore!
 
-To get started, please register using the link below:
-${process.env.NEXTAUTH_URL}/auth?ref=WA${Math.random().toString(36).substring(2, 7).toUpperCase()}
+You are not yet registered. To get started, please reply with "REGISTER" to create your account.
 
-Or reply with "REGISTER" to create an account.
-Reply with "HELP" for more information.
+Or visit our website to register:
+${process.env.NEXTAUTH_URL}/auth
 
-Available commands:
-• BALANCE - Check wallet balance
-• AIRTIME [phone] [amount] - Buy airtime
-• DATA [phone] [plan] - Buy data
-• ELECTRICITY [meter] [amount] - Buy electricity
-• CABLE [decoder] [package] - Buy cable TV
-• TRANSACTIONS - View history
-• REFERRAL - Get referral link`;
+💡 Tip: Registration gives you access to:
+• Buy airtime, data, and electricity
+• Earn ₦20,000 welcome bonus
+• Refer friends and earn rewards
+• 24/7 WhatsApp support
+
+Reply "REGISTER" now to create your account! 🚀`;
       }
 
-      // Store incoming message for analytics
+      return new NextResponse(buildTwilioResponse(responseMessage), {
+        headers: {
+          "Content-Type": "text/xml",
+        },
+      });
+    }
+
+    // ✅ STEP 3: User is registered - update channel
+    try {
       await prisma.channel.upsert({
         where: {
           channelIdentifier: whatsappFrom,
         },
         update: {
+          userId: user.id,
           lastSeen: new Date(),
+          isVerified: true,
           metadata: {
             lastMessage: body,
             lastMessageSid: messageSid,
-            status: "UNREGISTERED",
+            status: "ACTIVE",
           },
         },
         create: {
-          userId: "pending",
+          userId: user.id,
           channelType: ChannelType.WHATSAPP,
           channelIdentifier: whatsappFrom,
           channelUsername: whatsappFrom,
-          isVerified: false,
+          isVerified: true,
           linkedAt: new Date(),
           lastSeen: new Date(),
           metadata: {
@@ -136,65 +118,43 @@ Available commands:
             body,
             from: whatsappFrom,
             to: whatsappTo,
-            status: "UNREGISTERED",
+            status: "ACTIVE",
           },
         },
       });
-
-      return sendTwilioResponse(responseMessage);
+    } catch (error) {
+      console.error("Channel update error:", error);
     }
 
-    // User exists - update channel
-    await prisma.channel.upsert({
-      where: {
-        channelIdentifier: whatsappFrom,
-      },
-      update: {
-        userId: user.id,
-        lastSeen: new Date(),
-        isVerified: true,
-        metadata: {
-          lastMessage: body,
-          lastMessageSid: messageSid,
-          status: "ACTIVE",
-        },
-      },
-      create: {
-        userId: user.id,
-        channelType: ChannelType.WHATSAPP,
-        channelIdentifier: whatsappFrom,
-        channelUsername: whatsappFrom,
-        isVerified: true,
-        linkedAt: new Date(),
-        lastSeen: new Date(),
-        metadata: {
-          messageSid,
-          body,
-          from: whatsappFrom,
-          to: whatsappTo,
-          status: "ACTIVE",
-        },
+    // ✅ STEP 4: Process commands for registered user
+    responseMessage = await processWhatsAppCommand(user, body, whatsappFrom);
+
+    return new NextResponse(buildTwilioResponse(responseMessage), {
+      headers: {
+        "Content-Type": "text/xml",
       },
     });
 
-    // Process commands
-    responseMessage = await processWhatsAppCommand(user, body, whatsappFrom);
-
-    return sendTwilioResponse(responseMessage);
-
   } catch (error) {
     console.error("❌ [Twilio Webhook] Error:", error);
-    return sendTwilioResponse("Sorry, an error occurred. Please try again later.");
+    const errorMessage = "Sorry, an error occurred. Please try again later.";
+    return new NextResponse(buildTwilioResponse(errorMessage), {
+      headers: {
+        "Content-Type": "text/xml",
+      },
+    });
   }
 }
 
 // ============================================================
-// REGISTRATION HANDLER
+// USER REGISTRATION HANDLER
 // ============================================================
 
-async function handleRegistration(phone: string): Promise<string> {
+async function handleUserRegistration(phone: string): Promise<string> {
   try {
-    // Check if user already exists
+    console.log(`📝 [WhatsApp] Starting registration for: ${phone}`);
+
+    // Double check if user already exists (race condition)
     const existingUser = await prisma.user.findFirst({
       where: { phone: phone },
     });
@@ -208,88 +168,148 @@ Wallet Balance: ₦${Number(existingUser.walletBalance || 0).toFixed(2)}
 Type "HELP" to see available commands.`;
     }
 
-    // Generate a temporary username and create user
-    const username = `user_${Math.random().toString(36).substring(2, 8)}`;
+    // Generate user details
+    const username = `wa_${Math.random().toString(36).substring(2, 8)}`;
+    const email = `${username}@whatsapp.bilscore.com`;
+    const fullName = `WhatsApp User ${phone.slice(-4)}`;
+    const tempPassword = `WA${Math.random().toString(36).substring(2, 10)}!@#`;
     const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const WELCOME_BONUS = 20000;
 
-    // Create user with a random password (they'll need to set one later)
-    const newUser = await prisma.user.create({
+    // Hash password and PIN
+    const hashedPassword = await hash(tempPassword, 10);
+    const hashedPin = await hash("1234", 10);
+
+    // ✅ STEP 1: Create user
+    const user = await prisma.user.create({
       data: {
-        phone: phone,
         username: username,
-        fullName: `WhatsApp User ${phone.slice(-4)}`,
+        email: email,
+        phone: phone,
+        fullName: fullName,
+        passwordHash: hashedPassword,
+        pinHash: hashedPin,
         role: "END_USER",
         referralCode: referralCode,
         hasWallet: false,
-        walletBalance: 0,
         isVerified: true,
         isWalletFrozen: false,
         preferredLanguage: "EN",
         pinAttempts: 0,
         kycStatus: "PENDING",
-        // Create a channel immediately
-        channels: {
-          create: {
-            channelType: ChannelType.WHATSAPP,
-            channelIdentifier: phone,
-            channelUsername: phone,
-            isVerified: true,
-            linkedAt: new Date(),
-            lastSeen: new Date(),
-            metadata: {
-              registeredVia: "whatsapp",
-              registrationDate: new Date().toISOString(),
-            },
-          },
+        walletBalance: 0,
+      },
+    });
+
+    console.log(`✅ [WhatsApp] User created: ${user.id}`);
+
+    // ✅ STEP 2: Create wallet with welcome bonus
+    const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+
+    const wallet = await prisma.wallet.create({
+      data: {
+        userId: user.id,
+        accountNumber: accountNumber,
+        bankName: "BILSCORE",
+        accountName: user.fullName,
+        walletBalance: WELCOME_BONUS,
+        ledgerBalance: WELCOME_BONUS,
+        currency: "NGN",
+        isActive: true,
+        kycLevel: 1,
+        metadata: {
+          createdVia: "whatsapp",
+          welcomeBonus: WELCOME_BONUS,
+          registrationDate: new Date().toISOString(),
         },
       },
     });
 
-    // Create wallet for the user
-    const wallet = await prisma.wallet.create({
-      data: {
-        userId: newUser.id,
-        accountNumber: `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-        bankName: "BILSCORE",
-        accountName: newUser.fullName,
-        walletBalance: 0,
-        ledgerBalance: 0,
-        currency: "NGN",
-        isActive: true,
-        kycLevel: 1,
+    console.log(`💰 [WhatsApp] Wallet created: ${wallet.id}`);
+
+    // ✅ STEP 3: Update user with wallet
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { 
+        hasWallet: true,
+        walletBalance: WELCOME_BONUS,
       },
     });
 
-    // Update user with wallet
-    await prisma.user.update({
-      where: { id: newUser.id },
-      data: { hasWallet: true },
+    // ✅ STEP 4: Create welcome bonus transaction
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        userId: user.id,
+        type: "CREDIT",
+        amount: WELCOME_BONUS,
+        balanceBefore: 0,
+        balanceAfter: WELCOME_BONUS,
+        reference: `WELCOME_${user.id}`,
+        description: `🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+        status: "SUCCESS",
+        category: "SYSTEM",
+        metadata: {
+          isWelcomeBonus: true,
+          amount: WELCOME_BONUS,
+          source: "whatsapp-registration",
+        },
+      },
     });
 
-    console.log(`✅ [WhatsApp] New user registered via WhatsApp: ${newUser.id}`);
+    // ✅ STEP 5: Create WhatsApp channel
+    await prisma.channel.create({
+      data: {
+        userId: user.id,
+        channelType: ChannelType.WHATSAPP,
+        channelIdentifier: phone,
+        channelUsername: phone,
+        isVerified: true,
+        linkedAt: new Date(),
+        lastSeen: new Date(),
+        metadata: {
+          registeredVia: "whatsapp",
+          registrationDate: new Date().toISOString(),
+          welcomeBonus: WELCOME_BONUS,
+        },
+      },
+    });
 
-    return `🎉 Welcome to Bilscore, ${newUser.fullName}!
+    console.log(`📱 [WhatsApp] Channel created for: ${phone}`);
+
+    // ✅ STEP 6: Return welcome message
+    return `🎉 Welcome to Bilscore, ${user.fullName}!
 
 Your account has been created successfully via WhatsApp.
 
 📱 Phone: ${phone}
-💰 Wallet: ${wallet.accountNumber}
+💰 Wallet Balance: ₦${WELCOME_BONUS.toFixed(2)}
+🏦 Account Number: ${wallet.accountNumber}
 🔑 Referral Code: ${referralCode}
+🔐 Default PIN: 1234 (Change this in your profile)
+
+🎁 Welcome Bonus: You received ₦${WELCOME_BONUS.toFixed(2)}!
 
 To get started, reply with:
 • "HELP" - See all available commands
 • "BALANCE" - Check your wallet balance
 • "AIRTIME [phone] [amount]" - Buy airtime
 • "DATA [phone] [plan]" - Buy data
+• "ELECTRICITY [meter] [amount]" - Buy electricity
 
-You can also set up a transaction PIN for security by visiting our website:
-${process.env.NEXTAUTH_URL}/profile
+🔐 For security, change your PIN:
+• Visit: ${process.env.NEXTAUTH_URL}/profile
 
 Thank you for choosing Bilscore! 🚀`;
 
   } catch (error) {
     console.error("❌ [WhatsApp] Registration error:", error);
-    return `❌ Sorry, we couldn't create your account at this time. Please try again later or visit our website: ${process.env.NEXTAUTH_URL}`;
+    return `❌ Sorry, we couldn't create your account at this time.
+
+Please try again by replying with "REGISTER" or visit our website:
+${process.env.NEXTAUTH_URL}/auth
+
+If the problem persists, please contact support.`;
   }
 }
 
@@ -307,8 +327,13 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   }
 
   // ========== REGISTER ==========
-  if (command === "REGISTER" || command === "SIGNUP") {
-    return await handleRegistration(phone);
+  if (command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
+    return `✅ You are already registered with Bilscore!
+
+Your registered name: ${user.fullName}
+Wallet Balance: ₦${Number(user.wallet?.walletBalance || 0).toFixed(2)}
+
+Type "HELP" to see available commands.`;
   }
 
   // ========== BALANCE ==========
@@ -414,11 +439,11 @@ Example: ELECTRICITY 1234567890 5000`;
 CABLE [decoder number] [package]
 
 Available packages:
-• DSTV: Premium, Compact, Family
-• GOTV: Max, Plus, Lite
-• Startimes: Basic, Premium
+• DSTV: PREMIUM, COMPACT, FAMILY
+• GOTV: MAX, PLUS, LITE
+• Startimes: BASIC
 
-Example: CABLE 1234567890 Premium`;
+Example: CABLE 1234567890 PREMIUM`;
     }
 
     return await processCablePurchase(user, decoderNumber, packageCode);
@@ -569,7 +594,6 @@ Please fund your wallet and try again.`;
       },
     });
 
-    // Get updated balance
     const updatedWallet = await prisma.wallet.findUnique({
       where: { userId: user.id },
     });
@@ -593,7 +617,6 @@ Thank you for using Bilscore! 🎉`;
 
 async function processDataPurchase(user: any, phoneNumber: string, plan: string): Promise<string> {
   try {
-    // Find plan pricing (simplified - in production, fetch from product catalog)
     const planPrices: Record<string, number> = {
       "1GB": 1000,
       "2GB": 2000,
@@ -622,7 +645,6 @@ Please fund your wallet and try again.`;
 
     const network = detectNetwork(phoneNumber);
 
-    // Create transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -704,7 +726,6 @@ Need ₦${amount.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Create transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -748,7 +769,6 @@ Please fund your wallet and try again.`;
       },
     });
 
-    // Generate a mock token (in production, this comes from the vendor)
     const token = Math.random().toString(36).substring(2, 15).toUpperCase();
 
     const updatedWallet = await prisma.wallet.findUnique({
@@ -807,7 +827,6 @@ Need ₦${pkg.price.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Create transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -853,7 +872,6 @@ Please fund your wallet and try again.`;
       },
     });
 
-    // Save decoder
     await prisma.savedDecoder.upsert({
       where: {
         userId_decoderNumber: {
@@ -918,7 +936,6 @@ Example: PIN 1234
 Example: PIN 1234`;
   }
 
-  // Check if user already has a PIN
   if (user.pinHash) {
     return `🔐 You already have a transaction PIN set.
 To change your PIN, please use the Bilscore mobile app or website.
@@ -926,8 +943,6 @@ To change your PIN, please use the Bilscore mobile app or website.
 ${process.env.NEXTAUTH_URL}/profile`;
   }
 
-  // Hash the PIN
-  const { hash } = await import('bcrypt');
   const hashedPin = await hash(pin, 10);
 
   await prisma.user.update({
@@ -1035,17 +1050,18 @@ function detectNetwork(phoneNumber: string): string {
   return "MTN";
 }
 
-// ============================================================
-// TWILIO RESPONSE HELPER
-// ============================================================
-
-function sendTwilioResponse(message: string): NextResponse {
-  const twiml = new VoiceResponse();
-  twiml.message(message);
-  
-  return new NextResponse(twiml.toString(), {
-    headers: {
-      "Content-Type": "text/xml",
-    },
-  });
+function mapNetwork(networkInput: string): NetworkProvider {
+  const networkMap: Record<string, NetworkProvider> = {
+    'MTN': NetworkProvider.MTN,
+    'GLO': NetworkProvider.GLO,
+    'AIRTEL': NetworkProvider.AIRTEL,
+    '9MOBILE': NetworkProvider.NINEMOBILE,
+  };
+  const normalized = networkInput?.trim() || '';
+  const mapped = networkMap[normalized];
+  if (!mapped) {
+    console.warn(`⚠️ Unknown network: "${networkInput}", defaulting to MTN`);
+    return NetworkProvider.MTN;
+  }
+  return mapped;
 }
