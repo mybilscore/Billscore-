@@ -3,6 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { compare } from "bcrypt";
 import { prisma } from "~/lib/db";
 
+function getAppUrl(): string {
+  const url = process.env.NEXTAUTH_URL || 
+              process.env.NEXT_PUBLIC_APP_URL || 
+              process.env.APP_URL ||
+              process.env.VERCEL_URL ||
+              'https://app.bilscore.com';
+  
+  const cleanUrl = url.replace(/\/$/, '');
+  
+  if (url === process.env.VERCEL_URL && !url.startsWith('http')) {
+    return `https://${cleanUrl}`;
+  }
+  
+  return cleanUrl;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -15,25 +31,49 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ✅ Find transaction with this validation token
-    const transaction = await prisma.vtuTransaction.findFirst({
+    console.log(`🔍 [Confirm Purchase] Looking for token: ${token}`);
+
+    // ✅ CORRECT: Query JSON metadata field
+    let transaction = await prisma.vtuTransaction.findFirst({
       where: {
+        status: "PENDING",
         metadata: {
           path: "$.validationToken",
           equals: token,
         },
-        status: "PENDING",
       },
     });
 
+    // ✅ FALLBACK: Manual filter
     if (!transaction) {
+      console.log(`🔍 [Confirm Purchase] Not found with path query, trying fallback...`);
+      
+      const pendingTransactions = await prisma.vtuTransaction.findMany({
+        where: { status: "PENDING" },
+        take: 50,
+      });
+      
+      const found = pendingTransactions.find((tx: any) => {
+        return tx.metadata?.validationToken === token;
+      });
+      
+      if (found) {
+        transaction = found;
+        console.log(`✅ [Confirm Purchase] Found via fallback: ${transaction.id}`);
+      }
+    }
+
+    if (!transaction) {
+      console.log(`❌ [Confirm Purchase] No transaction found for token: ${token}`);
       return NextResponse.json({
         success: false,
         error: "Invalid or expired validation link",
       }, { status: 404 });
     }
 
-    // Check if validation token is expired
+    console.log(`✅ [Confirm Purchase] Found transaction: ${transaction.id}`);
+
+    // Check if expired
     const validationExpiry = transaction.metadata?.validationExpiry;
     if (validationExpiry && new Date(validationExpiry) < new Date()) {
       return NextResponse.json({
@@ -42,7 +82,7 @@ export async function POST(request: NextRequest) {
       }, { status: 410 });
     }
 
-    // Get user and verify PIN
+    // Get user
     const user = await prisma.user.findUnique({
       where: { id: transaction.userId },
       include: { wallet: true },
@@ -87,7 +127,7 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // Reset PIN attempts on success
+    // Reset PIN attempts
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -96,10 +136,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // ✅ Call the INTERNAL purchase API to complete the purchase
-    const apiUrl = `${process.env.NEXTAUTH_URL}/api/internal/electricity/purchase`;
+    // ✅ Call INTERNAL API
+    const apiUrl = `${getAppUrl()}/api/internal/electricity/purchase`;
     
-    console.log(`📡 [Confirm] Calling internal electricity API`);
+    console.log(`📡 [Confirm Purchase] Calling internal API for transaction: ${transaction.id}`);
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -113,16 +153,15 @@ export async function POST(request: NextRequest) {
         discoCode: transaction.product,
         meterType: "Prepaid",
         phone: user.phone,
-        pin: pin, // ✅ Pass the verified PIN
+        pin: pin,
       }),
     });
 
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("❌ [Confirm] Internal API error:", result);
+      console.error("❌ [Confirm Purchase] Internal API error:", result);
       
-      // Update transaction as failed
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -141,29 +180,32 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // ✅ Extract the VENDOR token from the API response
+    // ✅ Extract vendor token
     const vendorToken = result.data?.token || result.token;
-    const transactionId = result.data?.transactionId || result.transactionId;
+    const vendorReference = result.data?.vendorReference || result.vendorReference;
 
-    // ✅ Update the original transaction with the vendor token
+    console.log(`✅ [Confirm Purchase] Vendor token: ${vendorToken}`);
+
+    // ✅ Update transaction with vendor token
     await prisma.vtuTransaction.update({
       where: { id: transaction.id },
       data: {
         status: "SUCCESS",
         token: vendorToken,
-        vendorReference: result.data?.vendorReference,
+        vendorReference: vendorReference,
         deliveredAt: new Date(),
         metadata: {
           ...transaction.metadata,
           pinVerified: true,
           vendorToken: vendorToken,
+          vendorReference: vendorReference,
           completedAt: new Date().toISOString(),
           vendorResponse: result.data,
         },
       },
     });
 
-    // ✅ Send the vendor token to WhatsApp
+    // ✅ Send vendor token to WhatsApp
     await sendTokenToWhatsApp(user.phone, {
       transactionType: transaction.transactionType,
       amount: transaction.amount,
@@ -171,20 +213,35 @@ export async function POST(request: NextRequest) {
       product: transaction.product,
       token: vendorToken,
       transactionId: transaction.id,
+      vendorReference: vendorReference,
+    });
+
+    // Also update wallet transaction
+    await prisma.walletTransaction.updateMany({
+      where: {
+        reference: `PENDING_${transaction.id}`,
+        status: "PENDING",
+      },
+      data: {
+        type: "DEBIT",
+        status: "SUCCESS",
+        balanceBefore: Number(user.wallet?.walletBalance),
+        balanceAfter: Number(user.wallet?.walletBalance) - Number(transaction.amount),
+      },
     });
 
     return NextResponse.json({
       success: true,
       message: "Purchase confirmed successfully!",
       transactionId: transaction.id,
-      token: vendorToken, // ✅ Return the vendor token
+      token: vendorToken,
       serviceType: transaction.transactionType,
       amount: Number(transaction.amount),
       recipient: transaction.phoneNumber || transaction.meterNumber || "N/A",
     });
 
   } catch (error) {
-    console.error("Confirm purchase error:", error);
+    console.error("❌ [Confirm Purchase] Error:", error);
     return NextResponse.json({
       success: false,
       error: "Failed to confirm purchase",
@@ -209,6 +266,7 @@ async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<void
 🔑 Your Electricity Token: ${data.token}
 
 🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+📌 Vendor Reference: ${data.vendorReference || 'N/A'}
 
 Please use this token to recharge your meter.
 Thank you for using Bilscore! 🎉`;
