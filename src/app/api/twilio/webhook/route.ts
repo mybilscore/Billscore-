@@ -14,20 +14,6 @@ import {
 } from "@prisma/client";
 
 // ============================================================
-// HELPER: Generate Short Validation Token
-// ============================================================
-
-function generateValidationToken(): string {
-  // Short token for validation link (12 characters)
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let token = '';
-  for (let i = 0; i < 12; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
-
-// ============================================================
 // XML RESPONSE BUILDER
 // ============================================================
 
@@ -476,7 +462,7 @@ Or: SETDEFAULTDECODER 1234567890`;
     return await setDefaultDecoder(user.id, decoderId);
   }
 
-  // ========== ELECTRICITY PURCHASE - Calls Your API ==========
+  // ========== ELECTRICITY PURCHASE - Calls Internal API ==========
   
   if (command === "ELECTRICITY" || command === "ELEC" || command === "POWER") {
     const meters = await prisma.savedMeter.findMany({
@@ -551,7 +537,7 @@ Example: ELECTRICITY ${parts[1]} 5000`;
     }
   }
 
-  // ========== CABLE PURCHASE - Calls Your API ==========
+  // ========== CABLE PURCHASE - Calls Internal API ==========
   
   if (command === "CABLE" || command === "TV") {
     const decoders = await prisma.savedDecoder.findMany({
@@ -636,7 +622,7 @@ Example: CABLE ${parts[1]} 2`;
     }
   }
 
-  // ========== AIRTIME - Calls Your API ==========
+  // ========== AIRTIME - Calls Internal API ==========
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     const [, phoneNumber, amount] = parts;
     if (!phoneNumber || !amount) {
@@ -658,7 +644,7 @@ Example: AIRTIME 08012345678 500`;
     return await processAirtimePurchaseWithPin(user, phoneNumber, amountNum);
   }
 
-  // ========== DATA - Calls Your API ==========
+  // ========== DATA - Calls Internal API ==========
   if (command.startsWith("DATA")) {
     const [, phoneNumber, plan] = parts;
     if (!phoneNumber || !plan) {
@@ -1057,7 +1043,7 @@ function getAvailablePackages(): Array<{ name: string; code: string; price: numb
 }
 
 // ============================================================
-// PURCHASE HANDLERS - Calls Your APIs and Returns Vendor Tokens
+// PURCHASE HANDLERS - Calls Internal APIs
 // ============================================================
 
 async function processElectricityPurchaseWithPin(user: any, meterNumber: string, amount: number, disco: string): Promise<string> {
@@ -1074,10 +1060,10 @@ Example: PIN 1234
 ⚠️ Your PIN is required for all transactions.`;
     }
 
-    // ✅ Call your existing electricity purchase API
-    const apiUrl = `${getAppUrl()}/api/vendors/electricity/purchase`;
+    // ✅ Call INTERNAL API (bypasses session authentication)
+    const apiUrl = `${getAppUrl()}/api/internal/electricity/purchase`;
     
-    console.log(`📡 [WhatsApp] Calling electricity API for meter: ${meterNumber}`);
+    console.log(`📡 [WhatsApp] Calling internal electricity API for meter: ${meterNumber}`);
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -1085,6 +1071,7 @@ Example: PIN 1234
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        userId: user.id,
         meterNumber: meterNumber,
         amount: amount,
         discoCode: disco,
@@ -1097,7 +1084,7 @@ Example: PIN 1234
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("❌ [WhatsApp] Electricity API error:", result);
+      console.error("❌ [WhatsApp] Internal Electricity API error:", result);
       
       if (result.error?.includes("PIN")) {
         return `❌ ${result.error}
@@ -1111,7 +1098,7 @@ Example: PIN 1234`;
       return `❌ ${result.error || "Failed to purchase electricity. Please try again."}`;
     }
 
-    // ✅ Extract the VENDOR token (purchased token) from the API response
+    // ✅ Extract the VENDOR token from the API response
     const vendorToken = result.data?.token || result.token;
     const transactionId = result.data?.transactionId || result.transactionId;
     const vendorReference = result.data?.vendorReference || result.vendorReference;
@@ -1198,10 +1185,10 @@ Example: PIN 1234
 ⚠️ Your PIN is required for all transactions.`;
     }
 
-    // ✅ Call your existing cable purchase API
-    const apiUrl = `${getAppUrl()}/api/vendors/cable/purchase`;
+    // ✅ Call INTERNAL API
+    const apiUrl = `${getAppUrl()}/api/internal/cable/purchase`;
     
-    console.log(`📡 [WhatsApp] Calling cable API for ${decoderNumber}`);
+    console.log(`📡 [WhatsApp] Calling internal cable API for ${decoderNumber}`);
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -1209,6 +1196,7 @@ Example: PIN 1234
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        userId: user.id,
         smartCardNumber: decoderNumber,
         packageCode: packageCode,
         provider: "DSTV",
@@ -1220,11 +1208,10 @@ Example: PIN 1234
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("❌ [WhatsApp] Cable API error:", result);
+      console.error("❌ [WhatsApp] Internal Cable API error:", result);
       return `❌ ${result.error || "Failed to purchase cable subscription. Please try again."}`;
     }
 
-    // ✅ Extract the VENDOR token from the API response
     const vendorToken = result.data?.token || result.token;
     const transactionId = result.data?.transactionId || result.transactionId;
     const vendorReference = result.data?.vendorReference || result.vendorReference;
@@ -1257,7 +1244,6 @@ Example: PIN 1234
       console.error("Failed to save decoder:", saveError);
     }
 
-    // ✅ Return the VENDOR token to WhatsApp
     return `✅ Cable TV Subscription Successful! 📺
 
 📺 Decoder: ${decoderNumber}
@@ -1289,10 +1275,10 @@ Example: PIN 1234
 
     const network = detectNetwork(phoneNumber);
 
-    // ✅ Call your existing airtime purchase API
-    const apiUrl = `${getAppUrl()}/api/vendors/airtime/purchase`;
+    // ✅ Call INTERNAL API
+    const apiUrl = `${getAppUrl()}/api/internal/airtime/purchase`;
     
-    console.log(`📡 [WhatsApp] Calling airtime API for ${phoneNumber}`);
+    console.log(`📡 [WhatsApp] Calling internal airtime API for ${phoneNumber}`);
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -1300,6 +1286,7 @@ Example: PIN 1234
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        userId: user.id,
         phoneNumber: phoneNumber,
         amount: amount,
         network: network,
@@ -1310,7 +1297,7 @@ Example: PIN 1234
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("❌ [WhatsApp] Airtime API error:", result);
+      console.error("❌ [WhatsApp] Internal Airtime API error:", result);
       return `❌ ${result.error || "Failed to purchase airtime. Please try again."}`;
     }
 
@@ -1363,10 +1350,10 @@ Example: PIN 1234
 
     const network = detectNetwork(phoneNumber);
 
-    // ✅ Call your existing data purchase API
-    const apiUrl = `${getAppUrl()}/api/vendors/data/purchase`;
+    // ✅ Call INTERNAL API
+    const apiUrl = `${getAppUrl()}/api/internal/data/purchase`;
     
-    console.log(`📡 [WhatsApp] Calling data API for ${phoneNumber}`);
+    console.log(`📡 [WhatsApp] Calling internal data API for ${phoneNumber}`);
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -1374,6 +1361,7 @@ Example: PIN 1234
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        userId: user.id,
         phoneNumber: phoneNumber,
         planCode: plan,
         provider: network,
@@ -1385,7 +1373,7 @@ Example: PIN 1234
     const result = await response.json();
 
     if (!response.ok) {
-      console.error("❌ [WhatsApp] Data API error:", result);
+      console.error("❌ [WhatsApp] Internal Data API error:", result);
       return `❌ ${result.error || "Failed to purchase data. Please try again."}`;
     }
 
