@@ -1,6 +1,5 @@
 // app/api/auth/confirm-purchase/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { verify } from "jsonwebtoken";
 import { compare } from "bcrypt";
 import { prisma } from "~/lib/db";
 
@@ -16,20 +15,36 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Verify token
-    let decoded;
-    try {
-      decoded = verify(token, process.env.AUTH_SECRET || "fallback-secret") as any;
-    } catch (error) {
+    // ✅ Find transaction with this validation token
+    const transaction = await prisma.vtuTransaction.findFirst({
+      where: {
+        metadata: {
+          path: "$.validationToken",
+          equals: token,
+        },
+        status: "PENDING",
+      },
+    });
+
+    if (!transaction) {
       return NextResponse.json({
         success: false,
-        error: "Invalid or expired token",
-      }, { status: 401 });
+        error: "Invalid or expired validation link",
+      }, { status: 404 });
+    }
+
+    // Check if validation token is expired
+    const validationExpiry = transaction.metadata?.validationExpiry;
+    if (validationExpiry && new Date(validationExpiry) < new Date()) {
+      return NextResponse.json({
+        success: false,
+        error: "Validation link has expired",
+      }, { status: 410 });
     }
 
     // Get user and verify PIN
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
+      where: { id: transaction.userId },
       include: { wallet: true },
     });
 
@@ -43,7 +58,6 @@ export async function POST(request: NextRequest) {
     // Verify PIN
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
-      // Track failed attempts
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -82,53 +96,91 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Complete the transaction
-    const transaction = await prisma.$transaction(async (tx) => {
-      // Update VtuTransaction to SUCCESS
-      const updated = await tx.vtuTransaction.update({
-        where: { id: decoded.transactionId },
+    // ✅ Call the INTERNAL purchase API to complete the purchase
+    const apiUrl = `${process.env.NEXTAUTH_URL}/api/internal/electricity/purchase`;
+    
+    console.log(`📡 [Confirm] Calling internal electricity API`);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId: user.id,
+        meterNumber: transaction.meterNumber,
+        amount: Number(transaction.amount),
+        discoCode: transaction.product,
+        meterType: "Prepaid",
+        phone: user.phone,
+        pin: pin, // ✅ Pass the verified PIN
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      console.error("❌ [Confirm] Internal API error:", result);
+      
+      // Update transaction as failed
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
         data: {
-          status: "SUCCESS",
-          deliveredAt: new Date(),
+          status: "FAILED",
           metadata: {
-            ...decoded,
-            pinVerified: true,
-            verifiedAt: new Date().toISOString(),
+            ...transaction.metadata,
+            error: result.error || "Purchase failed",
+            failedAt: new Date().toISOString(),
           },
         },
       });
 
-      // Update wallet balance
-      const wallet = await tx.wallet.update({
-        where: { userId: user.id },
-        data: {
-          walletBalance: {
-            decrement: decoded.amount,
-          },
-        },
-      });
+      return NextResponse.json({
+        success: false,
+        error: result.error || "Failed to complete purchase",
+      }, { status: 500 });
+    }
 
-      // Update pending wallet transaction
-      await tx.walletTransaction.updateMany({
-        where: {
-          reference: `PENDING_${decoded.transactionId}`,
-          status: "PENDING",
-        },
-        data: {
-          type: "DEBIT",
-          status: "SUCCESS",
-          balanceBefore: Number(wallet.walletBalance) + decoded.amount,
-          balanceAfter: Number(wallet.walletBalance),
-        },
-      });
+    // ✅ Extract the VENDOR token from the API response
+    const vendorToken = result.data?.token || result.token;
+    const transactionId = result.data?.transactionId || result.transactionId;
 
-      return updated;
+    // ✅ Update the original transaction with the vendor token
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        status: "SUCCESS",
+        token: vendorToken,
+        vendorReference: result.data?.vendorReference,
+        deliveredAt: new Date(),
+        metadata: {
+          ...transaction.metadata,
+          pinVerified: true,
+          vendorToken: vendorToken,
+          completedAt: new Date().toISOString(),
+          vendorResponse: result.data,
+        },
+      },
+    });
+
+    // ✅ Send the vendor token to WhatsApp
+    await sendTokenToWhatsApp(user.phone, {
+      transactionType: transaction.transactionType,
+      amount: transaction.amount,
+      meterNumber: transaction.meterNumber,
+      product: transaction.product,
+      token: vendorToken,
+      transactionId: transaction.id,
     });
 
     return NextResponse.json({
       success: true,
       message: "Purchase confirmed successfully!",
       transactionId: transaction.id,
+      token: vendorToken, // ✅ Return the vendor token
+      serviceType: transaction.transactionType,
+      amount: Number(transaction.amount),
+      recipient: transaction.phoneNumber || transaction.meterNumber || "N/A",
     });
 
   } catch (error) {
@@ -137,5 +189,75 @@ export async function POST(request: NextRequest) {
       success: false,
       error: "Failed to confirm purchase",
     }, { status: 500 });
+  }
+}
+
+// ============================================================
+// HELPER: Send Token to WhatsApp
+// ============================================================
+
+async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<void> {
+  try {
+    let message = "";
+
+    if (data.transactionType === "ELECTRICITY_INSTANT") {
+      message = `✅ Electricity Purchase Confirmed! ⚡
+
+📍 Meter: ${data.meterNumber}
+📍 DisCo: ${data.product}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+🔑 Your Electricity Token: ${data.token}
+
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Please use this token to recharge your meter.
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "AIRTIME") {
+      message = `✅ Airtime Purchase Confirmed! 📱
+
+📱 Phone: ${data.phoneNumber}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+📡 Network: ${data.network}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "DATA") {
+      message = `✅ Data Purchase Confirmed! 📶
+
+📱 Phone: ${data.phoneNumber}
+📶 Plan: ${data.networkPlan}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+📡 Network: ${data.network}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "CABLE_TV") {
+      message = `✅ Cable TV Subscription Confirmed! 📺
+
+📺 Decoder: ${data.decoderNumber}
+📦 Package: ${data.packageName}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Your subscription has been activated. Enjoy! 🎉`;
+    }
+
+    // Send via Twilio
+    const response = await fetch(`${process.env.NEXTAUTH_URL}/api/twilio/send-message`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: phoneNumber,
+        message: message,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Failed to send WhatsApp message");
+    }
+  } catch (error) {
+    console.error("Error sending token to WhatsApp:", error);
   }
 }
