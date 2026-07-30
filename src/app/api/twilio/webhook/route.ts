@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
-import { sign } from "jsonwebtoken";
 import { 
   TransactionStatus, 
   VtuType, 
@@ -13,6 +12,7 @@ import {
   WalletTransactionType,
   VtuVendor,
 } from "@prisma/client";
+import { generateShortToken } from "~/lib/short-token";
 
 // ============================================================
 // XML RESPONSE BUILDER
@@ -29,6 +29,26 @@ function buildTwilioResponse(message: string): string {
 <Response>
     <Message>${escapedMessage}</Message>
 </Response>`;
+}
+
+// ============================================================
+// HELPER: Get Application URL
+// ============================================================
+
+function getAppUrl(): string {
+  const url = process.env.NEXTAUTH_URL || 
+              process.env.NEXT_PUBLIC_APP_URL || 
+              process.env.APP_URL ||
+              process.env.VERCEL_URL ||
+              'https://app.bilscore.com';
+  
+  const cleanUrl = url.replace(/\/$/, '');
+  
+  if (url === process.env.VERCEL_URL && !url.startsWith('http')) {
+    return `https://${cleanUrl}`;
+  }
+  
+  return cleanUrl;
 }
 
 // ============================================================
@@ -70,7 +90,7 @@ export async function POST(request: NextRequest) {
 You are not yet registered. To get started, please reply with "REGISTER" to create your account.
 
 Or visit our website to register:
-${process.env.NEXTAUTH_URL}/auth
+${getAppUrl()}/auth
 
 💡 Tip: Registration gives you access to:
 • Buy airtime, data, and electricity
@@ -295,7 +315,7 @@ To get started, reply with:
 • "ADDDECODER [decoder] [provider] [name]" - Save a decoder
 
 🔐 For security, change your PIN:
-• Visit: ${process.env.NEXTAUTH_URL}/profile
+• Visit: ${getAppUrl()}/profile
 
 Thank you for choosing Bilscore! 🚀`;
 
@@ -304,7 +324,7 @@ Thank you for choosing Bilscore! 🚀`;
     return `❌ Sorry, we couldn't create your account at this time.
 
 Please try again by replying with "REGISTER" or visit our website:
-${process.env.NEXTAUTH_URL}/auth
+${getAppUrl()}/auth
 
 If the problem persists, please contact support.`;
   }
@@ -461,7 +481,7 @@ Or: SETDEFAULTDECODER 1234567890`;
     return await setDefaultDecoder(user.id, decoderId);
   }
 
-  // ========== ELECTRICITY PURCHASE WITH PIN ==========
+  // ========== ELECTRICITY PURCHASE WITH SHORT TOKEN ==========
   
   // Show list of saved meters
   if (command === "ELECTRICITY" || command === "ELEC" || command === "POWER") {
@@ -538,7 +558,7 @@ Example: ELECTRICITY ${parts[1]} 5000`;
     }
   }
 
-  // ========== CABLE PURCHASE WITH PIN ==========
+  // ========== CABLE PURCHASE WITH SHORT TOKEN ==========
   
   // Show list of saved decoders
   if (command === "CABLE" || command === "TV") {
@@ -674,7 +694,7 @@ Example: DATA 08012345678 1GB`;
   // ========== REFERRAL ==========
   if (command === "REFERRAL" || command === "REF") {
     const referralCode = user.referralCode || "N/A";
-    const link = `${process.env.NEXTAUTH_URL}/auth?ref=${referralCode}`;
+    const link = `${getAppUrl()}/auth?ref=${referralCode}`;
     const count = await prisma.referral.count({
       where: { referrerId: user.id },
     });
@@ -1046,7 +1066,7 @@ function getAvailablePackages(): Array<{ name: string; code: string; price: numb
 }
 
 // ============================================================
-// PURCHASE HANDLERS WITH PIN VALIDATION
+// PURCHASE HANDLERS WITH SHORT TOKEN
 // ============================================================
 
 async function processElectricityPurchaseWithPin(user: any, meterNumber: string, amount: number, disco: string): Promise<string> {
@@ -1062,7 +1082,6 @@ Need ₦${amount.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Check if user has PIN set
     if (!user.pinHash) {
       return `🔐 You need to set a transaction PIN first.
 
@@ -1097,20 +1116,8 @@ Example: PIN 1234
       },
     });
 
-    // Generate validation token
-    const token = sign(
-      {
-        userId: user.id,
-        transactionId: transaction.id,
-        amount: amount,
-        serviceType: "Electricity",
-        recipient: meterNumber,
-        details: disco,
-        timestamp: Date.now(),
-      },
-      process.env.AUTH_SECRET || "fallback-secret",
-      { expiresIn: "5m" }
-    );
+    // ✅ Generate SHORT token (22 characters instead of 200+)
+    const token = generateShortToken();
 
     // Update transaction with token
     await prisma.vtuTransaction.update({
@@ -1144,7 +1151,11 @@ Example: PIN 1234
       },
     });
 
-    const validationLink = `${process.env.NEXTAUTH_URL}/auth/validate-purchase?token=${token}`;
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${token}`;
+
+    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
+    console.log(`📝 [WhatsApp] Token: ${token} (${token.length} chars)`);
 
     return `⚡ Electricity Purchase Initiated!
 
@@ -1198,7 +1209,6 @@ Need ₦${pkg.price.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Check if user has PIN set
     if (!user.pinHash) {
       return `🔐 You need to set a transaction PIN first.
 
@@ -1234,20 +1244,8 @@ Example: PIN 1234
       },
     });
 
-    // Generate validation token
-    const token = sign(
-      {
-        userId: user.id,
-        transactionId: transaction.id,
-        amount: pkg.price,
-        serviceType: "Cable",
-        recipient: decoderNumber,
-        details: packageCode,
-        timestamp: Date.now(),
-      },
-      process.env.AUTH_SECRET || "fallback-secret",
-      { expiresIn: "5m" }
-    );
+    // ✅ Generate SHORT token (22 characters instead of 200+)
+    const token = generateShortToken();
 
     // Update transaction with token
     await prisma.vtuTransaction.update({
@@ -1281,7 +1279,11 @@ Example: PIN 1234
       },
     });
 
-    const validationLink = `${process.env.NEXTAUTH_URL}/auth/validate-purchase?token=${token}`;
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${token}`;
+
+    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
+    console.log(`📝 [WhatsApp] Token: ${token} (${token.length} chars)`);
 
     return `📺 Cable Subscription Initiated!
 
@@ -1317,7 +1319,6 @@ Need ₦${amount.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Check if user has PIN set
     if (!user.pinHash) {
       return `🔐 You need to set a transaction PIN first.
 
@@ -1355,20 +1356,8 @@ Example: PIN 1234
       },
     });
 
-    // Generate validation token
-    const token = sign(
-      {
-        userId: user.id,
-        transactionId: transaction.id,
-        amount: amount,
-        serviceType: "Airtime",
-        recipient: phoneNumber,
-        details: network,
-        timestamp: Date.now(),
-      },
-      process.env.AUTH_SECRET || "fallback-secret",
-      { expiresIn: "5m" }
-    );
+    // ✅ Generate SHORT token (22 characters instead of 200+)
+    const token = generateShortToken();
 
     // Update transaction with token
     await prisma.vtuTransaction.update({
@@ -1402,7 +1391,11 @@ Example: PIN 1234
       },
     });
 
-    const validationLink = `${process.env.NEXTAUTH_URL}/auth/validate-purchase?token=${token}`;
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${token}`;
+
+    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
+    console.log(`📝 [WhatsApp] Token: ${token} (${token.length} chars)`);
 
     return `📱 Airtime Purchase Initiated!
 
@@ -1453,7 +1446,6 @@ Need ₦${price.toFixed(2)}.
 Please fund your wallet and try again.`;
     }
 
-    // Check if user has PIN set
     if (!user.pinHash) {
       return `🔐 You need to set a transaction PIN first.
 
@@ -1493,20 +1485,8 @@ Example: PIN 1234
       },
     });
 
-    // Generate validation token
-    const token = sign(
-      {
-        userId: user.id,
-        transactionId: transaction.id,
-        amount: price,
-        serviceType: "Data",
-        recipient: phoneNumber,
-        details: `${plan} - ${network}`,
-        timestamp: Date.now(),
-      },
-      process.env.AUTH_SECRET || "fallback-secret",
-      { expiresIn: "5m" }
-    );
+    // ✅ Generate SHORT token (22 characters instead of 200+)
+    const token = generateShortToken();
 
     // Update transaction with token
     await prisma.vtuTransaction.update({
@@ -1540,7 +1520,11 @@ Example: PIN 1234
       },
     });
 
-    const validationLink = `${process.env.NEXTAUTH_URL}/auth/validate-purchase?token=${token}`;
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${token}`;
+
+    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
+    console.log(`📝 [WhatsApp] Token: ${token} (${token.length} chars)`);
 
     return `📶 Data Purchase Initiated!
 
@@ -1588,7 +1572,7 @@ Example: PIN 1234`;
     return `🔐 You already have a transaction PIN set.
 To change your PIN, please use the Bilscore mobile app or website.
 
-${process.env.NEXTAUTH_URL}/profile`;
+${getAppUrl()}/profile`;
   }
 
   const hashedPin = await hash(pin, 10);
@@ -1660,7 +1644,7 @@ function getHelpMessage(user: any): string {
 
 🔐 All purchases require PIN validation via secure link.
 
-Need more help? Visit: ${process.env.NEXTAUTH_URL}/support`;
+Need more help? Visit: ${getAppUrl()}/support`;
 }
 
 async function getTransactionHistory(userId: string): Promise<string> {
