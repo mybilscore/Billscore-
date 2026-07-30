@@ -19,6 +19,88 @@ function getAppUrl(): string {
   return cleanUrl;
 }
 
+// ============================================================
+// HELPER: Send Token to WhatsApp
+// ============================================================
+
+async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<boolean> {
+  try {
+    let message = "";
+
+    if (data.transactionType === "ELECTRICITY_INSTANT") {
+      message = `✅ Electricity Purchase Confirmed! ⚡
+
+📍 Meter: ${data.meterNumber}
+📍 DisCo: ${data.product}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+🔑 Your Electricity Token: ${data.token}
+
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+📌 Vendor Reference: ${data.vendorReference || 'N/A'}
+
+Please use this token to recharge your meter.
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "AIRTIME") {
+      message = `✅ Airtime Purchase Confirmed! 📱
+
+📱 Phone: ${data.phoneNumber}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+📡 Network: ${data.network}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "DATA") {
+      message = `✅ Data Purchase Confirmed! 📶
+
+📱 Phone: ${data.phoneNumber}
+📶 Plan: ${data.networkPlan}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+📡 Network: ${data.network}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Thank you for using Bilscore! 🎉`;
+    } else if (data.transactionType === "CABLE_TV") {
+      message = `✅ Cable TV Subscription Confirmed! 📺
+
+📺 Decoder: ${data.decoderNumber}
+📦 Package: ${data.packageName}
+💰 Amount: ₦${Number(data.amount).toFixed(2)}
+🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
+
+Your subscription has been activated. Enjoy! 🎉`;
+    }
+
+    console.log(`📤 [WhatsApp] Sending token message to ${phoneNumber}`);
+    console.log(`📝 [WhatsApp] Message: ${message}`);
+
+    // ✅ Call the send-message API
+    const response = await fetch(`${getAppUrl()}/api/twilio/send-message`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: phoneNumber,
+        message: message,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("❌ [WhatsApp] Failed to send message:", errorData);
+      return false;
+    }
+
+    const result = await response.json();
+    console.log(`✅ [WhatsApp] Message sent successfully: ${result.sid}`);
+    return true;
+
+  } catch (error) {
+    console.error("❌ [WhatsApp] Error sending token:", error);
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -33,7 +115,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`🔍 [Confirm Purchase] Looking for token: ${token}`);
 
-    // ✅ CORRECT: Query JSON metadata field
+    // ✅ Find transaction by validation token in metadata
     let transaction = await prisma.vtuTransaction.findFirst({
       where: {
         status: "PENDING",
@@ -136,7 +218,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // ✅ Call INTERNAL API
+    // ✅ Call INTERNAL API to complete purchase
     const apiUrl = `${getAppUrl()}/api/internal/electricity/purchase`;
     
     console.log(`📡 [Confirm Purchase] Calling internal API for transaction: ${transaction.id}`);
@@ -205,18 +287,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // ✅ Send vendor token to WhatsApp
-    await sendTokenToWhatsApp(user.phone, {
-      transactionType: transaction.transactionType,
-      amount: transaction.amount,
-      meterNumber: transaction.meterNumber,
-      product: transaction.product,
-      token: vendorToken,
-      transactionId: transaction.id,
-      vendorReference: vendorReference,
-    });
-
-    // Also update wallet transaction
+    // ✅ Update wallet transaction
     await prisma.walletTransaction.updateMany({
       where: {
         reference: `PENDING_${transaction.id}`,
@@ -230,6 +301,21 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // ✅ Send vendor token to WhatsApp
+    const messageSent = await sendTokenToWhatsApp(user.phone, {
+      transactionType: transaction.transactionType,
+      amount: transaction.amount,
+      meterNumber: transaction.meterNumber,
+      product: transaction.product,
+      token: vendorToken,
+      transactionId: transaction.id,
+      vendorReference: vendorReference,
+    });
+
+    if (!messageSent) {
+      console.warn(`⚠️ [Confirm Purchase] Failed to send WhatsApp message, but purchase was successful`);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Purchase confirmed successfully!",
@@ -238,6 +324,7 @@ export async function POST(request: NextRequest) {
       serviceType: transaction.transactionType,
       amount: Number(transaction.amount),
       recipient: transaction.phoneNumber || transaction.meterNumber || "N/A",
+      whatsappSent: messageSent,
     });
 
   } catch (error) {
@@ -246,76 +333,5 @@ export async function POST(request: NextRequest) {
       success: false,
       error: "Failed to confirm purchase",
     }, { status: 500 });
-  }
-}
-
-// ============================================================
-// HELPER: Send Token to WhatsApp
-// ============================================================
-
-async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<void> {
-  try {
-    let message = "";
-
-    if (data.transactionType === "ELECTRICITY_INSTANT") {
-      message = `✅ Electricity Purchase Confirmed! ⚡
-
-📍 Meter: ${data.meterNumber}
-📍 DisCo: ${data.product}
-💰 Amount: ₦${Number(data.amount).toFixed(2)}
-🔑 Your Electricity Token: ${data.token}
-
-🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
-📌 Vendor Reference: ${data.vendorReference || 'N/A'}
-
-Please use this token to recharge your meter.
-Thank you for using Bilscore! 🎉`;
-    } else if (data.transactionType === "AIRTIME") {
-      message = `✅ Airtime Purchase Confirmed! 📱
-
-📱 Phone: ${data.phoneNumber}
-💰 Amount: ₦${Number(data.amount).toFixed(2)}
-📡 Network: ${data.network}
-🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
-
-Thank you for using Bilscore! 🎉`;
-    } else if (data.transactionType === "DATA") {
-      message = `✅ Data Purchase Confirmed! 📶
-
-📱 Phone: ${data.phoneNumber}
-📶 Plan: ${data.networkPlan}
-💰 Amount: ₦${Number(data.amount).toFixed(2)}
-📡 Network: ${data.network}
-🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
-
-Thank you for using Bilscore! 🎉`;
-    } else if (data.transactionType === "CABLE_TV") {
-      message = `✅ Cable TV Subscription Confirmed! 📺
-
-📺 Decoder: ${data.decoderNumber}
-📦 Package: ${data.packageName}
-💰 Amount: ₦${Number(data.amount).toFixed(2)}
-🆔 Transaction ID: ${data.transactionId?.substring(0, 10) || 'N/A'}
-
-Your subscription has been activated. Enjoy! 🎉`;
-    }
-
-    // Send via Twilio
-    const response = await fetch(`${process.env.NEXTAUTH_URL}/api/twilio/send-message`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        to: phoneNumber,
-        message: message,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("Failed to send WhatsApp message");
-    }
-  } catch (error) {
-    console.error("Error sending token to WhatsApp:", error);
   }
 }
