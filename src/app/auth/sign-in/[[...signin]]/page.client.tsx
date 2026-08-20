@@ -894,14 +894,16 @@ export default function AuthPage() {
             {/* Mobile Logo */}
             <div className="lg:hidden mb-6">
               <div className="flex items-center justify-center gap-2 mb-2">
-                <div className="w-10 h-10 bg-[#1e293b] rounded-xl flex items-center justify-center shadow-sm">
-                  <span className="text-white font-bold text-base">B</span>
-                </div>
+              <div className="w-14 h-14 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <img
+                  src="/uploads/log-icon.jpeg"
+                  alt="Bilscore"
+                  className="h-10 w-10 object-cover rounded-lg"
+                />
+              </div>
                 <span className="text-2xl font-bold text-[#1e293b]">bilscore</span>
               </div>
-              <p className="text-center text-sm text-gray-500">
-                {activeTab === "signin" ? "Welcome back" : "Create your account"}
-              </p>
+          
             </div>
 
             {/* Form Card */}
