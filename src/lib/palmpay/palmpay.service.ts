@@ -15,8 +15,13 @@ import {
   RefundStatusResponse,
   PalmPayWebhookPayload,
   ApiResponse,
-  VirtualAccountStatus,
 } from './types';
+
+// ✅ Global state for persistence across hot reloads
+const globalForPalmPay = global as unknown as {
+  palmPayServiceInstance: PalmPayService | null;
+  palmPayMode: 'simulation' | 'sandbox' | 'production';
+};
 
 class PalmPayService {
   private config: PalmPayConfig;
@@ -27,9 +32,15 @@ class PalmPayService {
     this.config = config;
     this.simulationMode = simulationMode;
     
-    // Initialize simulation data
     if (this.simulationMode) {
       this.initSimulationData();
+      console.log('🔮 [PalmPay] Running in SIMULATION mode');
+    } else {
+      console.log('✅ [PalmPay] Running in SANDBOX/PRODUCTION mode');
+      console.log(`  - Base URL: ${this.config.baseUrl}`);
+      console.log(`  - App ID: ${this.config.authorization}`);
+      console.log(`  - Merchant ID: ${this.config.merchantId}`);
+      console.log(`  - Country: ${this.config.countryCode}`);
     }
   }
 
@@ -37,6 +48,28 @@ class PalmPayService {
     this.simulationData.set('virtualAccounts', new Map());
     this.simulationData.set('orders', new Map());
     this.simulationData.set('refunds', new Map());
+  }
+
+  /**
+   * Get private key in PEM format
+   */
+  private getPrivateKeyPEM(): string {
+    let privateKey = this.config.privateKey;
+    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
+      privateKey = `-----BEGIN PRIVATE KEY-----\n${privateKey}\n-----END PRIVATE KEY-----`;
+    }
+    return privateKey;
+  }
+
+  /**
+   * Get public key in PEM format
+   */
+  private getPublicKeyPEM(): string {
+    let publicKey = this.config.publicKey;
+    if (!publicKey.includes('BEGIN PUBLIC KEY')) {
+      publicKey = `-----BEGIN PUBLIC KEY-----\n${publicKey}\n-----END PUBLIC KEY-----`;
+    }
+    return publicKey;
   }
 
   /**
@@ -48,25 +81,32 @@ class PalmPayService {
     data: Record<string, any> = {},
     customHeaders: Record<string, string> = {}
   ): Promise<ApiResponse<T>> {
-    // ✅ Check if we have the Bearer token
-    if (!this.simulationMode && !this.config.authorization) {
-      console.error('❌ PalmPay Bearer token not configured!');
+    if (this.simulationMode) {
+      return this.simulateRequest<T>(endpoint, method, data);
+    }
+
+    if (!this.config.authorization) {
+      console.error('❌ PalmPay App ID not configured!');
       return {
         respCode: '99999999',
-        respMsg: 'PalmPay Bearer token not configured. Please set PALMPAY_AUTHORIZATION environment variable.',
+        respMsg: 'PalmPay App ID not configured',
         status: false,
       };
     }
 
-    if (this.simulationMode) {
-      return this.simulateRequest<T>(endpoint, method, data);
+    if (!this.config.merchantId) {
+      console.error('❌ PalmPay Merchant ID not configured!');
+      return {
+        respCode: '99999999',
+        respMsg: 'PalmPay Merchant ID not configured',
+        status: false,
+      };
     }
 
     const requestTime = Date.now();
     const nonceStr = generateNonce();
     const version = 'V2.0';
 
-    // Prepare request data
     const requestData = {
       ...data,
       requestTime,
@@ -74,28 +114,22 @@ class PalmPayService {
       version,
     };
 
-    // Generate signature
-    const signature = generateSignature(
-      requestData,
-      this.config.privateKey,
-      nonceStr,
-      requestTime,
-      version
-    );
+    const privateKeyPEM = this.getPrivateKeyPEM();
+    const signature = generateSignature(requestData, privateKeyPEM);
 
     const url = `${this.config.baseUrl}${endpoint}`;
     
     const headers: HeadersInit = {
-      // ✅ Bearer token authorization
       'Authorization': `Bearer ${this.config.authorization}`,
-      'countryCode': this.config.countryCode,
+      'CountryCode': this.config.countryCode,
       'Signature': signature,
       'Content-Type': 'application/json;charset=UTF-8',
       ...customHeaders,
     };
 
     console.log(`📤 [PalmPay API] ${method} ${endpoint}`);
-    console.log(`📤 [PalmPay API] Bearer token: ${this.config.authorization.substring(0, 10)}...`);
+    console.log(`📤 [PalmPay API] App ID: ${this.config.authorization}`);
+    console.log(`📤 [PalmPay API] Merchant ID: ${this.config.merchantId}`);
 
     try {
       const response = await fetch(url, {
@@ -108,6 +142,11 @@ class PalmPayService {
       
       console.log(`📥 [PalmPay API] Response status: ${response.status}`);
       console.log(`📥 [PalmPay API] Response code: ${result.respCode}`);
+      console.log(`📥 [PalmPay API] Response message: ${result.respMsg}`);
+      
+      if (result.respCode !== '00000000') {
+        console.error(`❌ PalmPay API error: ${result.respMsg}`);
+      }
       
       return result as ApiResponse<T>;
     } catch (error: any) {
@@ -121,17 +160,14 @@ class PalmPayService {
   }
 
   /**
-   * Simulate API requests
+   * Simulate API requests for testing
    */
   private async simulateRequest<T>(
     endpoint: string,
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     data: Record<string, any>
   ): Promise<ApiResponse<T>> {
-    console.log(`🔮 [SIMULATION] ${method} ${endpoint}`, {
-      ...data,
-      licenseNumber: data.licenseNumber ? '***REDACTED***' : undefined,
-    });
+    console.log(`🔮 [SIMULATION] ${method} ${endpoint}`);
 
     await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
 
@@ -187,7 +223,7 @@ class PalmPayService {
     const accountNo = `666${Math.floor(1000000 + Math.random() * 9000000)}`;
     
     const account: CreateVirtualAccountResponse = {
-      virtualAccountName: `${data.virtualAccountName}(Account Suffix of Institution)`,
+      virtualAccountName: `${data.virtualAccountName}(Account Suffix)`,
       virtualAccountNo: accountNo,
       status: 'Enabled',
       identityType: data.identityType,
@@ -328,9 +364,6 @@ class PalmPayService {
 
   // ============ Public API Methods ============
 
-  /**
-   * Create a virtual account
-   */
   async createVirtualAccount(
     request: CreateVirtualAccountRequest
   ): Promise<ApiResponse<CreateVirtualAccountResponse>> {
@@ -341,9 +374,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Update virtual account status
-   */
   async updateVirtualAccount(
     request: UpdateVirtualAccountRequest
   ): Promise<ApiResponse<null>> {
@@ -354,9 +384,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Delete virtual account
-   */
   async deleteVirtualAccount(
     virtualAccountNo: string
   ): Promise<ApiResponse<null>> {
@@ -367,9 +394,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Query virtual account
-   */
   async queryVirtualAccount(
     virtualAccountNo: string
   ): Promise<ApiResponse<QueryVirtualAccountResponse>> {
@@ -380,9 +404,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Query pay-in order detail
-   */
   async queryOrderDetail(
     orderNo: string
   ): Promise<ApiResponse<PayInOrderDetailResponse>> {
@@ -393,9 +414,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Query pay-in orders (bulk)
-   */
   async queryOrders(params: {
     accountNo?: string;
     startTime: number;
@@ -410,9 +428,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Create refund
-   */
   async createRefund(
     request: RefundRequest
   ): Promise<ApiResponse<RefundResponse>> {
@@ -423,9 +438,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Query refund status
-   */
   async queryRefundStatus(
     params: { orderId?: string; orderNo?: string }
   ): Promise<ApiResponse<RefundStatusResponse>> {
@@ -436,9 +448,6 @@ class PalmPayService {
     );
   }
 
-  /**
-   * Handle webhook notification
-   */
   async handleWebhook(
     payload: PalmPayWebhookPayload,
     signature: string
@@ -446,38 +455,44 @@ class PalmPayService {
     verified: boolean;
     order: PayInOrderDetailResponse | null;
   }> {
+    const publicKeyPEM = this.getPublicKeyPEM();
     const verified = verifyWebhookSignature(
       payload as any,
       signature,
-      this.config.publicKey
+      publicKeyPEM
     );
 
     if (!verified) {
-      console.error('Webhook signature verification failed');
+      console.error('❌ Webhook signature verification failed');
       return { verified: false, order: null };
     }
+
+    console.log('✅ Webhook signature verified');
 
     if (this.simulationMode) {
       const orders = this.simulationData.get('orders') as Map<string, any>;
       orders.set(payload.orderNo, payload);
     }
 
-    // Update user wallet balance in database
     try {
       const user = await prisma.user.findFirst({
         where: {
-          wallet: { accountNumber: payload.virtualAccountNo }
+          wallet: { 
+            accountNumber: payload.virtualAccountNo 
+          }
         },
         include: { wallet: true },
       });
 
       if (user && user.wallet) {
+        const amount = payload.orderAmount / 100;
+        
         await prisma.$transaction([
           prisma.wallet.update({
             where: { id: user.wallet.id },
             data: {
               walletBalance: {
-                increment: payload.orderAmount / 100,
+                increment: amount,
               },
             },
           }),
@@ -486,13 +501,13 @@ class PalmPayService {
               walletId: user.wallet.id,
               userId: user.id,
               type: 'CREDIT',
-              amount: payload.orderAmount / 100,
+              amount: amount,
               balanceBefore: Number(user.wallet.walletBalance),
-              balanceAfter: Number(user.wallet.walletBalance) + (payload.orderAmount / 100),
+              balanceAfter: Number(user.wallet.walletBalance) + amount,
               reference: payload.orderNo,
               description: `Pay-in from ${payload.payerAccountName} (${payload.payerBankName})`,
               status: 'SUCCESS',
-              category: 'DEPOSIT',
+              category: 'FUNDING',
               metadata: {
                 orderNo: payload.orderNo,
                 payerAccountNo: payload.payerAccountNo,
@@ -504,10 +519,24 @@ class PalmPayService {
           }),
         ]);
 
-        console.log(`💰 Wallet balance updated for user ${user.id}: +₦${payload.orderAmount / 100}`);
+        await prisma.walletFunding.create({
+          data: {
+            walletId: user.wallet.id,
+            amount: amount,
+            reference: payload.orderNo,
+            provider: 'PALMPAY',
+            providerReference: payload.orderNo,
+            status: 'SUCCESS',
+            metadata: payload,
+          },
+        });
+
+        console.log(`💰 Wallet balance updated for user ${user.id}: +₦${amount}`);
+      } else {
+        console.warn(`⚠️ User not found for virtual account: ${payload.virtualAccountNo}`);
       }
     } catch (error) {
-      console.error('Failed to update wallet from webhook:', error);
+      console.error('❌ Failed to update wallet from webhook:', error);
     }
 
     return { verified: true, order: payload };
@@ -521,13 +550,42 @@ class PalmPayService {
   }
 
   /**
-   * Switch to production mode
+   * Get current mode
+   */
+  getMode(): 'simulation' | 'sandbox' | 'production' {
+    if (this.simulationMode) return 'simulation';
+    return this.config.isProduction ? 'production' : 'sandbox';
+  }
+
+  /**
+   * Get current status
+   */
+  getStatus() {
+    return {
+      mode: this.getMode(),
+      isSimulation: this.simulationMode,
+      config: {
+        baseUrl: this.config.baseUrl,
+        merchantId: this.config.merchantId,
+        isProduction: this.config.isProduction || false,
+        countryCode: this.config.countryCode,
+      },
+    };
+  }
+
+  /**
+   * Switch to production/sandbox mode
    */
   switchToProduction(config?: Partial<PalmPayConfig>): void {
     this.simulationMode = false;
     if (config) {
       this.config = { ...this.config, ...config };
     }
+    globalForPalmPay.palmPayMode = this.config.isProduction ? 'production' : 'sandbox';
+    console.log('🔄 [PalmPay] Switched to PRODUCTION/SANDBOX mode');
+    console.log(`  - Base URL: ${this.config.baseUrl}`);
+    console.log(`  - App ID: ${this.config.authorization}`);
+    console.log(`  - Merchant ID: ${this.config.merchantId}`);
   }
 
   /**
@@ -536,67 +594,97 @@ class PalmPayService {
   switchToSimulation(): void {
     this.simulationMode = true;
     this.initSimulationData();
+    globalForPalmPay.palmPayMode = 'simulation';
+    console.log('🔄 [PalmPay] Switched to SIMULATION mode');
   }
 
   /**
-   * Get all simulated orders (for testing)
+   * Switch mode with full control
    */
-  getSimulatedOrders(): any[] {
-    if (!this.simulationMode) return [];
-    const orders = this.simulationData.get('orders') as Map<string, any>;
-    return Array.from(orders.values());
-  }
+  switchMode(mode: 'simulation' | 'sandbox' | 'production'): void {
+    if (mode === 'simulation') {
+      this.switchToSimulation();
+      return;
+    }
 
-  /**
-   * Get all simulated virtual accounts (for testing)
-   */
-  getSimulatedAccounts(): any[] {
-    if (!this.simulationMode) return [];
-    const accounts = this.simulationData.get('virtualAccounts') as Map<string, any>;
-    return Array.from(accounts.values());
-  }
-
-  /**
-   * Simulate a pay-in webhook (for testing)
-   */
-  simulateWebhook(payload: Partial<PalmPayWebhookPayload>): void {
-    if (!this.simulationMode) return;
-
-    const orders = this.simulationData.get('orders') as Map<string, any>;
-    const order = {
-      orderNo: `MI${Date.now()}`,
-      orderStatus: 1,
-      createdTime: Date.now(),
-      updateTime: Date.now(),
-      currency: 'NGN',
-      orderAmount: payload.orderAmount || 10000,
-      reference: payload.reference || 'test',
-      payerAccountNo: payload.payerAccountNo || '1234567890',
-      payerAccountName: payload.payerAccountName || 'Test User',
-      payerBankName: payload.payerBankName || 'PalmPay',
-      virtualAccountNo: payload.virtualAccountNo || '6664564951',
-      virtualAccountName: payload.virtualAccountName || 'Test Account',
-      accountReference: payload.accountReference || `ref_${Date.now()}`,
-      sessionId: payload.sessionId || `session_${Date.now()}`,
-      ...payload,
+    this.simulationMode = false;
+    
+    // Reload config from environment
+    const newConfig: Partial<PalmPayConfig> = {
+      baseUrl: process.env.PALMPAY_BASE_URL || this.config.baseUrl,
+      authorization: process.env.PALMPAY_AUTHORIZATION || this.config.authorization,
+      merchantId: process.env.PALMPAY_MERCHANT_ID || this.config.merchantId,
+      countryCode: process.env.PALMPAY_COUNTRY_CODE || 'NG',
+      publicKey: process.env.PALMPAY_PUBLIC_KEY || this.config.publicKey,
+      privateKey: process.env.PALMPAY_PRIVATE_KEY || this.config.privateKey,
+      isProduction: mode === 'production',
+      webhookUrl: process.env.PALMPAY_WEBHOOK_URL || this.config.webhookUrl,
     };
+    
+    this.config = { ...this.config, ...newConfig };
+    globalForPalmPay.palmPayMode = mode;
+    
+    console.log(`🔄 [PalmPay] Switched to ${mode.toUpperCase()} mode`);
+    console.log(`  - Base URL: ${this.config.baseUrl}`);
+    console.log(`  - App ID: ${this.config.authorization ? '✅' : '❌'}`);
+    console.log(`  - Merchant ID: ${this.config.merchantId ? '✅' : '❌'}`);
+  }
 
-    orders.set(order.orderNo, order);
-    console.log(`📨 [SIMULATION] Webhook triggered for order ${order.orderNo}`);
+  /**
+   * Test connection to PalmPay API
+   */
+  async testConnection(): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+  }> {
+    try {
+      if (this.simulationMode) {
+        return {
+          success: true,
+          message: 'Running in simulation mode',
+          details: { mode: 'simulation' },
+        };
+      }
+
+      const result = await this.queryVirtualAccount('test_connection_123');
+      
+      return {
+        success: result.status,
+        message: result.respMsg || 'Connection test completed',
+        details: {
+          respCode: result.respCode,
+          mode: 'sandbox',
+          appId: this.config.authorization,
+          merchantId: this.config.merchantId,
+        },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Connection test failed',
+        details: { error: error.message },
+      };
+    }
   }
 }
 
-// Singleton instance
-let palmPayServiceInstance: PalmPayService | null = null;
+// ============================================================
+// ✅ SINGLETON EXPORT WITH PERSISTENCE
+// ============================================================
 
 export function getPalmPayService(
   config?: Partial<PalmPayConfig>,
   simulationMode?: boolean
 ): PalmPayService {
-  if (!palmPayServiceInstance) {
+  // ✅ Use persisted mode if available
+  const persistedMode = globalForPalmPay.palmPayMode;
+  
+  if (!globalForPalmPay.palmPayServiceInstance) {
     const defaultConfig: PalmPayConfig = {
       baseUrl: process.env.PALMPAY_BASE_URL || 'https://open-gw-sandbox.palmpay-inc.com',
-      authorization: process.env.PALMPAY_AUTHORIZATION || '', // ✅ Bearer token
+      authorization: process.env.PALMPAY_AUTHORIZATION || '',
+      merchantId: process.env.PALMPAY_MERCHANT_ID || '',
       countryCode: process.env.PALMPAY_COUNTRY_CODE || 'NG',
       publicKey: process.env.PALMPAY_PUBLIC_KEY || '',
       privateKey: process.env.PALMPAY_PRIVATE_KEY || '',
@@ -605,21 +693,38 @@ export function getPalmPayService(
     };
 
     const mergedConfig = { ...defaultConfig, ...config };
-    const isSimulation = simulationMode !== undefined 
-      ? simulationMode 
-      : !mergedConfig.isProduction || !mergedConfig.authorization;
+    
+    const hasAllConfig = mergedConfig.authorization && 
+                         mergedConfig.merchantId && 
+                         mergedConfig.publicKey && 
+                         mergedConfig.privateKey;
 
-    // ✅ Log the Bearer token status
-    if (isSimulation) {
-      console.log('🔮 [PalmPay] Running in SIMULATION mode');
-    } else if (mergedConfig.authorization) {
-      console.log('✅ [PalmPay] Running in PRODUCTION mode with Bearer token');
+    // ✅ Use persisted mode or determine from config
+    let isSimulation: boolean;
+
+    if (persistedMode) {
+      isSimulation = persistedMode === 'simulation';
+    } else if (simulationMode !== undefined) {
+      isSimulation = simulationMode;
     } else {
-      console.warn('⚠️ [PalmPay] PRODUCTION mode but no Bearer token configured! Falling back to SIMULATION.');
-      return new PalmPayService(mergedConfig, true);
+      isSimulation = !mergedConfig.isProduction || !hasAllConfig;
     }
 
-    palmPayServiceInstance = new PalmPayService(mergedConfig, isSimulation);
+    if (isSimulation && !simulationMode && !persistedMode) {
+      console.warn('⚠️ [PalmPay] Missing configuration! Falling back to SIMULATION.');
+      console.warn(`  - App ID: ${mergedConfig.authorization ? '✅' : '❌'}`);
+      console.warn(`  - Merchant ID: ${mergedConfig.merchantId ? '✅' : '❌'}`);
+      console.warn(`  - Public Key: ${mergedConfig.publicKey ? '✅' : '❌'}`);
+      console.warn(`  - Private Key: ${mergedConfig.privateKey ? '✅' : '❌'}`);
+    }
+
+    globalForPalmPay.palmPayServiceInstance = new PalmPayService(mergedConfig, isSimulation);
+    
+    // ✅ Save the initial mode
+    if (!globalForPalmPay.palmPayMode) {
+      globalForPalmPay.palmPayMode = isSimulation ? 'simulation' : 'sandbox';
+    }
   }
-  return palmPayServiceInstance;
+  
+  return globalForPalmPay.palmPayServiceInstance;
 }

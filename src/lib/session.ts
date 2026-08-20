@@ -1,21 +1,24 @@
-// lib/session.ts
+// lib/session.ts - UPDATED
+
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "./auth";
 import { prisma } from "./db";
 
+// ✅ Session user interface - matches the auth user type
 export interface UserSession {
   id: string;
   email: string;
-  name?: string | null;
-  phone: string | null;
-  partyId: number;
-  partyType: string;
-  slug: string;
+  fullName?: string | null;
+  phone: string;
   role: string;
-  individualId?: number | null;
+  hasWallet: boolean;
+  walletBalance?: number;
 }
 
+/**
+ * Get current user from session
+ */
 export const getCurrentUser = async (): Promise<UserSession | null> => {
   const session = await getServerSession(authOptions);
   
@@ -24,39 +27,37 @@ export const getCurrentUser = async (): Promise<UserSession | null> => {
   return {
     id: session.user.id,
     email: session.user.email,
-    name: session.user.name,
+    fullName: session.user.fullName,
     phone: session.user.phone,
-    partyId: session.user.partyId,
-    partyType: session.user.partyType,
-    slug: session.user.slug,
     role: session.user.role,
-    individualId: session.user.individualId,
+    hasWallet: session.user.hasWallet,
   };
 };
 
-export const redirectIfAuthenticated = async (
-  redirectTo: string = "/dashboard"
-): Promise<void> => {
-  const user = await getCurrentUser();
-  
-  if (user) {
-    // User is logged in, determine where to redirect
-    if (user.partyStatus === "PENDING_PROFILE") {
-      redirect(`/${user.slug}/profile/complete`);
-    } else if (user.isSuperAdmin) {
-      redirect("/admin");
-    } else {
-      redirect(`/${user.slug}`);
-    }
-  }
-};
 /**
- * Get current user or redirect to login
- * @param redirectTo - Where to redirect if not authenticated
- * @param requiredRoles - Optional roles that are allowed
+ * Get current user with wallet balance
+ */
+export const getCurrentUserWithBalance = async (): Promise<(UserSession & { walletBalance: number }) | null> => {
+  const user = await getCurrentUser();
+  if (!user) return null;
+
+  // Fetch wallet balance from database
+  const wallet = await prisma.wallet.findUnique({
+    where: { userId: user.id },
+    select: { walletBalance: true },
+  });
+
+  return {
+    ...user,
+    walletBalance: Number(wallet?.walletBalance || 0),
+  };
+};
+
+/**
+ * Require authentication - redirect to login if not authenticated
  */
 export const requireAuth = async (
-  redirectTo: string = "/",
+  redirectTo: string = "/auth/sign-in",
   requiredRoles?: string | string[]
 ): Promise<UserSession> => {
   const user = await getCurrentUser();
@@ -68,7 +69,7 @@ export const requireAuth = async (
   if (requiredRoles) {
     const roles = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
     if (!user.role || !roles.includes(user.role)) {
-      redirect("/unauthorized");
+      redirect("/auth/unauthorized");
     }
   }
 
@@ -76,7 +77,20 @@ export const requireAuth = async (
 };
 
 /**
- * Check if user has specific permission
+ * Redirect to dashboard if already authenticated
+ */
+export const redirectIfAuthenticated = async (
+  redirectTo: string = "/dashboard"
+): Promise<void> => {
+  const user = await getCurrentUser();
+  
+  if (user) {
+    redirect(redirectTo);
+  }
+};
+
+/**
+ * Check if user has specific role
  */
 export const hasRole = (user: UserSession | null, allowedRoles: string[]): boolean => {
   if (!user) return false;
@@ -84,18 +98,46 @@ export const hasRole = (user: UserSession | null, allowedRoles: string[]): boole
 };
 
 /**
- * Get party type specific data
+ * Check if user is admin
  */
-export const getPartyDetails = async (partyId: number) => {
-  const party = await prisma.parties.findUnique({
-    where: { id: partyId },
-    include: {
-      individual: true,
-      organization: true,
-      community: true,
-      contacts: true,
-      addresses: true,
-    },
-  });
-  return party;
+export const isAdmin = (user: UserSession | null): boolean => {
+  if (!user) return false;
+  return user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+};
+
+/**
+ * Check if user is agent or retailer
+ */
+export const isAgent = (user: UserSession | null): boolean => {
+  if (!user) return false;
+  return user.role === "AGENT" || user.role === "RETAILER";
+};
+
+/**
+ * Check if user is developer
+ */
+export const isDeveloper = (user: UserSession | null): boolean => {
+  if (!user) return false;
+  return user.role === "DEVELOPER";
+};
+
+/**
+ * Get user's full display name
+ */
+export const getUserDisplayName = (user: UserSession | null): string => {
+  if (!user) return "User";
+  return user.fullName || user.email || user.phone || "User";
+};
+
+/**
+ * Get user's initials
+ */
+export const getUserInitials = (user: UserSession | null): string => {
+  if (!user) return "U";
+  const name = user.fullName || user.email || user.phone || "User";
+  const parts = name.trim().split(" ");
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return name.substring(0, 2).toUpperCase();
 };

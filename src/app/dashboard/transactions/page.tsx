@@ -1,18 +1,17 @@
-// app/dashboard/transactions/page.tsx
+// app/dashboard/transactions/page.tsx - COMPLETE UPDATED
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { TransactionsClient } from "./page.client";
 import { TransactionStatus, VtuType } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
 
 export default async function TransactionsPage() {
   console.log("📊 [TRANSACTIONS] Starting transactions page load...");
   
-  // Get authenticated user from session
   const sessionUser = await requireAuth("/auth/sign-in");
   console.log(`👤 [TRANSACTIONS] User authenticated: ${sessionUser.id}`);
 
-  // Fetch user data
   const user = await prisma.user.findUnique({
     where: { id: sessionUser.id },
     select: {
@@ -35,12 +34,11 @@ export default async function TransactionsPage() {
     return null;
   }
 
-  // Fetch transactions with pagination
   const page = 1;
   const pageSize = 20;
   const skip = (page - 1) * pageSize;
 
-  const [transactions, totalTransactions, stats] = await Promise.all([
+  const [transactions, totalTransactions, stats, statusCounts, typeCounts] = await Promise.all([
     prisma.vtuTransaction.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -51,6 +49,15 @@ export default async function TransactionsPage() {
           select: {
             fullName: true,
             phone: true,
+          },
+        },
+        walletTransaction: {
+          select: {
+            balanceBefore: true,
+            balanceAfter: true,
+            reference: true,
+            description: true,
+            id: true,
           },
         },
       },
@@ -71,47 +78,86 @@ export default async function TransactionsPage() {
         id: true,
       },
     }),
+    prisma.vtuTransaction.groupBy({
+      by: ['status'],
+      where: { userId: user.id },
+      _count: {
+        status: true,
+      },
+    }),
+    prisma.vtuTransaction.groupBy({
+      by: ['transactionType'],
+      where: { userId: user.id },
+      _count: {
+        transactionType: true,
+      },
+    }),
   ]);
 
-  // Get transaction counts by status
-  const statusCounts = await prisma.vtuTransaction.groupBy({
-    by: ['status'],
-    where: { userId: user.id },
-    _count: {
-      status: true,
-    },
+  // ✅ Helper function to safely convert Decimal to number
+  const toNumber = (value: any): number | null => {
+    if (value === null || value === undefined) return null;
+    
+    if (value instanceof Decimal) {
+      return value.toNumber();
+    }
+    
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const num = parseFloat(value);
+      return isNaN(num) ? null : num;
+    }
+    
+    const num = Number(value);
+    return isNaN(num) ? null : num;
+  };
+
+  // ✅ Format transactions with all useful fields
+  const formattedTransactions = transactions.map((tx) => {
+    const hasWalletTx = tx.walletTransaction !== null;
+    
+    let balanceBefore: number | null = null;
+    let balanceAfter: number | null = null;
+    
+    if (hasWalletTx) {
+      const wt = tx.walletTransaction!;
+      balanceBefore = toNumber(wt.balanceBefore);
+      balanceAfter = toNumber(wt.balanceAfter);
+    }
+    
+    return {
+      id: tx.id,
+      type: tx.transactionType,
+      product: tx.product,
+      amount: toNumber(tx.amount) || 0,
+      totalDebited: toNumber(tx.totalDebited) || 0,
+      status: tx.status,
+      phoneNumber: tx.phoneNumber,
+      network: tx.network,
+      networkPlan: tx.networkPlan,
+      meterNumber: tx.meterNumber,
+      meterType: tx.meterType,
+      token: tx.token,
+      vendor: tx.vendor,
+      vendorReference: tx.vendorReference,
+      vendorCommission: toNumber(tx.vendorCommission),
+      scheduledFor: tx.scheduledFor?.toISOString() || null,
+      deliveredAt: tx.deliveredAt?.toISOString() || null,
+      createdAt: tx.createdAt.toISOString(),
+      updatedAt: tx.updatedAt.toISOString(),
+      user: tx.user,
+      // ✅ Balance fields (hidden from list, shown in expanded view)
+      balanceBefore: balanceBefore,
+      balanceAfter: balanceAfter,
+      walletReference: tx.walletTransaction?.reference || null,
+      walletDescription: tx.walletTransaction?.description || null,
+      hasWalletTransaction: hasWalletTx,
+    };
   });
 
-  // Get transaction counts by type
-  const typeCounts = await prisma.vtuTransaction.groupBy({
-    by: ['transactionType'],
-    where: { userId: user.id },
-    _count: {
-      transactionType: true,
-    },
-  });
-
-  // Format transactions for the client
-  const formattedTransactions = transactions.map((tx) => ({
-    id: tx.id,
-    type: tx.transactionType,
-    product: tx.product,
-    amount: Number(tx.amount),
-    totalDebited: Number(tx.totalDebited),
-    status: tx.status,
-    phoneNumber: tx.phoneNumber,
-    network: tx.network,
-    vendorReference: tx.vendorReference,
-    createdAt: tx.createdAt.toISOString(),
-    updatedAt: tx.updatedAt.toISOString(),
-    deliveredAt: tx.deliveredAt?.toISOString(),
-    user: tx.user,
-  }));
-
-  // Prepare stats
   const transactionStats = {
     total: totalTransactions,
-    totalAmount: Number(stats._sum.totalDebited || 0),
+    totalAmount: toNumber(stats._sum.totalDebited) || 0,
     totalTransactions: Number(stats._count.id || 0),
     successCount: statusCounts.find((s) => s.status === TransactionStatus.SUCCESS)?._count.status || 0,
     pendingCount: statusCounts.find((s) => s.status === TransactionStatus.PENDING)?._count.status || 0,
@@ -119,7 +165,6 @@ export default async function TransactionsPage() {
     processingCount: statusCounts.find((s) => s.status === TransactionStatus.PROCESSING)?._count.status || 0,
   };
 
-  // Prepare type breakdown
   const typeBreakdown = typeCounts.map((t) => ({
     type: t.transactionType,
     count: t._count.transactionType,
@@ -132,11 +177,10 @@ export default async function TransactionsPage() {
     phone: user.phone,
     role: user.role,
     hasWallet: user.hasWallet,
-    walletBalance: Number(user.wallet?.walletBalance || 0),
+    walletBalance: toNumber(user.wallet?.walletBalance) || 0,
   };
 
   console.log(`📊 [TRANSACTIONS] Found ${transactions.length} transactions, total: ${totalTransactions}`);
-  console.log(`📊 [TRANSACTIONS] Stats:`, transactionStats);
 
   return (
     <TransactionsClient

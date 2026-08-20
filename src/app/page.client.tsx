@@ -15,20 +15,13 @@ import {
   Loader2,
   Check,
   Gift,
-  Copy,
-  Share2,
-  Users,
-  TrendingUp,
-  Wallet,
-  Sparkles,
-  ArrowRight,
-  Apple,
+  Calendar,
   User,
   Key,
 } from "lucide-react";
 
 // ============================================
-// GOOGLE & APPLE SOCIAL BUTTONS
+// SOCIAL BUTTONS - REMOVED GOOGLE & APPLE
 // ============================================
 
 function SocialButtons({ 
@@ -40,66 +33,9 @@ function SocialButtons({
   setIsLoading: (loading: boolean) => void;
   setError: (error: string) => void;
 }) {
-  const router = useRouter();
-  const callbackUrl = "/dashboard";
-
-  const handleSocialSignIn = async (provider: string) => {
-    if (isLoading) return;
-    
-    setIsLoading(true);
-    setError("");
-
-    try {
-      localStorage.setItem("auth_redirect", window.location.pathname);
-      
-      await signIn(provider, {
-        callbackUrl,
-        redirect: true,
-      });
-    } catch (error) {
-      console.error(`${provider} sign in error:`, error);
-      setError(`Failed to sign in with ${provider}. Please try again.`);
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <button
-        onClick={() => handleSocialSignIn("google")}
-        disabled={isLoading}
-        className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 hover:border-[#1e293b] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[#1e293b]"
-        type="button"
-      >
-        <svg className="h-5 w-5" viewBox="0 0 24 24">
-          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-        </svg>
-        Continue with Google
-      </button>
-
-      <button
-        onClick={() => handleSocialSignIn("apple")}
-        disabled={isLoading}
-        className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-black text-white rounded-xl hover:bg-[#1a1a1a] hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-        type="button"
-      >
-        <Apple className="h-5 w-5" />
-        Continue with Apple
-      </button>
-
-      <div className="relative my-4">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-gray-200" />
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="px-3 bg-white text-gray-400">or continue with email</span>
-        </div>
-      </div>
-    </div>
-  );
+  // Social sign-in is removed - this component is now empty
+  // We keep it as a placeholder but it renders nothing
+  return null;
 }
 
 type ForgotPasswordStep = "email" | "reset" | null;
@@ -861,7 +797,7 @@ export default function AuthPage() {
       {/* Main Auth Page */}
       <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-white lg:flex">
         {/* LEFT SIDE - Brand Story */}
-        <div className="hidden lg:flex lg:w-1/2 lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex-col justify-start px-16 py-12 relative overflow-y-auto">
+        <div className="hidden lg:flex lg:w-1/2 lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex-col justify-start px-16 pt-20 pb-12 relative overflow-y-auto">
           <div className="absolute top-0 right-0 w-96 h-96 bg-[#1e293b]/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
           <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#1e293b]/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/3" />
 
@@ -874,7 +810,7 @@ export default function AuthPage() {
 
           <div className="relative z-10 max-w-lg">
             {/* Logo */}
-            <Link href="/" className="inline-flex items-center mb-10 group">
+            <Link href="/" className="inline-flex items-center mb-12 group">
               <div className="w-14 h-14 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
                 <img
                   src="/uploads/log-icon.jpeg"
@@ -919,11 +855,11 @@ export default function AuthPage() {
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white border border-gray-100 shadow-sm">
                 <div className="w-10 h-10 rounded-lg bg-[#1e293b]/5 flex items-center justify-center flex-shrink-0">
-                  <Phone className="h-5 w-5 text-[#1e293b]" />
+                  <Calendar className="h-5 w-5 text-[#1e293b]" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[#1e293b]">USSD *123#</p>
-                  <p className="text-xs text-gray-400">No internet needed</p>
+                  <p className="text-sm font-semibold text-[#1e293b]">Schedule Bills</p>
+                  <p className="text-xs text-gray-400">Schedule and pay when you want</p>
                 </div>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white border border-gray-100 shadow-sm">
@@ -949,45 +885,13 @@ export default function AuthPage() {
                 </div>
               </div>
             </div>
-
-            {/* Core Differentiators */}
-            <div className="flex flex-wrap gap-3 pt-6 border-t border-gray-100">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Schedule Bills
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Agent Wallet
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                WhatsApp Bot
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
-                <Gift className="h-3.5 w-3.5" />
-                Offline USSD
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e293b]/5 rounded-full text-xs font-medium text-[#1e293b]">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Starter Credit
-              </span>
-            </div>
           </div>
         </div>
 
         {/* RIGHT SIDE - Auth Form */}
         <div className="w-full lg:w-1/2 flex items-center justify-center p-4 md:p-8 min-h-screen overflow-y-auto">
           <div className="w-full max-w-sm py-4">
-            {/* ✅ UPDATED: Mobile Logo - Clean Version (No Image) */}
+            {/* Mobile Logo */}
             <div className="lg:hidden mb-6">
               <div className="flex items-center justify-center gap-2 mb-2">
                 <div className="w-10 h-10 bg-[#1e293b] rounded-xl flex items-center justify-center shadow-sm">
@@ -1026,7 +930,7 @@ export default function AuthPage() {
                 </button>
               </div>
 
-              {/* Social Buttons */}
+              {/* Social Buttons - Now renders nothing */}
               <SocialButtons
                 isLoading={loading || signUpLoading || socialLoading}
                 setIsLoading={setSocialLoading}
@@ -1080,325 +984,341 @@ export default function AuthPage() {
               )}
 
               {/* ========================================== */}
-              {/* SIGN IN FORM */}
+              {/* SIGN IN FORM - With welcome message */}
               {/* ========================================== */}
               {activeTab === "signin" && (
-                <form onSubmit={handleSignIn} className="space-y-5">
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
-                      Email / Username / Phone
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <>
+                  {/* Welcome Message */}
+                  <div className="mb-6 text-center">
+                    <h2 className="text-xl font-bold text-[#1e293b]">Welcome Back </h2>
+                    <p className="text-sm text-gray-500 mt-0.5">Sign in to continue managing your payments</p>
+                  </div>
+
+                  <form onSubmit={handleSignIn} className="space-y-5">
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
+                        Email / Username / Phone
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={identifier}
+                          onChange={(e) => setIdentifier(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
+                          placeholder="Email, username, or phone number"
+                          required
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Enter your email address, username, or phone number
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-sm font-medium text-[#1e293b]">Password</label>
+                        <button
+                          type="button"
+                          onClick={() => setForgotStep("email")}
+                          className="text-xs font-medium text-[#1e293b] hover:text-[#0f172a] transition-colors"
+                        >
+                          Forgot password?
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
+                          placeholder="••••••••"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2"
+                        >
+                          {showPassword ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center">
                       <input
-                        type="text"
-                        value={identifier}
-                        onChange={(e) => setIdentifier(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="Email, username, or phone number"
-                        required
+                        type="checkbox"
+                        id="remember"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="h-4 w-4 text-[#1e293b] focus:ring-[#1e293b] border-gray-300 rounded"
                       />
+                      <label htmlFor="remember" className="ml-2 text-sm text-gray-500">Remember me</label>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">
-                      Enter your email address, username, or phone number
-                    </p>
-                  </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-sm font-medium text-[#1e293b]">Password</label>
-                      <button
-                        type="button"
-                        onClick={() => setForgotStep("email")}
-                        className="text-xs font-medium text-[#1e293b] hover:text-[#0f172a] transition-colors"
-                      >
-                        Forgot password?
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type={showPassword ? "text" : "password"}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="••••••••"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
-                      >
-                        {showPassword ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="remember"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="h-4 w-4 text-[#1e293b] focus:ring-[#1e293b] border-gray-300 rounded"
-                    />
-                    <label htmlFor="remember" className="ml-2 text-sm text-gray-500">Remember me</label>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading || socialLoading}
-                    className="w-full py-3 px-4 bg-[#1e293b] text-white rounded-xl hover:bg-[#0f172a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                  >
-                    {loading ? <Loader2 className="animate-spin h-5 w-5 mx-auto" /> : "Sign In"}
-                  </button>
-
-                  <div className="text-center">
-                    <span className="text-sm text-gray-400">Don't have an account? </span>
                     <button
-                      type="button"
-                      onClick={() => setActiveTab("signup")}
-                      className="text-sm font-medium text-[#1e293b] hover:underline"
+                      type="submit"
+                      disabled={loading || socialLoading}
+                      className="w-full py-3 px-4 bg-[#1e293b] text-white rounded-xl hover:bg-[#0f172a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                     >
-                      Sign up free
+                      {loading ? <Loader2 className="animate-spin h-5 w-5 mx-auto" /> : "Sign In"}
                     </button>
-                  </div>
-                </form>
+
+                    <div className="text-center">
+                      <span className="text-sm text-gray-400">Don't have an account? </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("signup")}
+                        className="text-sm font-medium text-[#1e293b] hover:underline"
+                      >
+                        Sign up free
+                      </button>
+                    </div>
+                  </form>
+                </>
               )}
 
               {/* ========================================== */}
-              {/* SIGN UP FORM */}
+              {/* SIGN UP FORM - With welcome message */}
               {/* ========================================== */}
               {activeTab === "signup" && (
-                <form onSubmit={handleSignUp} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
-                      Username <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <>
+                  {/* Welcome Message */}
+                  <div className="mb-5 text-center">
+                    <h2 className="text-xl font-bold text-[#1e293b]">Create Your Account </h2>
+                    <p className="text-sm text-gray-500 mt-0.5">Start managing your bills, airtime, and data in minutes</p>
+                  </div>
+
+                  <form onSubmit={handleSignUp} className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Username <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="text"
+                          name="username"
+                          value={signUpData.username}
+                          onChange={handleSignUpChange}
+                          required
+                          className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                          placeholder="johndoe"
+                          minLength={3}
+                          maxLength={30}
+                          pattern="[a-zA-Z0-9_.-]{3,30}"
+                        />
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        Letters, numbers, underscore, dot, hyphen (3-30 chars)
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Full Name</label>
                       <input
                         type="text"
-                        name="username"
-                        value={signUpData.username}
+                        name="fullName"
+                        value={signUpData.fullName}
                         onChange={handleSignUpChange}
                         required
-                        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="johndoe"
-                        minLength={3}
-                        maxLength={30}
-                        pattern="[a-zA-Z0-9_.-]{3,30}"
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                        placeholder="John Doe"
                       />
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">
-                      Letters, numbers, underscore, dot, hyphen (3-30 characters)
-                    </p>
-                  </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">Full Name</label>
-                    <input
-                      type="text"
-                      name="fullName"
-                      value={signUpData.fullName}
-                      onChange={handleSignUpChange}
-                      required
-                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                      placeholder="John Doe"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">Email Address</label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type="email"
-                        name="email"
-                        value={signUpData.email}
-                        onChange={handleSignUpChange}
-                        required
-                        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="you@example.com"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">Phone Number</label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type="tel"
-                        name="phone"
-                        value={signUpData.phone}
-                        onChange={handleSignUpChange}
-                        required
-                        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="08012345678"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type={showSignUpPassword ? "text" : "password"}
-                        name="password"
-                        value={signUpData.password}
-                        onChange={handleSignUpChange}
-                        required
-                        className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="••••••••"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignUpPassword(!showSignUpPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
-                      >
-                        {showSignUpPassword ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
-                      </button>
-                    </div>
-                    <PasswordStrengthIndicator password={signUpData.password} />
-                    {passwordErrors.length > 0 && (
-                      <div className="mt-2 p-3 bg-rose-50 rounded-lg">
-                        <p className="text-xs font-medium text-rose-700 mb-1">Password requirements:</p>
-                        <ul className="text-xs text-rose-600 space-y-0.5">
-                          {passwordErrors.map((err, idx) => (
-                            <li key={idx}>• {err}</li>
-                          ))}
-                        </ul>
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Email Address</label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="email"
+                          name="email"
+                          value={signUpData.email}
+                          onChange={handleSignUpChange}
+                          required
+                          className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                          placeholder="you@example.com"
+                        />
                       </div>
-                    )}
-                  </div>
-
-                  {/* Transaction PIN */}
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
-                      Transaction PIN <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type={showSignUpPin ? "text" : "password"}
-                        name="transactionPin"
-                        value={signUpData.transactionPin}
-                        onChange={handleSignUpChange}
-                        required
-                        maxLength={6}
-                        className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50"
-                        placeholder="••••"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignUpPin(!showSignUpPin)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
-                      >
-                        {showSignUpPin ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
-                      </button>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">
-                      4-6 digit numeric PIN for transaction confirmations
-                    </p>
-                    {pinErrors.length > 0 && (
-                      <div className="mt-2 p-3 bg-rose-50 rounded-lg">
-                        <p className="text-xs font-medium text-rose-700 mb-1">PIN requirements:</p>
-                        <ul className="text-xs text-rose-600 space-y-0.5">
-                          {pinErrors.map((err, idx) => (
-                            <li key={idx}>• {err}</li>
-                          ))}
-                        </ul>
+
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Phone Number</label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="tel"
+                          name="phone"
+                          value={signUpData.phone}
+                          onChange={handleSignUpChange}
+                          required
+                          className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                          placeholder="08012345678"
+                        />
                       </div>
-                    )}
-                  </div>
+                    </div>
 
-                  {/* Referral Code Input */}
-                  <div>
-                    <label className="block text-sm font-medium text-[#1e293b] mb-1.5">
-                      Referral Code <span className="text-gray-400 text-xs font-normal">(Optional)</span>
-                    </label>
-                    <div className="relative">
-                      <Gift className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        type="text"
-                        name="referralCode"
-                        value={signUpData.referralCode}
-                        onChange={handleSignUpChange}
-                        className={`w-full pl-10 pr-12 py-3 border rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 uppercase ${
-                          referralValid === true
-                            ? "border-emerald-400 bg-emerald-50/30"
-                            : referralValid === false
-                            ? "border-rose-400 bg-rose-50/30"
-                            : "border-gray-200"
-                        }`}
-                        placeholder="BIL-XXXXXX"
-                        maxLength={10}
-                      />
-                      {referralChecking && (
-                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 animate-spin" />
-                      )}
-                      {referralValid === true && !referralChecking && (
-                        <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-500" />
-                      )}
-                      {referralValid === false && !referralChecking && signUpData.referralCode && (
-                        <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-rose-500" />
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Password</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type={showSignUpPassword ? "text" : "password"}
+                          name="password"
+                          value={signUpData.password}
+                          onChange={handleSignUpChange}
+                          required
+                          className="w-full pl-10 pr-12 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                          placeholder="••••••••"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSignUpPassword(!showSignUpPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2"
+                        >
+                          {showSignUpPassword ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
+                        </button>
+                      </div>
+                      <PasswordStrengthIndicator password={signUpData.password} />
+                      {passwordErrors.length > 0 && (
+                        <div className="mt-1 p-2 bg-rose-50 rounded-lg">
+                          <p className="text-xs font-medium text-rose-700 mb-0.5">Password requirements:</p>
+                          <ul className="text-xs text-rose-600 space-y-0">
+                            {passwordErrors.map((err, idx) => (
+                              <li key={idx}>• {err}</li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
                     </div>
 
-                    {referralValid === true && (
-                      <div className="mt-1.5 p-2 bg-emerald-50 rounded-lg">
-                        <p className="text-xs text-emerald-700 flex items-center gap-1.5">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          ✅ Valid referral code from <span className="font-medium">{referrerName || "a friend"}</span>! You'll both earn <span className="font-bold">₦50</span> bonus.
+                    {/* Transaction PIN */}
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Transaction PIN <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type={showSignUpPin ? "text" : "password"}
+                          name="transactionPin"
+                          value={signUpData.transactionPin}
+                          onChange={handleSignUpChange}
+                          required
+                          maxLength={6}
+                          className="w-full pl-10 pr-12 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 text-sm"
+                          placeholder="••••"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSignUpPin(!showSignUpPin)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2"
+                        >
+                          {showSignUpPin ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" /> : <Eye className="h-5 w-5 text-gray-400 hover:text-[#1e293b]" />}
+                        </button>
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        4-6 digit numeric PIN for transaction confirmations
+                      </p>
+                      {pinErrors.length > 0 && (
+                        <div className="mt-1 p-2 bg-rose-50 rounded-lg">
+                          <p className="text-xs font-medium text-rose-700 mb-0.5">PIN requirements:</p>
+                          <ul className="text-xs text-rose-600 space-y-0">
+                            {pinErrors.map((err, idx) => (
+                              <li key={idx}>• {err}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Referral Code Input */}
+                    <div>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Referral Code <span className="text-gray-400 text-xs font-normal">(Optional)</span>
+                      </label>
+                      <div className="relative">
+                        <Gift className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="text"
+                          name="referralCode"
+                          value={signUpData.referralCode}
+                          onChange={handleSignUpChange}
+                          className={`w-full pl-10 pr-12 py-2.5 border rounded-xl focus:ring-2 focus:ring-[#1e293b] focus:border-transparent transition-all duration-200 bg-white/50 uppercase text-sm ${
+                            referralValid === true
+                              ? "border-emerald-400 bg-emerald-50/30"
+                              : referralValid === false
+                              ? "border-rose-400 bg-rose-50/30"
+                              : "border-gray-200"
+                          }`}
+                          placeholder="BIL-XXXXXX"
+                          maxLength={10}
+                        />
+                        {referralChecking && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 animate-spin" />
+                        )}
+                        {referralValid === true && !referralChecking && (
+                          <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-500" />
+                        )}
+                        {referralValid === false && !referralChecking && signUpData.referralCode && (
+                          <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-rose-500" />
+                        )}
+                      </div>
+
+                      {referralValid === true && (
+                        <div className="mt-1 p-1.5 bg-emerald-50 rounded-lg">
+                          <p className="text-xs text-emerald-700 flex items-center gap-1.5">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                             Valid referral code from <span className="font-medium">{referrerName || "a friend"}</span>! You'll both earn <span className="font-bold">₦50</span> bonus.
+                          </p>
+                        </div>
+                      )}
+                      {referralValid === false && signUpData.referralCode && (
+                        <p className="mt-0.5 text-xs text-rose-600 flex items-center gap-1.5">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                           Invalid referral code. Please check and try again.
                         </p>
-                      </div>
-                    )}
-                    {referralValid === false && signUpData.referralCode && (
-                      <p className="mt-1 text-xs text-rose-600 flex items-center gap-1.5">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                        ❌ Invalid referral code. Please check and try again.
-                      </p>
-                    )}
-                    {!signUpData.referralCode && !isFromReferral && (
-                      <p className="mt-1 text-xs text-gray-400 flex items-center gap-1.5">
-                        <Gift className="h-3.5 w-3.5" />
-                        Got a referral code? Enter it here to earn rewards!
-                      </p>
-                    )}
-                    {!signUpData.referralCode && isFromReferral && (
-                      <p className="mt-1 text-xs text-emerald-600 flex items-center gap-1.5">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Referral code from your invite has been auto-filled! 🎉
-                      </p>
-                    )}
-                  </div>
+                      )}
+                      {!signUpData.referralCode && !isFromReferral && (
+                        <p className="mt-0.5 text-xs text-gray-400 flex items-center gap-1.5">
+                          <Gift className="h-3.5 w-3.5" />
+                          Got a referral code? Enter it here to earn rewards!
+                        </p>
+                      )}
+                      {!signUpData.referralCode && isFromReferral && (
+                        <p className="mt-0.5 text-xs text-emerald-600 flex items-center gap-1.5">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Referral code from your invite has been auto-filled! 🎉
+                        </p>
+                      )}
+                    </div>
 
-                  <button
-                    type="submit"
-                    disabled={signUpLoading || socialLoading}
-                    className="w-full py-3 px-4 bg-[#1e293b] text-white rounded-xl hover:bg-[#0f172a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                  >
-                    {signUpLoading ? <Loader2 className="animate-spin h-5 w-5 mx-auto" /> : "Create Account"}
-                  </button>
-
-                  <p className="text-center text-xs text-gray-400">
-                    By registering, you agree to our Terms of Service and Privacy Policy.
-                  </p>
-
-                  <div className="text-center">
-                    <span className="text-sm text-gray-400">Already have an account? </span>
                     <button
-                      type="button"
-                      onClick={() => setActiveTab("signin")}
-                      className="text-sm font-medium text-[#1e293b] hover:underline"
+                      type="submit"
+                      disabled={signUpLoading || socialLoading}
+                      className="w-full py-2.5 px-4 bg-[#1e293b] text-white rounded-xl hover:bg-[#0f172a] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                     >
-                      Sign in
+                      {signUpLoading ? <Loader2 className="animate-spin h-5 w-5 mx-auto" /> : "Create Account"}
                     </button>
-                  </div>
-                </form>
+
+                    <p className="text-center text-xs text-gray-400">
+                      By registering, you agree to our Terms of Service and Privacy Policy.
+                    </p>
+
+                    <div className="text-center">
+                      <span className="text-sm text-gray-400">Already have an account? </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("signin")}
+                        className="text-sm font-medium text-[#1e293b] hover:underline"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  </form>
+                </>
               )}
             </div>
 

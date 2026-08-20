@@ -40,6 +40,8 @@ import {
   Lightbulb,
   Wifi,
   Loader2,
+  Lock,
+  Fingerprint,
 } from "lucide-react";
 
 // Types
@@ -86,6 +88,7 @@ interface SettingsClientProps {
     walletBalance: number;
     isDeveloper: boolean;
     referralCode: string;
+    hasPin: boolean;
   };
   developerData: {
     accountType: string;
@@ -111,6 +114,485 @@ const formatCurrency = (amount: number) => {
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleDateString("en-NG", { month: "short", day: "numeric", year: "numeric" });
+};
+
+// ============================================================
+// CHANGE PASSWORD MODAL
+// ============================================================
+
+const ChangePasswordModal = ({
+  isOpen,
+  onClose,
+  onChangePassword,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+}) => {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState<"input" | "success">("input");
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async () => {
+    setError("");
+
+    if (!currentPassword) {
+      setError("Please enter your current password");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError("New password must be at least 6 characters");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+      setStep("success");
+      setTimeout(() => {
+        onClose();
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setStep("input");
+        setError("");
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Failed to change password");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300">
+        <button
+          onClick={() => {
+            onClose();
+            setCurrentPassword("");
+            setNewPassword("");
+            setConfirmPassword("");
+            setStep("input");
+            setError("");
+          }}
+          className="absolute right-4 top-4 rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+              step === "success" ? "bg-green-100" : "bg-[#040724]/10"
+            }`}>
+              {step === "success" ? (
+                <Check className="h-6 w-6 text-green-600" />
+              ) : (
+                <Shield className="h-6 w-6 text-[#040724]" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                {step === "success" ? "Password Changed!" : "Change Password"}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {step === "success" 
+                  ? "Your password has been updated successfully" 
+                  : "Enter your current password and choose a new one"}
+              </p>
+            </div>
+          </div>
+
+          {step === "success" ? (
+            <div className="text-center py-8">
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+                <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
+              </div>
+              <p className="text-gray-500 dark:text-gray-400">
+                Your password has been successfully changed.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Current Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? "text" : "password"}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter your current password"
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showCurrentPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  New Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password (min 6 characters)"
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showNewPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-gray-400">Must be at least 6 characters</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Confirm New Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                  <span className="text-sm">{error}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleSubmit}
+                disabled={
+                  isLoading ||
+                  !currentPassword ||
+                  !newPassword ||
+                  !confirmPassword ||
+                  newPassword.length < 6
+                }
+                className="w-full rounded-xl bg-[#040724] py-3 text-white hover:bg-[#1e2b5a] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Changing Password...
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-5 w-5" />
+                    Change Password
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// PIN MODAL
+// ============================================================
+
+const PinModal = ({
+  isOpen,
+  onClose,
+  onSetPin,
+  mode = "create",
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSetPin: (pin: string, currentPin?: string) => Promise<void>;
+  mode?: "create" | "change" | "verify";
+}) => {
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [currentPin, setCurrentPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
+  const [showConfirmPin, setShowConfirmPin] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState<"input" | "confirm" | "success">("input");
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async () => {
+    setError("");
+
+    if (mode === "change" && !currentPin) {
+      setError("Please enter your current PIN");
+      return;
+    }
+
+    if (pin.length < 4 || pin.length > 6) {
+      setError("PIN must be 4-6 digits");
+      return;
+    }
+
+    if (!/^\d+$/.test(pin)) {
+      setError("PIN must contain only numbers");
+      return;
+    }
+
+    if (mode === "create" || mode === "change") {
+      if (pin !== confirmPin) {
+        setError("PINs do not match");
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    try {
+      if (mode === "change") {
+        await onSetPin(pin, currentPin);
+      } else {
+        await onSetPin(pin);
+      }
+      setStep("success");
+      setTimeout(() => {
+        onClose();
+        setPin("");
+        setConfirmPin("");
+        setCurrentPin("");
+        setStep("input");
+        setError("");
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Failed to set PIN");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getTitle = () => {
+    if (step === "success") return "PIN Set Successfully";
+    switch (mode) {
+      case "create": return "Set Transaction PIN";
+      case "change": return "Change Transaction PIN";
+      case "verify": return "Verify Transaction PIN";
+      default: return "Transaction PIN";
+    }
+  };
+
+  const getDescription = () => {
+    if (step === "success") return "Your transaction PIN has been set successfully";
+    switch (mode) {
+      case "create": return "Set a 4-6 digit PIN to secure your transactions";
+      case "change": return "Enter your current and new 4-6 digit PIN";
+      case "verify": return "Enter your PIN to verify your identity";
+      default: return "";
+    }
+  };
+
+  const getButtonText = () => {
+    if (isLoading) return "Processing...";
+    if (step === "success") return "✓ Done";
+    switch (mode) {
+      case "create": return "Set PIN";
+      case "change": return "Change PIN";
+      case "verify": return "Verify PIN";
+      default: return "Submit";
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300">
+        <button
+          onClick={() => {
+            onClose();
+            setPin("");
+            setConfirmPin("");
+            setCurrentPin("");
+            setStep("input");
+            setError("");
+          }}
+          className="absolute right-4 top-4 rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+              step === "success" ? "bg-green-100" : "bg-[#040724]/10"
+            }`}>
+              {step === "success" ? (
+                <Check className="h-6 w-6 text-green-600" />
+              ) : (
+                <Lock className="h-6 w-6 text-[#040724]" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">{getTitle()}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{getDescription()}</p>
+            </div>
+          </div>
+
+          {step === "success" ? (
+            <div className="text-center py-8">
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+                <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
+              </div>
+              <p className="text-gray-500 dark:text-gray-400">
+                Your transaction PIN has been successfully set.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {mode === "change" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Current PIN <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={currentPin}
+                      onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Enter current PIN"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                      maxLength={6}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {mode === "change" ? "New PIN" : "Transaction PIN"} <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter PIN (4-6 digits)"
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                    maxLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-gray-400">Must be 4-6 digits</p>
+              </div>
+
+              {(mode === "create" || mode === "change") && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Confirm PIN <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPin ? "text" : "password"}
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Confirm PIN"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                      maxLength={6}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPin(!showConfirmPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showConfirmPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                  <span className="text-sm">{error}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleSubmit}
+                disabled={
+                  isLoading ||
+                  (mode === "change" && !currentPin) ||
+                  !pin ||
+                  ((mode === "create" || mode === "change") && !confirmPin) ||
+                  pin.length < 4 ||
+                  ((mode === "create" || mode === "change") && confirmPin.length < 4)
+                }
+                className="w-full rounded-xl bg-[#040724] py-3 text-white hover:bg-[#1e2b5a] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-5 w-5" />
+                    {getButtonText()}
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // ============================================================
@@ -716,6 +1198,14 @@ export function SettingsClient({
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [notifyOnNewDevice, setNotifyOnNewDevice] = useState(true);
   const [notifyOnNewLocation, setNotifyOnNewLocation] = useState(true);
+  
+  // PIN states
+  const [hasPin, setHasPin] = useState(user.hasPin);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinModalMode, setPinModalMode] = useState<"create" | "change" | "verify">("create");
+
+  // Password change states
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
 
   // Notification states
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -750,13 +1240,75 @@ export function SettingsClient({
   const handleSaveProfile = async () => {
     setIsSaving(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName, email, phone }),
+      });
+      
+      if (!response.ok) throw new Error("Failed to update profile");
+      
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (error) {
       console.error("Error saving profile:", error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+    const response = await fetch("/api/user/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to change password");
+    }
+  };
+
+  const handleSetPin = async (pin: string, currentPin?: string) => {
+    const response = await fetch("/api/user/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        pin, 
+        currentPin,
+        mode: pinModalMode 
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to set PIN");
+    }
+
+    setHasPin(true);
+  };
+
+  const handleRemovePin = async () => {
+    if (!confirm("Are you sure you want to remove your PIN? This will disable PIN protection for transactions.")) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/user/pin", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove PIN");
+      }
+
+      setHasPin(false);
+    } catch (error) {
+      console.error("Error removing PIN:", error);
+      alert("Failed to remove PIN. Please try again.");
     }
   };
 
@@ -817,6 +1369,20 @@ export function SettingsClient({
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
       {/* Modals */}
+      <ChangePasswordModal
+        isOpen={showChangePasswordModal}
+        onClose={() => setShowChangePasswordModal(false)}
+        onChangePassword={handleChangePassword}
+      />
+      <PinModal
+        isOpen={showPinModal}
+        onClose={() => {
+          setShowPinModal(false);
+          setPinModalMode("create");
+        }}
+        onSetPin={handleSetPin}
+        mode={pinModalMode}
+      />
       <ApiKeyModal
         isOpen={showApiKeyModal}
         onClose={() => setShowApiKeyModal(false)}
@@ -1065,10 +1631,65 @@ export function SettingsClient({
                 <div className="space-y-4">
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Password</h4>
-                    <button className="rounded-lg border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
+                    <button 
+                      onClick={() => setShowChangePasswordModal(true)}
+                      className="rounded-lg bg-[#040724] px-4 py-2 text-sm text-white hover:bg-[#1e2b5a] transition-colors"
+                    >
                       Change Password
                     </button>
                   </div>
+
+                  {/* PIN Section */}
+                  <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">Transaction PIN</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {hasPin 
+                            ? "PIN is set and active" 
+                            : "No PIN set. Add extra security to your transactions"}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {hasPin ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                setPinModalMode("change");
+                                setShowPinModal(true);
+                              }}
+                              className="rounded-lg bg-[#040724] px-4 py-2 text-sm text-white hover:bg-[#1e2b5a] transition-colors"
+                            >
+                              Change PIN
+                            </button>
+                            <button
+                              onClick={handleRemovePin}
+                              className="rounded-lg border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20"
+                            >
+                              Remove
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setPinModalMode("create");
+                              setShowPinModal(true);
+                            }}
+                            className="flex items-center gap-2 rounded-lg bg-[#040724] px-4 py-2 text-sm text-white hover:bg-[#1e2b5a] transition-colors"
+                          >
+                            <Lock className="h-4 w-4" /> Set PIN
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {hasPin && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                        <Check className="h-4 w-4" />
+                        Transactions are protected with PIN
+                      </div>
+                    )}
+                  </div>
+
                   <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Two-Factor Authentication</h4>
                     <ToggleSwitch

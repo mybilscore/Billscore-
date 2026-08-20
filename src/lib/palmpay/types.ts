@@ -1,13 +1,12 @@
-// src/lib/palmpay/types.ts
-
 export interface PalmPayConfig {
   baseUrl: string;
-  authorization: string;
+  authorization: string; // App ID (Bearer token)
+  merchantId: string;
   countryCode: string;
   publicKey: string;
   privateKey: string;
   isProduction: boolean;
-  webhookUrl?: string;
+  webhookUrl: string;
 }
 
 export interface CreateVirtualAccountRequest {
@@ -23,10 +22,10 @@ export interface CreateVirtualAccountResponse {
   virtualAccountName: string;
   virtualAccountNo: string;
   status: 'Enabled' | 'Disabled' | 'Deleted';
-  identityType: string;
-  licenseNumber: string;
+  identityType?: string;
+  licenseNumber?: string;
   email?: string;
-  customerName: string;
+  customerName?: string;
   accountReference?: string;
 }
 
@@ -35,11 +34,20 @@ export interface UpdateVirtualAccountRequest {
   status: 'Enabled' | 'Disabled';
 }
 
-export interface QueryVirtualAccountResponse extends CreateVirtualAccountResponse {}
+export interface QueryVirtualAccountResponse {
+  virtualAccountName: string;
+  virtualAccountNo: string;
+  status: 'Enabled' | 'Disabled' | 'Deleted';
+  identityType?: string;
+  licenseNumber?: string;
+  email?: string;
+  customerName?: string;
+  accountReference?: string;
+}
 
 export interface PayInOrderDetailResponse {
   orderNo: string;
-  orderStatus: number;
+  orderStatus: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   createdTime: number;
   updateTime: number;
   currency: string;
@@ -52,6 +60,9 @@ export interface PayInOrderDetailResponse {
   virtualAccountName?: string;
   accountReference?: string;
   sessionId?: string;
+  paidAmount?: number;
+  fee?: number;
+  settlementAmount?: number;
 }
 
 export interface PayInOrderListResponse {
@@ -75,7 +86,7 @@ export interface RefundRequest {
 export interface RefundResponse {
   orderNo: string;
   orderId: string;
-  orderStatus: number;
+  orderStatus: 1 | 2 | 3 | 4 | 5;
   currency: string;
   amount: number;
 }
@@ -83,16 +94,15 @@ export interface RefundResponse {
 export interface RefundStatusResponse {
   orderId: string;
   orderNo: string;
-  orderStatus: number;
-  message?: string;
+  orderStatus: 1 | 2 | 3 | 4 | 5;
+  message: string;
   currency: string;
-  amount?: number;
-  errorMsg?: string;
+  amount: number;
 }
 
 export interface PalmPayWebhookPayload {
   orderNo: string;
-  orderStatus: number;
+  orderStatus: 1 | 2 | 3 | 4 | 5 | 6;
   createdTime: number;
   updateTime: number;
   currency: string;
@@ -108,24 +118,15 @@ export interface PalmPayWebhookPayload {
   sign?: string;
 }
 
-export enum OrderStatus {
-  INITIATED = 0,
-  SUCCESS = 1,
-  FAILED = 2,
-  PROCESSING = 3,
-  REFUNDED = 4,
-  PARTIAL_REFUND = 5,
+export interface ApiResponse<T> {
+  respCode: string;
+  respMsg: string;
+  status: boolean;
+  data?: T;
 }
 
 export enum VirtualAccountStatus {
   ENABLED = 'Enabled',
   DISABLED = 'Disabled',
   DELETED = 'Deleted',
-}
-
-export interface ApiResponse<T = any> {
-  data?: T;
-  respMsg: string;
-  respCode: string;
-  status: boolean;
 }

@@ -30,11 +30,14 @@ export function createVTPassSandboxConfig(): VTPassConfig {
   const secretKey = process.env.VTPASS_SANDBOX_SECRET_KEY;
   const publicKey = process.env.VTPASS_SANDBOX_PUBLIC_KEY;
   
-  // ✅ Remove trailing slash from API URL
-  const rawApiUrl = process.env.VTPASS_SANDBOX_API_URL || 'https://sandbox.vtpass.com/api/';
+  // ✅ Use /api as base (endpoints will be appended)
+  const rawApiUrl = process.env.VTPASS_SANDBOX_API_URL || 'https://sandbox.vtpass.com/api';
   const apiBaseUrl = rawApiUrl.replace(/\/$/, ''); // Remove trailing slash
 
   console.log(`🔧 [VTPassConfig] API Base URL: ${apiBaseUrl}`);
+  console.log(`🔧 [VTPassConfig] API Key set: ${!!apiKey}`);
+  console.log(`🔧 [VTPassConfig] Secret Key set: ${!!secretKey}`);
+  console.log(`🔧 [VTPassConfig] Public Key set: ${!!publicKey}`);
 
   return {
     id: 'vtpass-sandbox-001',
@@ -67,7 +70,7 @@ export function createVTPassLiveConfig(): VTPassConfig {
   const secretKey = process.env.VTPASS_LIVE_SECRET_KEY;
   const publicKey = process.env.VTPASS_LIVE_PUBLIC_KEY;
   
-  const rawApiUrl = process.env.VTPASS_LIVE_API_URL || 'https://vtpass.com/api/';
+  const rawApiUrl = process.env.VTPASS_LIVE_API_URL || 'https://vtpass.com/api';
   const apiBaseUrl = rawApiUrl.replace(/\/$/, '');
 
   return {
@@ -105,22 +108,4 @@ export function createVTPassConfig(): VTPassConfig {
   }
   
   return createVTPassSandboxConfig();
-}
-
-export function vtpassConfigToDatabase(config: VTPassConfig) {
-  return {
-    id: config.id,
-    name: config.name,
-    code: config.code,
-    apiBaseUrl: config.apiBaseUrl,
-    authType: config.authType,
-    authConfig: config.authConfig,
-    priority: config.priority,
-    supportedServices: config.supportedServices,
-    status: 'ACTIVE',
-    successRate: 100,
-    avgResponseTime: 0,
-    failureCount: 0,
-    consecutiveFailures: 0,
-  };
 }

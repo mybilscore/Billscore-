@@ -8,23 +8,10 @@ import {
   VendorAuthType,
   VtuVendor,
 } from './types';
-import { VtuType } from '@prisma/client';
-import {
-  BilalSadaAuthResponse,
-  BilalSadaAirtimeRequest,
-  BilalSadaAirtimeResponse,
-  BilalSadaDataRequest,
-  BilalSadaDataResponse,
-  BilalSadaElectricityRequest,
-  BilalSadaElectricityResponse,
-  BilalSadaCableRequest,
-  BilalSadaCableResponse,
-  BilalSadaNetworkMap,
-  BilalSadaDataPlanMap,
-  BilalSadaDiscoMap,
-  BilalSadaCableMap,
-} from './bilalsada.types';
+import { VtuType, NetworkProvider, PlanType, ValidityUnit, PlanStatus } from '@prisma/client';
+import { prisma } from "~/lib/db";
 
+// Types
 interface BilalSadaAuthConfig {
   username: string;
   password: string;
@@ -32,10 +19,148 @@ interface BilalSadaAuthConfig {
   tokenExpiry?: Date;
 }
 
+interface BilalSadaAuthResponse {
+  status: string;
+  AccessToken: string;
+  balance: string;
+  username: string;
+}
+
+interface BilalSadaDataRequest {
+  network: number;
+  phone: string;
+  data_plan: number;
+  bypass: boolean;
+  "request-id": string;
+}
+
+interface BilalSadaAirtimeRequest {
+  network: number;
+  phone: string;
+  plan_type: string;
+  amount: number;
+  bypass: boolean;
+  "request-id": string;
+}
+
+interface BilalSadaElectricityRequest {
+  disco: number;
+  meter_type: string;
+  meter_number: string;
+  amount: number;
+  bypass: boolean;
+  "request-id": string;
+}
+
+interface BilalSadaCableRequest {
+  cablename: string;
+  cableplan: string;
+  smart_card_number: string;
+  "request-id": string;
+}
+
+interface BilalSadaDataResponse {
+  network: string;
+  "request-id": string;
+  amount: string;
+  dataplan: string;
+  status: string;
+  message: string;
+  response: string;
+  phone_number: string;
+  oldbal: string;
+  newbal: number;
+  system: string;
+  plan_type: string;
+  wallet_vending: string;
+}
+
+interface BilalSadaAirtimeResponse {
+  network: string;
+  "request-id": string;
+  amount: number;
+  discount: number;
+  status: string;
+  message: string;
+  phone_number: string;
+  oldbal: string;
+  newbal: number;
+  system: string;
+  plan_type: string;
+  wallet_vending: string;
+}
+
+interface BilalSadaElectricityResponse {
+  disco_name: string;
+  "request-id": string;
+  amount: number;
+  charges: number;
+  status: string;
+  message: string;
+  meter_number: string;
+  meter_type: string;
+  oldbal: string;
+  newbal: number;
+  system: string;
+  token: string;
+  wallet_vending: string;
+}
+
+interface BilalSadaCableResponse {
+  cablename: string;
+  cableplan: string;
+  amount: number;
+  status: string;
+  message: string;
+  smart_card_number: string;
+  "request-id": string;
+  oldbal: number;
+  newbal: number;
+  system: string;
+}
+
+// Cache entry interface
+interface CacheEntry {
+  vendorPlanId: string;
+  networkCode: number;
+  timestamp: number;
+}
+
 export class BilalSadaVendor extends BaseVendor {
   private authConfig: BilalSadaAuthConfig;
   private accessToken: string | null = null;
   private tokenExpiry: Date | null = null;
+  
+  // Cache for database plan lookups
+  private planCache: Map<string, CacheEntry> = new Map();
+  private cacheTTL: number = 60000; // 1 minute cache
+
+  // ✅ Vendor-specific network mapping (only for this vendor)
+  private readonly VENDOR_NETWORK_MAP: Record<string, number> = {
+    'MTN': 1,
+    'GLO': 3,
+    'AIRTEL': 2,
+    '9MOBILE': 4,
+  };
+
+  // ✅ Vendor-specific disco mapping
+  private readonly VENDOR_DISCO_MAP: Record<string, number> = {
+    'IKEJA': 1,
+    'EKO': 2,
+    'KANO': 3,
+    'PORT_HARCOURT': 4,
+    'JOS': 5,
+    'IBADAN': 6,
+    'KADUNA': 7,
+    'ABUJA': 8,
+  };
+
+  // ✅ Vendor-specific cable mapping
+  private readonly VENDOR_CABLE_MAP: Record<string, string> = {
+    'GOTV': 'gotv',
+    'DSTV': 'dstv',
+    'STARTIMES': 'startimes',
+  };
 
   constructor(config: VendorConfig) {
     super({
@@ -47,7 +172,12 @@ export class BilalSadaVendor extends BaseVendor {
     this.authConfig = config.authConfig as BilalSadaAuthConfig;
     console.log(`✅ [BilalSadaVendor] Initialized with username: ${this.authConfig.username}`);
     console.log(`✅ [BilalSadaVendor] API Base URL: ${config.apiBaseUrl}`);
+    console.log(`✅ [BilalSadaVendor] Vendor ID: ${config.id}`);
   }
+
+  // ============================================================
+  // AUTHENTICATION
+  // ============================================================
 
   async authenticate(): Promise<Record<string, string>> {
     // Check if we have a valid token
@@ -107,7 +237,11 @@ export class BilalSadaVendor extends BaseVendor {
     }
   }
 
-  transformRequest<T>(request: VendorRequest<T>): any {
+  // ============================================================
+  // REQUEST TRANSFORMATION
+  // ============================================================
+
+  async transformRequest<T>(request: VendorRequest<T>): Promise<any> {
     console.log(`🔄 [BilalSadaVendor] Transforming request for: ${request.service}`);
     console.log(`🔄 [BilalSadaVendor] Original data:`, JSON.stringify(request.data, null, 2));
     
@@ -118,7 +252,7 @@ export class BilalSadaVendor extends BaseVendor {
         transformedData = this.transformAirtimeRequest(request.data);
         break;
       case VtuType.DATA:
-        transformedData = this.transformDataRequest(request.data);
+        transformedData = await this.transformDataRequest(request.data);
         break;
       case VtuType.ELECTRICITY_INSTANT:
         transformedData = this.transformElectricityRequest(request.data);
@@ -134,6 +268,10 @@ export class BilalSadaVendor extends BaseVendor {
     console.log(`🔄 [BilalSadaVendor] Transformed data:`, JSON.stringify(transformedData, null, 2));
     return transformedData;
   }
+
+  // ============================================================
+  // AIRTIME TRANSFORMATION
+  // ============================================================
 
   private transformAirtimeRequest(data: any): BilalSadaAirtimeRequest {
     console.log(`📱 [BilalSadaVendor] Airtime request:`, data);
@@ -155,20 +293,75 @@ export class BilalSadaVendor extends BaseVendor {
     };
   }
 
-  private transformDataRequest(data: any): BilalSadaDataRequest {
+  // ============================================================
+  // DATA TRANSFORMATION (VENDOR-AGNOSTIC LOOKUP)
+  // ============================================================
+
+  private async transformDataRequest(data: any): Promise<BilalSadaDataRequest> {
     console.log(`📊 [BilalSadaVendor] Data request:`, data);
     
-    const networkMap: Record<string, number> = {
-      'MTN': 1,
-      'GLO': 3,
-      'AIRTEL': 2,
-      '9MOBILE': 4,
-    };
+    let networkCode = 1;
+    let planId = 1;
 
-    const planId = this.getDataPlanId(data.network, data.planCode);
+    // ✅ Always try database first
+    if (data.planCode && data.network) {
+      const cacheKey = `${data.network}_${data.planCode}`;
+      
+      // Check cache
+      const cached = this.planCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
+        networkCode = cached.networkCode;
+        planId = parseInt(cached.vendorPlanId) || 1;
+        console.log(`✅ [BilalSadaVendor] Using cached plan: ${data.planCode} -> ${planId}`);
+        return this.buildDataRequest(data, networkCode, planId);
+      }
 
+      try {
+        // ✅ Query database using vendor-agnostic fields
+        const plan = await prisma.dataPlan.findFirst({
+          where: {
+            vendorId: this.config.id, // Use this vendor's ID
+            OR: [
+              { name: data.planCode },
+              { vendorPlanId: data.planCode },
+            ],
+            network: data.network as NetworkProvider,
+            isActive: true,
+          },
+          select: {
+            vendorPlanId: true,
+            vendorNetworkCode: true,
+          },
+        });
+
+        if (plan && plan.vendorPlanId) {
+          planId = parseInt(plan.vendorPlanId) || 1;
+          networkCode = parseInt(plan.vendorNetworkCode || '1') || 1;
+          
+          // Cache the result
+          this.planCache.set(cacheKey, {
+            vendorPlanId: plan.vendorPlanId,
+            networkCode,
+            timestamp: Date.now(),
+          });
+          
+          console.log(`✅ [BilalSadaVendor] Found plan in DB: ${data.planCode} -> ${planId}`);
+          return this.buildDataRequest(data, networkCode, planId);
+        }
+      } catch (error) {
+        console.error(`❌ [BilalSadaVendor] DB lookup error:`, error);
+      }
+    }
+
+    // ✅ Fallback to hardcoded mapping
+    console.log(`⚠️ [BilalSadaVendor] Using fallback mapping for: ${data.network} ${data.planCode}`);
+    const result = this.getDataPlanFromFallback(data.network, data.planCode);
+    return this.buildDataRequest(data, result.networkCode, result.planId);
+  }
+
+  private buildDataRequest(data: any, networkCode: number, planId: number): BilalSadaDataRequest {
     return {
-      network: networkMap[data.network] || 1,
+      network: networkCode,
       phone: data.phoneNumber,
       data_plan: planId,
       bypass: false,
@@ -176,22 +369,52 @@ export class BilalSadaVendor extends BaseVendor {
     };
   }
 
+  // ============================================================
+  // FALLBACK MAPPING (VENDOR-SPECIFIC)
+  // ============================================================
+
+  private getDataPlanFromFallback(network: string, planCode: string): { networkCode: number; planId: number } {
+    const networkCode = this.VENDOR_NETWORK_MAP[network] || 1;
+    
+    // Hardcoded mapping for this vendor only
+    const fallbackMap: Record<string, Record<string, number>> = {
+      'MTN': { '500MB': 1, '1GB': 2, '2GB': 3, '5GB': 4 },
+      'GLO': { '500MB': 220, '1GB': 221, '3GB': 224, '5GB': 227 },
+      'AIRTEL': { '500MB': 15, '1GB': 16, '2GB': 17, '5GB': 18 },
+      '9MOBILE': { '500MB': 70, '1GB': 71, '2GB': 72, '5GB': 73 },
+    };
+
+    let planId = 1;
+    const vendorMap = fallbackMap[network];
+    if (vendorMap) {
+      // Try exact match first
+      if (vendorMap[planCode]) {
+        planId = vendorMap[planCode];
+      } else {
+        // Try partial match
+        const keys = Object.keys(vendorMap);
+        for (const key of keys) {
+          if (planCode.includes(key) || key.includes(planCode)) {
+            planId = vendorMap[key];
+            break;
+          }
+        }
+      }
+    }
+
+    console.log(`📊 [BilalSadaVendor] Fallback: ${network} ${planCode} -> ${planId}`);
+    return { networkCode, planId };
+  }
+
+  // ============================================================
+  // ELECTRICITY TRANSFORMATION
+  // ============================================================
+
   private transformElectricityRequest(data: any): BilalSadaElectricityRequest {
     console.log(`⚡ [BilalSadaVendor] Electricity request:`, data);
     
-    const discoMap: Record<string, number> = {
-      'IKEJA': 1,
-      'EKO': 2,
-      'KANO': 3,
-      'PORT_HARCOURT': 4,
-      'JOS': 5,
-      'IBADAN': 6,
-      'KADUNA': 7,
-      'ABUJA': 8,
-    };
-
     return {
-      disco: discoMap[data.discoCode] || 1,
+      disco: this.VENDOR_DISCO_MAP[data.discoCode] || 1,
       meter_type: data.meterType || 'prepaid',
       meter_number: data.meterNumber,
       amount: data.amount,
@@ -200,16 +423,24 @@ export class BilalSadaVendor extends BaseVendor {
     };
   }
 
+  // ============================================================
+  // CABLE TV TRANSFORMATION
+  // ============================================================
+
   private transformCableTVRequest(data: any): BilalSadaCableRequest {
     console.log(`📺 [BilalSadaVendor] Cable TV request:`, data);
     
     return {
-      cablename: data.provider.toLowerCase(),
+      cablename: this.VENDOR_CABLE_MAP[data.provider] || data.provider.toLowerCase(),
       cableplan: data.packageCode,
       smart_card_number: data.decoderNumber,
       'request-id': this.generateRequestId('Cable'),
     };
   }
+
+  // ============================================================
+  // RESPONSE TRANSFORMATION
+  // ============================================================
 
   transformResponse(response: any): VendorResponse {
     console.log(`🔄 [BilalSadaVendor] Transforming response...`);
@@ -234,7 +465,7 @@ export class BilalSadaVendor extends BaseVendor {
           commission: response.discount || 0,
           totalAmount: response.amount || 0,
         },
-        vendor: VtuVendor.VTPASS,
+        vendor: VtuVendor.BILAL_SADA,
         vendorReference: response['request-id'],
         rawResponse: response,
         metadata: {
@@ -253,7 +484,7 @@ export class BilalSadaVendor extends BaseVendor {
       success: false,
       error: response.message || 'Transaction failed',
       statusCode: 400,
-      vendor: VtuVendor.VTPASS,
+      vendor: VtuVendor.BILAL_SADA,
       vendorReference: response['request-id'],
       rawResponse: response,
       metadata: {
@@ -263,7 +494,10 @@ export class BilalSadaVendor extends BaseVendor {
     };
   }
 
-  // Override makeRequest for simulation
+  // ============================================================
+  // MAKE REQUEST (OVERRIDE FOR ASYNC TRANSFORM)
+  // ============================================================
+
   protected async makeRequest<T>(request: VendorRequest<T>): Promise<VendorResponse<T>> {
     const startTime = Date.now();
     
@@ -289,7 +523,7 @@ export class BilalSadaVendor extends BaseVendor {
       const headers = await this.authenticate();
       console.log(`🔍 [BilalSadaVendor] Headers:`, JSON.stringify(headers, null, 2));
       
-      const transformedData = this.transformRequest(request);
+      const transformedData = await this.transformRequest(request);
       console.log(`🔍 [BilalSadaVendor] Request body:`, JSON.stringify(transformedData, null, 2));
       
       // In simulation mode, generate a simulated response
@@ -343,6 +577,10 @@ export class BilalSadaVendor extends BaseVendor {
       };
     }
   }
+
+  // ============================================================
+  // SIMULATED RESPONSE GENERATOR
+  // ============================================================
 
   private generateSimulatedResponse(service: VtuType, request: any): any {
     const requestId = request['request-id'] || this.generateRequestId('SIM');
@@ -429,6 +667,151 @@ export class BilalSadaVendor extends BaseVendor {
     }
   }
 
+  // ============================================================
+  // PLAN IMPORT (VENDOR-AGNOSTIC)
+  // ============================================================
+
+  async importPlans(planStrings: string[], importedBy: string = 'system'): Promise<{
+    created: number;
+    updated: number;
+    errors: string[];
+  }> {
+    const results = { created: 0, updated: 0, errors: [] as string[] };
+    const importBatch = `import_${Date.now()}_${this.config.code}`;
+
+    for (const planString of planStrings) {
+      try {
+        const parsed = this.parsePlanString(planString);
+        if (!parsed) {
+          results.errors.push(`Failed to parse: ${planString}`);
+          continue;
+        }
+
+        // ✅ Use vendor-agnostic fields
+        const existing = await prisma.dataPlan.findUnique({
+          where: {
+            vendorId_vendorPlanId: {
+              vendorId: this.config.id,
+              vendorPlanId: String(parsed.id),
+            },
+          },
+        });
+
+        const planData = {
+          network: parsed.network as NetworkProvider,
+          planType: this.parsePlanType(parsed.planType),
+          name: parsed.name,
+          amountMB: parsed.sizeMB,
+          ourPrice: parsed.price,
+          vendorPrice: parsed.price,
+          validity: parsed.validity.value,
+          validityUnit: this.parseValidityUnit(parsed.validity.unit),
+          description: parsed.description,
+          vendorId: this.config.id,
+          vendorPlanId: String(parsed.id),
+          vendorNetworkCode: String(this.VENDOR_NETWORK_MAP[parsed.network] || 1),
+          vendorPlanType: parsed.planType,
+          vendorMetadata: { raw: planString },
+          importBatch,
+          lastSyncedAt: new Date(),
+          isActive: true,
+          status: PlanStatus.ACTIVE,
+        };
+
+        if (existing) {
+          await prisma.dataPlan.update({
+            where: { id: existing.id },
+            data: {
+              ...planData,
+              updatedAt: new Date(),
+              updatedBy: importedBy,
+            },
+          });
+          results.updated++;
+        } else {
+          await prisma.dataPlan.create({
+            data: {
+              ...planData,
+              createdBy: importedBy,
+            },
+          });
+          results.created++;
+        }
+      } catch (error) {
+        results.errors.push(`Error importing plan: ${error instanceof Error ? error.message : 'Unknown'}`);
+      }
+    }
+
+    console.log(`✅ [BilalSadaVendor] Import complete: ${results.created} created, ${results.updated} updated`);
+    return results;
+  }
+
+  // ============================================================
+  // PLAN PARSING HELPERS
+  // ============================================================
+
+  private parsePlanString(planString: string): any {
+    const parts = planString.split(/\s+/);
+    if (parts.length < 6) return null;
+
+    return {
+      id: parseInt(parts[0]),
+      network: parts[1],
+      planType: parts[2],
+      name: parts[3],
+      price: parseFloat(parts[4].replace(/[₦,]/g, '')),
+      validity: this.parseValidity(parts.slice(5).join(' ')),
+      sizeMB: this.parseSizeToMB(parts[3]),
+      description: planString,
+    };
+  }
+
+  private parseSizeToMB(sizeStr: string): number {
+    const upper = sizeStr.toUpperCase();
+    if (upper.includes('TB')) return Math.round(parseFloat(upper) * 1024 * 1024);
+    if (upper.includes('GB')) return Math.round(parseFloat(upper) * 1024);
+    if (upper.includes('MB')) return parseFloat(upper);
+    if (upper.includes('KB')) return Math.round(parseFloat(upper) / 1024);
+    return 0;
+  }
+
+  private parseValidity(validityStr: string): { value: number; unit: string } {
+    const lower = validityStr.toLowerCase();
+    const match = lower.match(/(\d+)\s*(hour|day|week|month|year)s?/i);
+    if (match) {
+      let value = parseInt(match[1]);
+      let unit = match[2].toLowerCase();
+      if (unit === 'week') { value *= 7; unit = 'days'; }
+      return { value, unit: unit + 's' };
+    }
+    return { value: 30, unit: 'days' };
+  }
+
+  private parsePlanType(type: string): PlanType {
+    const map: Record<string, PlanType> = {
+      'SME': PlanType.SME,
+      'GIFTING': PlanType.GIFTING,
+      'COOPERATE_GIFTING': PlanType.COOPERATE_GIFTING,
+      'CORPORATE': PlanType.CORPORATE,
+      'PREMIUM': PlanType.PREMIUM,
+    };
+    return map[type.toUpperCase()] || PlanType.GIFTING;
+  }
+
+  private parseValidityUnit(unit: string): ValidityUnit {
+    const map: Record<string, ValidityUnit> = {
+      'hours': ValidityUnit.HOURS,
+      'days': ValidityUnit.DAYS,
+      'months': ValidityUnit.MONTHS,
+      'years': ValidityUnit.YEARS,
+    };
+    return map[unit] || ValidityUnit.DAYS;
+  }
+
+  // ============================================================
+  // RESPONSE HELPER METHODS
+  // ============================================================
+
   private getNetworkName(networkId: number): string {
     const map: Record<number, string> = {
       1: 'MTN',
@@ -465,16 +848,9 @@ export class BilalSadaVendor extends BaseVendor {
     return map[discoId] || 'DISCO';
   }
 
-  private getDataPlanId(network: string, planCode: string): number {
-    const networkMap: Record<string, Record<string, number>> = {
-      'MTN': { '500MB': 1, '1GB': 2, '2GB': 3, '5GB': 4 },
-      'GLO': { '500MB': 220, '1GB': 221, '3GB': 224, '5GB': 227 },
-      'AIRTEL': { '500MB': 15, '1GB': 16, '2GB': 17, '5GB': 18 },
-      '9MOBILE': { '500MB': 70, '1GB': 71, '2GB': 72, '5GB': 73 },
-    };
-    
-    return networkMap[network]?.[planCode] || 1;
-  }
+  // ============================================================
+  // UTILITY METHODS
+  // ============================================================
 
   private generateRequestId(prefix: string): string {
     const timestamp = Date.now();
@@ -482,7 +858,15 @@ export class BilalSadaVendor extends BaseVendor {
     return `${prefix}_${timestamp}_${random}`;
   }
 
-  // Service methods
+  clearCache(): void {
+    this.planCache.clear();
+    console.log(`🗑️ [BilalSadaVendor] Plan cache cleared`);
+  }
+
+  // ============================================================
+  // SERVICE METHODS
+  // ============================================================
+
   async buyAirtime(request: any): Promise<VendorResponse> {
     console.log(`📞 [BilalSadaVendor] buyAirtime called`);
     return this.makeRequest({
@@ -523,9 +907,20 @@ export class BilalSadaVendor extends BaseVendor {
     });
   }
 
+  async checkTransactionStatus(reference: string): Promise<VendorResponse> {
+    console.log(`🔍 [BilalSadaVendor] checkTransactionStatus called`);
+    return this.makeRequest({
+      service: VtuType.AIRTIME,
+      endpoint: '/requery',
+      method: 'POST',
+      data: { request_id: reference },
+    });
+  }
+
   async checkVendorHealth(): Promise<boolean> {
     try {
       console.log(`🏥 [BilalSadaVendor] Checking vendor health...`);
+      // In simulation mode, always return true
       return true;
     } catch (error) {
       return false;

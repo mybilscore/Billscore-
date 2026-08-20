@@ -1,3 +1,5 @@
+// ui/components/sidebar/sidebar.tsx
+
 "use client";
 
 import Link from "next/link";
@@ -27,6 +29,7 @@ import {
   CreditCard,
   TrendingUp,
   CheckCircle,
+  Book,
   Filter,
   List,
   PieChart,
@@ -43,6 +46,7 @@ interface SidebarProps {
   isMobile: boolean;
   userData: {
     id: string;
+    username?: string;
     fullName: string;
     email: string;
     phone: string;
@@ -101,6 +105,43 @@ export default function Sidebar({
     }));
   };
 
+  // ✅ Get user initials for avatar
+  const getUserInitials = () => {
+    const name = userData.fullName || userData.username || userData.email || "User";
+    const parts = name.trim().split(" ");
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  // ✅ Get display name - prioritizes username
+  const getDisplayName = () => {
+    // First try username
+    if (userData.username && userData.username.trim().length > 0) {
+      return userData.username;
+    }
+    // Then try full name
+    if (userData.fullName && userData.fullName.trim().length > 0) {
+      const parts = userData.fullName.trim().split(" ");
+      return parts[0];
+    }
+    // Then try email
+    if (userData.email) {
+      return userData.email.split("@")[0];
+    }
+    // Then try phone
+    if (userData.phone) {
+      return userData.phone;
+    }
+    return "User";
+  };
+
+  // ✅ Get full name for greeting
+  const getFullName = () => {
+    return userData.fullName || userData.username || userData.email?.split("@")[0] || userData.phone || "User";
+  };
+
   // Copy referral link
   const copyReferralLink = async () => {
     if (!userData.referralCode) return;
@@ -116,28 +157,28 @@ export default function Sidebar({
   };
 
   // Share referral link
-  const shareReferralLink = async () => {
-    if (!userData.referralCode) return;
+  // const shareReferralLink = async () => {
+  //   if (!userData.referralCode) return;
     
-    try {
-      const link = `${window.location.origin}?ref=${userData.referralCode}`;
-      const text = `🎉 Join me on Bilscore! Use my referral code ${userData.referralCode} to get started and earn rewards. Sign up here: ${link}`;
+  //   try {
+  //     const link = `${window.location.origin}?ref=${userData.referralCode}`;
+  //     const text = `🎉 Join me on Bilscore! Use my referral code ${userData.referralCode} to get started and earn rewards. Sign up here: ${link}`;
 
-      if (navigator.share) {
-        await navigator.share({
-          title: "Join Bilscore - Get Rewards",
-          text: text,
-          url: link,
-        });
-      } else {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 3000);
-      }
-    } catch (error) {
-      console.error("Share error:", error);
-    }
-  };
+  //     if (navigator.share) {
+  //       await navigator.share({
+  //         title: "Join Bilscore - Get Rewards",
+  //         text: text,
+  //         url: link,
+  //       });
+  //     } else {
+  //       await navigator.clipboard.writeText(text);
+  //       setCopied(true);
+  //       setTimeout(() => setCopied(false), 3000);
+  //     }
+  //   } catch (error) {
+  //     console.error("Share error:", error);
+  //   }
+  // };
 
   // Transactions sub-menu items
   const transactionsSubItems: NavItem[] = [
@@ -147,12 +188,7 @@ export default function Sidebar({
       icon: List 
     },
     { 
-      title: "Summary", 
-      href: "/dashboard/summary/airtime", 
-      icon: PieChart 
-    },
-    { 
-      title: "Wallet ", 
+      title: "Wallet", 
       href: "/dashboard/wallet", 
       icon: Wallet 
     },
@@ -176,11 +212,10 @@ export default function Sidebar({
       href: "/dashboard/summary/cable", 
       icon: Tv 
     },
-
-     { 
-      title: "Bill Schedule", 
-      href: "/dashboard/summary/subscriptions", 
-      icon: Tv 
+    { 
+      title: "E Schedule", 
+      href: "/dashboard/summary/e-schedule", 
+      icon: Repeat 
     },
     { 
       title: "Bulk Purchases", 
@@ -194,30 +229,14 @@ export default function Sidebar({
     },
   ];
 
-  // Referral sub-menu items
-  // const referralSubItems: NavItem[] = [
-   
-  //   { 
-  //     title: "Share & Earn", 
-  //     href: "/dashboard/referral/share", 
-  //     icon: Share2 
-  //   },
-  //   { 
-  //     title: "Leaderboard", 
-  //     href: "/dashboard/referral/leaderboard", 
-  //     icon: TrendingUp 
-  //   },
-  // ];
-
   const baseNavItems: NavItem[] = [
     { title: "Dashboard", href: "/dashboard", icon: Home },
     { title: "Buy Airtime", href: "/dashboard/airtime", icon: Smartphone },
     { title: "Buy Data", href: "/dashboard/data", icon: Wifi },
     { title: "Buy Electricity", href: "/dashboard/electricity", icon: Zap },
     { title: "Cable TV", href: "/dashboard/cable", icon: Tv },
-    // ✅ Changed: "Subscriptions" → "Bill Scheduler"
-    { title: "Bill Scheduler", href: "/dashboard/subscriptions", icon: Repeat },
-    { title: "Pricing", href: "", icon: Clock },
+    { title: "Education", href: "/dashboard/education", icon: Book },
+    { title: "E-Schedule", href: "/dashboard/e-schedule", icon: Repeat },
     { 
       title: "Transactions", 
       href: "/dashboard/transactions", 
@@ -253,19 +272,7 @@ export default function Sidebar({
     { title: "Webhooks", href: "/dashboard/developer/webhooks", icon: MessageSquare },
   ];
 
-  // Referral Nav Item
-  // const referralNavItem: NavItem = {
-  //   title: "Referrals",
-  //   href: "/dashboard/referral",
-  //   icon: Gift,
-  //   badge: referralStats.totalReferrals > 0 ? referralStats.totalReferrals : undefined,
-  //   badgeColor: "bg-amber-100 text-amber-600",
-  //   subItems: referralSubItems,
-  //   isExpanded: expandedMenus.referral,
-  // };
-
   let navItems = [...baseNavItems];
-  // navItems.push(referralNavItem);
   if (isAgent) navItems = [...navItems, ...agentNavItems];
   if (isAdmin) navItems = [...navItems, ...adminNavItems];
   if (isDeveloper) navItems = [...navItems, ...developerNavItems];
@@ -276,8 +283,6 @@ export default function Sidebar({
     const hasSubItems = item.subItems && item.subItems.length > 0;
     const isExpanded = item.isExpanded !== undefined ? item.isExpanded : true;
 
-    // ✅ Updated: Removed dark/black colors - using white/gray theme only
-    // ✅ Removed the dark left border (border-l-4 border-[#1e293b])
     const activeStyles = "bg-[#f5f5f5] text-[#1e293b] shadow-sm";
     const inactiveStyles = "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800";
 
@@ -353,27 +358,31 @@ export default function Sidebar({
 
   const sidebarContent = (
     <>
-      {/* User Profile Card - Keep User Icon */}
+      {/* ✅ User Profile Card - Shows username and initials */}
       <div className="mb-4 flex items-center gap-3 rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1e293b] text-white">
-          <User className="h-5 w-5" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1e293b] text-white text-sm font-bold">
+          {getUserInitials()}
         </div>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-gray-900 dark:text-white">{userData.fullName}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{userData.role.replace("_", " ")}</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+            {getDisplayName()}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+            {userData.email || "Member"}
+          </p>
         </div>
-        {userData.referralCode && (
+        {/* {userData.referralCode && (
           <div className="flex-shrink-0">
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
               <Gift className="h-3 w-3" />
               {referralStats.totalReferrals || 0}
             </span>
           </div>
-        )}
+        )} */}
       </div>
 
       {/* Referral Quick Share - Only if user has referral code */}
-      {userData.referralCode && (
+      {/* {userData.referralCode && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/30 dark:bg-amber-900/20">
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0">
@@ -411,7 +420,7 @@ export default function Sidebar({
             </p>
           )}
         </div>
-      )}
+      )} */}
 
       <nav className="mb-6">
         <ul className="space-y-1">{navItems.map((item) => renderNavItem(item))}</ul>

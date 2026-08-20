@@ -2,16 +2,27 @@
 
 import { createClient } from "redis";
 
-// ✅ Singleton pattern - persistent connection
+// ✅ Singleton pattern - persistent connection (GLOBAL)
 let redisClient: ReturnType<typeof createClient> | null = null;
 let isConnected = false;
 let isConnecting = false;
 let connectionPromise: Promise<any> | null = null;
 let connectionAttempt = 0;
 let initialized = false;
+let initPromise: Promise<any> | null = null;
 
-// ✅ Create Redis client only once
+// ✅ Create Redis client only once - using globalThis to persist across HMR
 function getRedisClientInstance() {
+  // Check if we already have a client in global scope (survives HMR)
+  if (globalThis.__redisClient) {
+    redisClient = globalThis.__redisClient;
+    if (redisClient?.isReady) {
+      isConnected = true;
+      initialized = true;
+    }
+    return redisClient;
+  }
+
   if (!redisClient) {
     console.log("🔧 [Redis] Creating Redis client instance...");
     
@@ -31,6 +42,9 @@ function getRedisClientInstance() {
         },
       },
     });
+
+    // ✅ Store in global for HMR survival
+    globalThis.__redisClient = redisClient;
 
     // ✅ Event listeners
     redisClient.on("error", (err) => {
@@ -73,11 +87,9 @@ function getRedisClientInstance() {
 
 // ✅ Get Redis client (with connection management)
 export async function getRedisClient() {
-  const client = getRedisClientInstance();
-
-  // If already connected, return immediately
-  if (isConnected && client.isReady) {
-    return client;
+  // If we already have a connected client, return it immediately
+  if (isConnected && redisClient?.isReady) {
+    return redisClient;
   }
 
   // If connection is in progress, wait for it
@@ -85,12 +97,13 @@ export async function getRedisClient() {
     console.log("⏳ [Redis] Connection already in progress, waiting...");
     await connectionPromise;
     if (isConnected) {
-      return client;
+      return redisClient;
     }
   }
 
   // Start connection if not connected
   if (!isConnected && !isConnecting) {
+    const client = getRedisClientInstance();
     isConnecting = true;
     
     connectionPromise = (async () => {
@@ -131,7 +144,48 @@ export async function getRedisClient() {
     }
   }
 
-  return client;
+  return redisClient;
+}
+
+// ✅ Initialize Redis on server start (only once)
+export async function initRedis() {
+  // Prevent multiple initializations
+  if (initPromise) {
+    return initPromise;
+  }
+
+  initPromise = (async () => {
+    if (!initialized && typeof window === 'undefined') {
+      try {
+        await getRedisClient();
+        initialized = true;
+        console.log("✅ [Redis] Initialization complete");
+      } catch (error) {
+        console.error("❌ [Redis] Initialization failed:", error);
+        // Don't throw - allow app to work without Redis
+      }
+    }
+  })();
+
+  return initPromise;
+}
+
+// ✅ Auto-initialize in server environment (only once)
+if (typeof window === 'undefined' && !globalThis.__redisInitialized) {
+  globalThis.__redisInitialized = true;
+  // Initialize immediately, don't wait
+  initRedis().catch(console.error);
+}
+
+// ✅ Get connection status
+export function getRedisStatus() {
+  return {
+    isConnected,
+    isConnecting,
+    initialized,
+    hasClient: !!redisClient,
+    isReady: redisClient?.isReady || false,
+  };
 }
 
 // ✅ Close Redis connection
@@ -142,6 +196,7 @@ export async function closeRedis() {
     isConnecting = false;
     connectionPromise = null;
     redisClient = null;
+    globalThis.__redisClient = null;
     initialized = false;
     console.log("🔌 [Redis] Connection closed");
   }
@@ -211,34 +266,8 @@ export async function safeRedisKeys(pattern: string): Promise<string[]> {
   }
 }
 
-// ✅ Initialize Redis on server start
-export async function initRedis() {
-  if (!initialized && typeof window === 'undefined') {
-    try {
-      await getRedisClient();
-      initialized = true;
-      console.log("✅ [Redis] Initialization complete");
-    } catch (error) {
-      console.error("❌ [Redis] Initialization failed:", error);
-    }
-  }
-}
-
-// ✅ Auto-initialize in server environment
-if (typeof window === 'undefined') {
-  // Wait a bit for the server to stabilize
-  setTimeout(() => {
-    initRedis().catch(console.error);
-  }, 1000);
-}
-
-// ✅ Get connection status
-export function getRedisStatus() {
-  return {
-    isConnected,
-    isConnecting,
-    initialized,
-    hasClient: !!redisClient,
-    isReady: redisClient?.isReady || false,
-  };
+// ✅ Declare global types
+declare global {
+  var __redisClient: ReturnType<typeof createClient> | null;
+  var __redisInitialized: boolean;
 }

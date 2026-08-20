@@ -1,9 +1,10 @@
-// app/dashboard/summary/cable/page.tsx
+// app/dashboard/summary/cable/page.tsx - UPDATED
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { CableSummaryClient } from "./page.client";
 import { TransactionStatus, VtuType } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
 
 export default async function CableSummaryPage() {
   console.log("📺 [CABLE SUMMARY] Loading...");
@@ -31,6 +32,21 @@ export default async function CableSummaryPage() {
         vendor: true,
         vendorReference: true,
         metadata: true,
+        // ✅ Additional fields for more details
+        vendorCommission: true,
+        vendorTotalAmount: true,
+        commissionRate: true,
+        commissionType: true,
+        channel: true,
+        // ✅ Include wallet transaction for balance info
+        walletTransaction: {
+          select: {
+            balanceBefore: true,
+            balanceAfter: true,
+            reference: true,
+            description: true,
+          },
+        },
       },
     }),
     prisma.vtuTransaction.aggregate({
@@ -44,6 +60,15 @@ export default async function CableSummaryPage() {
     }),
   ]);
 
+  // ✅ Helper function to safely convert Decimal to number
+  const toNumber = (value: any): number | null => {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Decimal) return value.toNumber();
+    if (typeof value === 'number') return value;
+    const num = Number(value);
+    return isNaN(num) ? null : num;
+  };
+
   const formattedTransactions = transactions.map(t => {
     const meta = t.metadata as any || {};
     return {
@@ -55,6 +80,16 @@ export default async function CableSummaryPage() {
       smartCardNumber: meta.smartCardNumber || null,
       provider: meta.provider || null,
       packageName: meta.packageName || null,
+      decoderNumber: meta.decoderNumber || null,
+      customerName: meta.customerName || null,
+      subscriptionType: meta.subscriptionType || null,
+      vendorCommission: toNumber(t.vendorCommission),
+      vendorTotalAmount: toNumber(t.vendorTotalAmount),
+      commissionRate: toNumber(t.commissionRate),
+      balanceBefore: t.walletTransaction?.balanceBefore ? toNumber(t.walletTransaction.balanceBefore) : null,
+      balanceAfter: t.walletTransaction?.balanceAfter ? toNumber(t.walletTransaction.balanceAfter) : null,
+      walletReference: t.walletTransaction?.reference || null,
+      walletDescription: t.walletTransaction?.description || null,
     };
   });
 

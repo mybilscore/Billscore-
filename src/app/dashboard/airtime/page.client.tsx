@@ -1,8 +1,8 @@
-// app/dashboard/buy/airtime/page.client.tsx - REDUCED NETWORK PROVIDER SIZE
+// app/dashboard/buy/airtime/page.client.tsx - UPDATED WITH RECENT CUSTOMERS IN INPUT DROPDOWN
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Phone,
@@ -27,6 +27,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Search,
 } from "lucide-react";
 
 interface Network {
@@ -88,7 +89,7 @@ const formatDate = (dateString: string | null) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Reduced Size Amount Button
+// Amount Button
 const AmountButton = ({
   amount,
   isSelected,
@@ -114,7 +115,7 @@ const AmountButton = ({
   );
 };
 
-// ✅ SMALLER Network Button - Reduced size
+// Network Button
 const NetworkButton = ({
   network,
   isSelected,
@@ -188,119 +189,13 @@ const ServiceDetection = ({
 
   return (
     <div className="mt-2 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-1.5 dark:bg-blue-950/30">
-      <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
       <span className="text-xs text-blue-700 dark:text-blue-300">
         {detectedNetwork ? (
-          <>Detected: <strong>{detectedNetwork}</strong></>
+          <>📡 <strong>{detectedNetwork}</strong> detected</>
         ) : (
           <>Enter a valid phone number to detect network</>
         )}
       </span>
-    </div>
-  );
-};
-
-// ✅ Reduced Size Recent Customers Component
-const RecentCustomers = ({
-  customers,
-  onSelect,
-  isLoading,
-}: {
-  customers: Customer[];
-  onSelect: (phone: string) => void;
-  isLoading: boolean;
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-2">
-        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-      </div>
-    );
-  }
-
-  if (!customers || customers.length === 0) {
-    return (
-      <div className="text-center py-2 text-xs text-gray-500 dark:text-gray-400">
-        No recent customers yet.
-      </div>
-    );
-  }
-
-  const displayCustomers = isExpanded ? customers : customers.slice(0, 3);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <History className="h-3.5 w-3.5 text-gray-500" />
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-            Recent Customers
-          </span>
-          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full dark:bg-blue-900/30 dark:text-blue-400">
-            {customers.length}
-          </span>
-        </div>
-        {customers.length > 3 && (
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-0.5"
-          >
-            {isExpanded ? (
-              <>
-                Show less <ChevronUp className="h-3 w-3" />
-              </>
-            ) : (
-              <>
-                View all <ChevronDown className="h-3 w-3" />
-              </>
-            )}
-          </button>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        {displayCustomers.map((customer) => (
-          <button
-            key={customer.id}
-            onClick={() => onSelect(customer.phone)}
-            className="w-full flex items-center justify-between rounded-lg border border-gray-100 p-2 text-left transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 group"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
-                  {customer.fullName || "Unknown"}
-                </p>
-                {customer.isFavorite && (
-                  <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
-                )}
-                {customer.customerType === "VIP" && (
-                  <span className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded dark:bg-purple-900/30 dark:text-purple-400">
-                    VIP
-                  </span>
-                )}
-                {customer.customerType === "WHOLESALE" && (
-                  <span className="text-[8px] bg-green-100 text-green-700 px-1 py-0.5 rounded dark:bg-green-900/30 dark:text-green-400">
-                    Bulk
-                  </span>
-                )}
-              </div>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {customer.phone}
-              </p>
-            </div>
-            <div className="text-right flex-shrink-0 ml-2">
-              <p className="text-xs font-medium text-gray-900 dark:text-white">
-                {formatCurrency(customer.totalSpent)}
-              </p>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {customer.totalTransactions} tx • {formatDate(customer.lastTransactionAt)}
-              </p>
-            </div>
-          </button>
-        ))}
-      </div>
     </div>
   );
 };
@@ -374,6 +269,12 @@ export function AirtimeClient({
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
+  
+  // ✅ Dropdown states
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selectedNetworkData = networks.find((n) => n.id === selectedNetwork);
 
@@ -431,15 +332,29 @@ export function AirtimeClient({
     }
   }, [phoneNumber, networks]);
 
+  // ✅ Filter customers when typing
+  useEffect(() => {
+    if (phoneNumber.length > 0) {
+      const filtered = recentCustomers.filter(c => 
+        c.phone.includes(phoneNumber) || 
+        (c.fullName && c.fullName.toLowerCase().includes(phoneNumber.toLowerCase()))
+      );
+      setFilteredCustomers(filtered);
+    } else {
+      setFilteredCustomers(recentCustomers);
+    }
+  }, [phoneNumber, recentCustomers]);
+
   // Fetch recent customers
   useEffect(() => {
     const fetchRecentCustomers = async () => {
       setLoadingCustomers(true);
       try {
-        const response = await fetch("/api/customers/recent?limit=5");
+        const response = await fetch("/api/customers/recent?limit=10");
         const result = await response.json();
         if (result.success) {
           setRecentCustomers(result.data.customers);
+          setFilteredCustomers(result.data.customers);
         }
       } catch (error) {
         console.error("Failed to fetch recent customers:", error);
@@ -449,6 +364,20 @@ export function AirtimeClient({
     };
 
     fetchRecentCustomers();
+  }, []);
+
+  // ✅ Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
   // Ensure wallet exists on mount
@@ -496,10 +425,32 @@ export function AirtimeClient({
     setPinError("");
   };
 
-  const handleSelectCustomer = (phone: string) => {
-    setPhoneNumber(phone);
+  // ✅ Handle selecting a customer from dropdown
+  const handleSelectCustomer = (customer: Customer) => {
+    setPhoneNumber(customer.phone);
+    setShowDropdown(false);
     setError("");
     setPinError("");
+  };
+
+  // ✅ Handle input focus
+  const handleInputFocus = () => {
+    if (filteredCustomers.length > 0) {
+      setShowDropdown(true);
+    }
+  };
+
+  // ✅ Handle input change
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, "");
+    setPhoneNumber(value);
+    setError("");
+    setPinError("");
+    if (value.length > 0 && filteredCustomers.length > 0) {
+      setShowDropdown(true);
+    } else {
+      setShowDropdown(false);
+    }
   };
 
   const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -586,10 +537,11 @@ export function AirtimeClient({
       }
 
       // Refresh recent customers
-      const customersResponse = await fetch("/api/customers/recent?limit=5");
+      const customersResponse = await fetch("/api/customers/recent?limit=10");
       const customersResult = await customersResponse.json();
       if (customersResult.success) {
         setRecentCustomers(customersResult.data.customers);
+        setFilteredCustomers(customersResult.data.customers);
       }
 
       // Clear success after 5 seconds
@@ -635,92 +587,131 @@ export function AirtimeClient({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Form - 2 columns */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Recent Customers - Reduced size */}
-            {recentCustomers.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <RecentCustomers
-                  customers={recentCustomers}
-                  onSelect={handleSelectCustomer}
-                  isLoading={loadingCustomers}
-                />
-              </div>
-            )}
-
-            {/* ✅ Phone Number Input - MOVED FIRST */}
+            {/* ✅ Phone Number & Network Provider - SAME CARD with dropdown */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Recipient Phone Number
+                Recipient Details
               </h2>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  <Phone className="h-5 w-5" />
-                </div>
-                <input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ""))}
-                  placeholder="08012345678"
-                  maxLength={11}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-                  {phoneNumber.length}/11
-                </div>
-              </div>
               
+              {/* Phone Number Input with Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                    <Phone className="h-5 w-5" />
+                  </div>
+                  <input
+                    ref={inputRef}
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={handlePhoneChange}
+                    onFocus={handleInputFocus}
+                    placeholder="Enter phone number or search recent"
+                    maxLength={11}
+                    className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 flex items-center gap-2">
+                    {loadingCustomers && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {phoneNumber.length > 0 && recentCustomers.length > 0 && (
+                      <span className="text-[10px] text-blue-500">
+                        {filteredCustomers.length} matches
+                      </span>
+                    )}
+                    <span>{phoneNumber.length}/11</span>
+                  </div>
+                </div>
+
+                {/* ✅ Dropdown for recent customers */}
+                {showDropdown && filteredCustomers.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div className="sticky top-0 bg-gray-50 px-3 py-2 border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                      <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400">
+                        Recent Customers ({filteredCustomers.length})
+                      </p>
+                    </div>
+                    {filteredCustomers.map((customer) => (
+                      <button
+                        key={customer.id}
+                        onClick={() => handleSelectCustomer(customer)}
+                        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                            <User className="h-4 w-4 text-gray-600 dark:text-gray-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {customer.fullName || "Unknown"}
+                              </p>
+                              {customer.isFavorite && (
+                                <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                              )}
+                              {customer.customerType === "VIP" && (
+                                <span className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded dark:bg-purple-900/30 dark:text-purple-400 flex-shrink-0">
+                                  VIP
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {customer.phone}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-2">
+                          <p className="text-xs font-medium text-gray-900 dark:text-white">
+                            {formatCurrency(customer.totalSpent)}
+                          </p>
+                          <p className="text-[9px] text-gray-400">
+                            {customer.totalTransactions} tx
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Service Detection */}
               <ServiceDetection 
                 phoneNumber={phoneNumber} 
                 detectedNetwork={detectedNetwork} 
               />
 
-              {/* Customer Info if exists */}
-              {phoneNumber.length >= 10 && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-1.5 dark:bg-gray-800">
-                  <User className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-xs text-gray-600 dark:text-gray-400">
-                    {recentCustomers.find(c => c.phone === phoneNumber)?.fullName 
-                      ? `Customer: ${recentCustomers.find(c => c.phone === phoneNumber)?.fullName}`
-                      : "New customer - will be saved automatically"
-                    }
-                  </span>
+              {/* Network Selection */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Network Provider
+                  </label>
+                  {detectedNetwork && (
+                    <span className="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <Check className="h-3 w-3" />
+                      Auto-detected
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-
-            {/* ✅ Network Selection - REDUCED SIZE */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Network Provider
-              </h2>
-              {detectedNetwork ? (
-                <div className="mb-2 rounded-lg bg-green-50 px-3 py-1.5 dark:bg-green-950/30">
-                  <p className="text-xs text-green-700 dark:text-green-400">
-                    ✅ Auto-detected: <strong>{detectedNetwork}</strong>
-                  </p>
-                  <p className="text-[10px] text-green-600 dark:text-green-400/80">
-                    You can still manually select a different network below
-                  </p>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {networks.map((network) => (
+                    <NetworkButton
+                      key={network.id}
+                      network={network}
+                      isSelected={selectedNetwork === network.id}
+                      onClick={() => setSelectedNetwork(network.id)}
+                      isAutoDetected={isAutoDetected}
+                    />
+                  ))}
                 </div>
-              ) : (
-                <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
-                  Enter a phone number above to auto-detect the network, or select manually
-                </p>
-              )}
-              <div className="grid grid-cols-4 gap-1.5">
-                {networks.map((network) => (
-                  <NetworkButton
-                    key={network.id}
-                    network={network}
-                    isSelected={selectedNetwork === network.id}
-                    onClick={() => setSelectedNetwork(network.id)}
-                    isAutoDetected={isAutoDetected}
-                  />
-                ))}
+                {!detectedNetwork && phoneNumber.length >= 4 && (
+                  <p className="mt-2 text-[10px] text-yellow-600 dark:text-yellow-400">
+                    ⚠️ Could not detect network. Please select manually.
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Amount Selection - Reduced size */}
+            {/* Amount Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Select Amount
@@ -847,7 +838,7 @@ export function AirtimeClient({
                     </div>
                   )}
 
-                  {/* ✅ Transaction PIN Input */}
+                  {/* Transaction PIN Input */}
                   <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       Transaction PIN
@@ -930,7 +921,7 @@ export function AirtimeClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Recent customers saved for quick access
+                  Search recent customers by name or number
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>

@@ -1,0 +1,125 @@
+// src/app/api/mobile/saved-meters/[id]/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { verify } from "jsonwebtoken";
+import { prisma } from "~/lib/db";
+
+const JWT_SECRET = process.env.MOBILE_JWT_SECRET || process.env.AUTH_SECRET || "your-secret-key";
+
+async function authenticateMobile(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = verify(token, JWT_SECRET) as any;
+    return decoded;
+  } catch (error) {
+    return null;
+  }
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const decoded = await authenticateMobile(request);
+    if (!decoded) {
+      return NextResponse.json({
+        success: false,
+        error: "Unauthorized",
+      }, { status: 401 });
+    }
+
+    const userId = decoded.userId || decoded.id;
+    const { id } = params;
+    const body = await request.json();
+    const { meterNumber, disco, name, meterType, isDefault } = body;
+
+    const existing = await prisma.savedMeter.findFirst({
+      where: { id, userId },
+    });
+
+    if (!existing) {
+      return NextResponse.json({
+        success: false,
+        error: "Meter not found",
+      }, { status: 404 });
+    }
+
+    if (isDefault) {
+      await prisma.savedMeter.updateMany({
+        where: { userId },
+        data: { isDefault: false },
+      });
+    }
+
+    const updated = await prisma.savedMeter.update({
+      where: { id },
+      data: {
+        meterNumber: meterNumber || existing.meterNumber,
+        disco: disco || existing.disco,
+        name: name || existing.name,
+        meterType: meterType || existing.meterType,
+        isDefault: isDefault !== undefined ? isDefault : existing.isDefault,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: updated,
+    });
+  } catch (error: any) {
+    console.error("❌ [MOBILE UPDATE METER] Error:", error);
+    return NextResponse.json({
+      success: false,
+      error: error.message || "Failed to update meter",
+    }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const decoded = await authenticateMobile(request);
+    if (!decoded) {
+      return NextResponse.json({
+        success: false,
+        error: "Unauthorized",
+      }, { status: 401 });
+    }
+
+    const userId = decoded.userId || decoded.id;
+    const { id } = params;
+
+    const existing = await prisma.savedMeter.findFirst({
+      where: { id, userId },
+    });
+
+    if (!existing) {
+      return NextResponse.json({
+        success: false,
+        error: "Meter not found",
+      }, { status: 404 });
+    }
+
+    await prisma.savedMeter.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Meter deleted successfully",
+    });
+  } catch (error: any) {
+    console.error("❌ [MOBILE DELETE METER] Error:", error);
+    return NextResponse.json({
+      success: false,
+      error: error.message || "Failed to delete meter",
+    }, { status: 500 });
+  }
+}

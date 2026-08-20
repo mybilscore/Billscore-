@@ -1,13 +1,12 @@
-// app/dashboard/buy/electricity/page.client.tsx - UPDATED
+// app/dashboard/buy/electricity/page.client.tsx - COMPLETE UPDATED
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import QRCode from "react-qr-code";
 import {
-  Phone,
-  Wifi,
   Zap,
-  Tv,
   Check,
   ArrowRight,
   AlertCircle,
@@ -16,8 +15,8 @@ import {
   CreditCard,
   Clock,
   Shield,
-  Lightbulb,
-  MapPin,
+  Radio,
+  Users,
   ShoppingBag,
   RotateCcw,
   CheckCircle2,
@@ -28,8 +27,29 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Search,
+  Filter,
+  X,
+  TrendingUp,
+  Sparkles,
+  MapPin,
+  Building,
+  Smartphone,
+  Lightbulb,
+  ChevronDown as ChevronDownIcon,
+  QrCode as QrCodeIcon,
+  Copy,
+  Download,
+  Share2,
+  Link as LinkIcon,
+  Store,
+  ExternalLink,
 } from "lucide-react";
 
+// ✅ Import QR hash utilities
+import { generateQRUrl } from "~/lib/qr-hash";
+
+// Types
 interface DisCo {
   id: string;
   name: string;
@@ -38,6 +58,7 @@ interface DisCo {
   logo: string;
   color: string;
   meterTypes: string[];
+  serviceID: string;
   discoId: number;
 }
 
@@ -49,18 +70,6 @@ interface SavedMeter {
   meterType: string;
   isDefault: boolean;
   createdAt: string;
-}
-
-interface Customer {
-  id: string;
-  phone: string;
-  fullName: string | null;
-  totalTransactions: number;
-  totalSpent: number;
-  lastTransactionAt: string | null;
-  firstTransactionAt: string;
-  customerType: string;
-  isFavorite: boolean;
 }
 
 interface ElectricityClientProps {
@@ -99,17 +108,296 @@ const formatDate = (dateString: string) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Reduced Size Recent Meters Component
-const RecentMeters = ({
+// ✅ QR Code Modal - Shows the QR code with download/share options
+const QRCodeModal = ({
+  isOpen,
+  onClose,
+  identifier,
+  serviceType,
+  provider,
+  qrValue,
+  onQuickOrder,
+  businessName = "Bilscore",
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  identifier: string;
+  serviceType: string;
+  provider: string;
+  qrValue: string;
+  onQuickOrder: () => void;
+  businessName?: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showFullLink, setShowFullLink] = useState(false);
+  const qrRef = useRef<HTMLDivElement>(null);
+
+  if (!isOpen) return null;
+
+  const urlParams = new URLSearchParams(qrValue.split('?')[1]);
+  const hashShort = urlParams.get('h')?.substring(0, 8) || '';
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(qrValue);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 3000);
+      toast.success("Link copied to clipboard!");
+    } catch (error) {
+      toast.error("Failed to copy link");
+    }
+  };
+
+  const handleCopyQR = () => {
+    // Copy QR code as image (SVG) to clipboard
+    const qrSvg = qrRef.current?.querySelector("svg");
+    if (qrSvg) {
+      const svgData = new XMLSerializer().serializeToString(qrSvg);
+      // For simplicity, we'll copy the link instead
+      handleCopyLink();
+    } else {
+      handleCopyLink();
+    }
+  };
+
+  const handleDownloadQR = async () => {
+    setIsDownloading(true);
+    try {
+      const qrSvg = qrRef.current?.querySelector("svg");
+      if (!qrSvg) throw new Error("QR code not found");
+
+      const svgData = new XMLSerializer().serializeToString(qrSvg);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = URL.createObjectURL(
+          new Blob([svgData], { type: "image/svg+xml" })
+        );
+      });
+
+      canvas.width = 400;
+      canvas.height = 400;
+      ctx?.drawImage(img, 0, 0, 400, 400);
+
+      const link = document.createElement("a");
+      link.download = `${serviceType}_${identifier}_QR.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+
+      toast.success("QR code downloaded!");
+    } catch (error) {
+      console.error("Download error:", error);
+      toast.error("Failed to download QR code");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${serviceType} Payment QR Code`,
+          text: `Scan to pay for ${provider} ${serviceType.toLowerCase()} ${identifier}\n\n${qrValue}`,
+          url: qrValue,
+        });
+      } else {
+        await navigator.clipboard.writeText(qrValue);
+        toast.success("Link copied to clipboard!");
+      }
+    } catch (error) {
+      console.error("Share error:", error);
+    }
+  };
+
+  const handleOpenLink = () => {
+    window.open(qrValue, '_blank');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute right-3 top-3 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800 z-10"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        <div className="p-5">
+          <div className="text-center mb-4">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#1e293b] shadow-lg">
+              <QrCodeIcon className="h-7 w-7 text-white" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+              {serviceType} QR Code
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {provider} • {identifier}
+            </p>
+            <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+              <Shield className="h-3.5 w-3.5" />
+              Secured • {hashShort}...
+            </div>
+          </div>
+
+          {/* QR Code */}
+          <div ref={qrRef} className="flex justify-center mb-4">
+            <div className="rounded-xl border-2 border-gray-200 bg-white p-4 dark:border-gray-700">
+              <QRCode
+                value={qrValue}
+                size={180}
+                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                viewBox="0 0 256 256"
+                bgColor="#ffffff"
+                fgColor="#1e293b"
+                level="H"
+              />
+              <div className="mt-3 text-center">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {businessName}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {serviceType} • {identifier}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* QR Code Actions - Download, Share, Copy QR */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={handleDownloadQR}
+              disabled={isDownloading}
+              className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isDownloading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Download
+            </button>
+            <button
+              onClick={handleShare}
+              className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2"
+            >
+              <Share2 className="h-4 w-4" />
+              Share
+            </button>
+            <button
+              onClick={handleCopyQR}
+              className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2"
+            >
+              {copied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              Copy
+            </button>
+          </div>
+
+          {/* ✅ Link Section - Full URL with copy */}
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-3 mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">QR Link</span>
+              <button
+                onClick={() => setShowFullLink(!showFullLink)}
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                {showFullLink ? 'Hide' : 'Show full'}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-mono text-gray-700 dark:text-gray-300 ${showFullLink ? 'break-all' : 'truncate'}`}>
+                  {qrValue}
+                </p>
+              </div>
+              <button
+                onClick={handleCopyLink}
+                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                title="Copy link"
+              >
+                {copiedLink ? (
+                  <Check className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <button
+                onClick={handleOpenLink}
+                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                title="Open link"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </button>
+            </div>
+            {copiedLink && (
+              <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                ✅ Copied to clipboard!
+              </p>
+            )}
+          </div>
+
+          {/* Details Grid */}
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700 text-center">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</p>
+              <p className="text-xs font-medium text-gray-900 dark:text-white mt-0.5 truncate">{serviceType}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700 text-center">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">Provider</p>
+              <p className="text-xs font-medium text-gray-900 dark:text-white mt-0.5 truncate">{provider}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700 text-center">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">Identifier</p>
+              <p className="text-xs font-mono font-medium text-gray-900 dark:text-white mt-0.5 truncate">{identifier}</p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-2">
+            <button
+              onClick={onQuickOrder}
+              className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white hover:bg-[#0f172a] transition-all flex items-center justify-center gap-2"
+            >
+              <ShoppingBag className="h-4 w-4" />
+              Quick Order
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ Saved Meters Component with both Buy Now and QR Display links
+const SavedMeters = ({
   meters,
   onSelect,
+  onViewQR,
+  onGetQRDisplayLink,
   isLoading,
+  baseUrl,
 }: {
   meters: SavedMeter[];
-  onSelect: (meterNumber: string, disco: string, meterType: string) => void;
+  onSelect: (meterNumber: string) => void;
+  onViewQR: (identifier: string, provider: string, serviceType: string) => void;
+  onGetQRDisplayLink: (identifier: string, provider: string, serviceType: string) => void;
   isLoading: boolean;
+  baseUrl: string;
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [copiedBuyNowLink, setCopiedBuyNowLink] = useState<Record<string, boolean>>({});
+  const [copiedQRDisplayLink, setCopiedQRDisplayLink] = useState<Record<string, boolean>>({});
 
   if (isLoading) {
     return (
@@ -128,6 +416,28 @@ const RecentMeters = ({
   }
 
   const displayMeters = isExpanded ? meters : meters.slice(0, 3);
+
+  const handleCopyBuyNowLink = async (meterNumber: string, link: string) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedBuyNowLink(prev => ({ ...prev, [meterNumber]: true }));
+      setTimeout(() => setCopiedBuyNowLink(prev => ({ ...prev, [meterNumber]: false })), 3000);
+      toast.success("Buy Now link copied!");
+    } catch (error) {
+      toast.error("Failed to copy link");
+    }
+  };
+
+  const handleCopyQRDisplayLink = async (meterNumber: string, link: string) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedQRDisplayLink(prev => ({ ...prev, [meterNumber]: true }));
+      setTimeout(() => setCopiedQRDisplayLink(prev => ({ ...prev, [meterNumber]: false })), 3000);
+      toast.success("QR Display link copied!");
+    } catch (error) {
+      toast.error("Failed to copy link");
+    }
+  };
 
   return (
     <div className="space-y-2">
@@ -159,108 +469,118 @@ const RecentMeters = ({
         )}
       </div>
 
-      <div className="space-y-1.5">
-        {displayMeters.map((meter) => (
-          <button
-            key={meter.id}
-            onClick={() => onSelect(meter.meterNumber, meter.disco, meter.meterType)}
-            className="w-full flex items-center justify-between rounded-lg border border-gray-100 p-2 text-left transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 group"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
-                  {meter.name || `${meter.disco} Meter`}
-                </p>
-                {meter.isDefault && (
-                  <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
-                )}
-                <span className="text-[8px] bg-gray-100 text-gray-700 px-1 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
-                  {meter.disco}
-                </span>
+      <div className="space-y-2">
+        {displayMeters.map((meter) => {
+          // ✅ Generate Buy Now link with full URL (includes hash)
+          const buyNowLink = generateQRUrl(baseUrl, {
+            identifier: meter.meterNumber,
+            type: "electricity",
+            provider: meter.disco,
+          });
+          
+          // ✅ Extract hash and expiresAt from buyNowLink
+          const url = new URL(buyNowLink);
+          const params = new URLSearchParams(url.search);
+          const hash = params.get('h');
+          const expiresAt = params.get('e');
+          
+          // ✅ Build QR Display link with hash parameter
+          const qrDisplayLink = `${baseUrl}/qr/display/${meter.meterNumber}?t=electricity&p=${encodeURIComponent(meter.disco)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+          
+          return (
+            <div
+              key={meter.id}
+              className="rounded-lg border border-gray-100 p-2 transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600"
+            >
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => onSelect(meter.meterNumber)}
+                  className="flex-1 min-w-0 text-left"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
+                      {meter.name || `${meter.disco} Meter`}
+                    </p>
+                    {meter.isDefault && (
+                      <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
+                    )}
+                    <span className="text-[8px] bg-gray-100 text-gray-700 px-1 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
+                      {meter.meterType}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                    {meter.meterNumber} • {meter.disco}
+                  </p>
+                </button>
+                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                  <button
+                    onClick={() => onViewQR(meter.meterNumber, meter.disco, "Electricity")}
+                    className="rounded-lg p-1.5 text-gray-400 hover:text-[#1e293b] transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title="View QR Code"
+                  >
+                    <QrCodeIcon className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => onGetQRDisplayLink(meter.meterNumber, meter.disco, "Electricity")}
+                    className="rounded-lg p-1.5 text-gray-400 hover:text-blue-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                    title="Get QR Link"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                  <p className="text-[9px] text-gray-400">
+                    {formatDate(meter.createdAt)}
+                  </p>
+                </div>
               </div>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {meter.meterNumber}
-              </p>
+              
+              {/* ✅ Buy Now Link - visible on the main page */}
+              {/* <div className="mt-1.5 flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/30 rounded-lg px-2 py-1">
+                <ShoppingBag className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                <span className="text-[9px] font-medium text-blue-600 dark:text-blue-400 flex-shrink-0">Buy Now:</span>
+                <p className="text-[9px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">
+                  {buyNowLink}
+                </p>
+                <button
+                  onClick={() => handleCopyBuyNowLink(meter.meterNumber, buyNowLink)}
+                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  title="Copy Buy Now link"
+                >
+                  {copiedBuyNowLink[meter.meterNumber] ? (
+                    <Check className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
+              </div> */}
+              
+              {/* ✅ QR Display Link - visible on the main page */}
+              {/* <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
+                <LinkIcon className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">QR Link:</span>
+                <p className="text-[9px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">
+                  {qrDisplayLink}
+                </p>
+                <button
+                  onClick={() => handleCopyQRDisplayLink(meter.meterNumber, qrDisplayLink)}
+                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  title="Copy QR Display link"
+                >
+                  {copiedQRDisplayLink[meter.meterNumber] ? (
+                    <Check className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
+              </div> */}
             </div>
-            <div className="text-right flex-shrink-0 ml-2">
-              <p className="text-[10px] text-gray-400">
-                {meter.meterType}
-              </p>
-              <p className="text-[9px] text-gray-400">
-                {formatDate(meter.createdAt)}
-              </p>
-            </div>
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 };
 
-// ✅ Reduced Size DisCo Button
-const DisCoButton = ({
-  disco,
-  isSelected,
-  onClick,
-}: {
-  disco: DisCo;
-  isSelected: boolean;
-  onClick: () => void;
-}) => {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex flex-col items-center justify-center rounded-lg border-2 p-2.5 transition-all duration-200 ${
-        isSelected
-          ? "border-blue-400 bg-blue-50 text-gray-900 shadow-md dark:border-blue-600 dark:bg-blue-950/40 dark:text-white"
-          : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-      }`}
-    >
-      <div className="h-10 w-10 rounded-full flex items-center justify-center text-2xl">
-        {disco.logo}
-      </div>
-      <span className={`mt-0.5 text-[10px] font-semibold ${isSelected ? "text-blue-700 dark:text-blue-300" : "text-gray-900 dark:text-white"}`}>
-        {disco.code}
-      </span>
-      <span className={`text-[8px] ${isSelected ? "text-blue-500/70 dark:text-blue-400/70" : "text-gray-500 dark:text-gray-400"}`}>
-        {disco.region}
-      </span>
-      {isSelected && (
-        <span className="mt-0.5 text-[7px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded dark:bg-green-900/30 dark:text-green-400">
-          Selected
-        </span>
-      )}
-    </button>
-  );
-};
-
-// ✅ Reduced Size Amount Button
-const AmountButton = ({
-  amount,
-  isSelected,
-  onClick,
-}: {
-  amount: { label: string; value: number };
-  isSelected: boolean;
-  onClick: () => void;
-}) => {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-lg border-2 p-2 text-center transition-all duration-200 ${
-        isSelected
-          ? "border-blue-500 bg-blue-500 text-white shadow-md"
-          : "border-gray-200 bg-white hover:border-[#1e293b]/50 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
-      }`}
-    >
-      <span className={`text-sm font-bold ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
-        {amount.label}
-      </span>
-    </button>
-  );
-};
-
-// ✅ Status Message Component - Inline like Airtime
+// ✅ Status Message Component
 const StatusMessage = ({ 
   error, 
   success, 
@@ -290,7 +610,7 @@ const StatusMessage = ({
           <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-green-700 dark:text-green-400">
-              Electricity token purchased successfully! 🎉
+              Purchase successful! 🎉
             </p>
             {transactionId && (
               <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
@@ -306,37 +626,167 @@ const StatusMessage = ({
   return null;
 };
 
+// ✅ Amount Button
+const AmountButton = ({
+  amount,
+  isSelected,
+  onClick,
+}: {
+  amount: { label: string; value: number };
+  isSelected: boolean;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg border-2 p-2.5 text-center transition-all duration-200 ${
+        isSelected
+          ? "border-blue-500 bg-blue-500 text-white shadow-md"
+          : "border-gray-200 bg-white hover:border-[#1e293b]/50 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+      }`}
+    >
+      <span className={`text-base font-bold ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
+        {amount.label}
+      </span>
+    </button>
+  );
+};
+
+// ✅ Main Component
 export function ElectricityClient({
   user: initialUser,
   discos,
   recommendedAmounts,
 }: ElectricityClientProps) {
+  const router = useRouter();
   const [user, setUser] = useState(initialUser);
-  const [selectedDisco, setSelectedDisco] = useState<string>("");
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
-  const [customAmount, setCustomAmount] = useState<string>("");
+  const [selectedDisco, setSelectedDisco] = useState<string | null>(null);
   const [meterNumber, setMeterNumber] = useState<string>("");
   const [meterType, setMeterType] = useState<string>("Prepaid");
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
+  const [customAmount, setCustomAmount] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState<string>("");
-  const [transactionData, setTransactionData] = useState<{
-    amount: number;
-    meterNumber: string;
-    disco: string;
-    token?: string;
-  } | null>(null);
   const [isEnsuringWallet, setIsEnsuringWallet] = useState(false);
   const [savedMeters, setSavedMeters] = useState<SavedMeter[]>([]);
   const [loadingMeters, setLoadingMeters] = useState(false);
   
-  // ✅ PIN state
+  // ✅ QR Code state
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrData, setQrData] = useState<{ 
+    identifier: string; 
+    provider: string; 
+    serviceType: string; 
+    qrValue: string;
+    hash: string;
+    expiresAt?: string;
+  } | null>(null);
+  
+  // PIN state
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
+  
+  // Meter verification state
+  const [verifying, setVerifying] = useState(false);
+  const [verifiedMeter, setVerifiedMeter] = useState<{
+    customerName: string;
+    meterNumber: string;
+    meterType: string;
+    status: string;
+    customerAddress?: string;
+  } | null>(null);
+
+  // ✅ Dropdown state for DisCo
+  const [showDiscoDropdown, setShowDiscoDropdown] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const currentDisco = discos.find((d) => d.id === selectedDisco);
+
+  // ✅ Get base URL
+  const getBaseUrl = () => {
+    if (typeof window !== 'undefined') {
+      return window.location.origin;
+    }
+    return process.env.NEXTAUTH_URL || 'http://localhost:3000';
+  };
+
+  // ✅ Filter discos based on search
+  const filteredDiscos = discos.filter((d) =>
+    d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.region.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // ✅ Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDiscoDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // ✅ Verify meter using API route
+  useEffect(() => {
+    const verifyMeter = async () => {
+      if (!meterNumber || meterNumber.length < 10 || !selectedDisco) {
+        setVerifiedMeter(null);
+        return;
+      }
+      
+      setVerifying(true);
+      setVerifiedMeter(null);
+      
+      try {
+        const disco = discos.find(d => d.id === selectedDisco);
+        if (!disco) return;
+        
+        const response = await fetch("/api/vendors/electricity/verify-meter", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            serviceID: disco.serviceID || disco.code,
+            meterNumber: meterNumber,
+            meterType: meterType.toLowerCase(),
+          }),
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          setVerifiedMeter({
+            customerName: result.data.customerName,
+            meterNumber: result.data.meterNumber,
+            meterType: result.data.meterType,
+            status: result.data.status,
+            customerAddress: result.data.customerAddress,
+          });
+        } else {
+          setVerifiedMeter(null);
+        }
+      } catch (error) {
+        console.error("Verification error:", error);
+        setVerifiedMeter(null);
+      } finally {
+        setVerifying(false);
+      }
+    };
+    
+    // Debounce verification
+    const timer = setTimeout(verifyMeter, 800);
+    return () => clearTimeout(timer);
+  }, [meterNumber, selectedDisco, meterType]);
 
   // Fetch saved meters
   useEffect(() => {
@@ -386,6 +836,91 @@ export function ElectricityClient({
     ensureWallet();
   }, [user.hasWallet]);
 
+  // ✅ Handle View QR Code - Shows QR modal with Buy Now link
+  const handleViewQR = (identifier: string, provider: string, serviceType: string) => {
+    const baseUrl = getBaseUrl();
+    
+    // Generate the Buy Now QR code value
+    const qrValue = generateQRUrl(baseUrl, {
+      identifier: identifier,
+      type: serviceType.toLowerCase(),
+      provider: provider,
+    });
+    
+    // Extract the hash and params
+    const url = new URL(qrValue);
+    const params = new URLSearchParams(url.search);
+    const hash = params.get('h');
+    const expiresAt = params.get('e');
+    
+    // ✅ Set QR data with the qrValue and show modal
+    setQrData({
+      identifier: identifier,
+      provider: provider,
+      serviceType: serviceType,
+      qrValue: qrValue,
+      hash: hash || '',
+      expiresAt: expiresAt || undefined,
+    });
+    setShowQRModal(true);
+  };
+
+  // ✅ Handle Get QR Display Link - Navigates to QR display page for sharing
+  const handleGetQRDisplayLink = (identifier: string, provider: string, serviceType: string) => {
+    const baseUrl = getBaseUrl();
+    
+    // Generate the Buy Now link to extract hash
+    const buyNowLink = generateQRUrl(baseUrl, {
+      identifier: identifier,
+      type: serviceType.toLowerCase(),
+      provider: provider,
+    });
+    
+    // Extract hash and expiresAt
+    const url = new URL(buyNowLink);
+    const params = new URLSearchParams(url.search);
+    const hash = params.get('h');
+    const expiresAt = params.get('e');
+    
+    // ✅ Build QR Display link with hash parameter
+    const displayPath = `/qr/display/${identifier}?t=${serviceType.toLowerCase()}&p=${encodeURIComponent(provider)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+    
+    console.log(`🔗 [QR] Navigating to QR display page: ${displayPath}`);
+    
+    // Navigate to the QR display page
+    router.push(displayPath);
+  };
+
+  // ✅ Handle Quick Order from QR
+  const handleQuickOrder = () => {
+    if (!qrData) return;
+    setShowQRModal(false);
+    setMeterNumber(qrData.identifier);
+    // Find the disco that matches the provider
+    const matchedDisco = discos.find(d => d.code === qrData.provider || d.name === qrData.provider);
+    if (matchedDisco) {
+      setSelectedDisco(matchedDisco.id);
+    }
+    // Scroll to meter input
+    document.getElementById('meter-number-input')?.focus();
+  };
+
+  const handleDiscoSelect = (discoId: string) => {
+    setSelectedDisco(discoId);
+    setVerifiedMeter(null);
+    setError("");
+    setPinError("");
+    setShowDiscoDropdown(false);
+    setSearchTerm("");
+  };
+
+  const handleMeterTypeChange = (type: string) => {
+    setMeterType(type);
+    setVerifiedMeter(null);
+    setError("");
+    setPinError("");
+  };
+
   const handleAmountSelect = (value: number) => {
     setSelectedAmount(value);
     setCustomAmount("");
@@ -403,10 +938,8 @@ export function ElectricityClient({
     setPinError("");
   };
 
-  const handleSelectMeter = (meterNumber: string, disco: string, meterType: string) => {
+  const handleSelectSavedMeter = (meterNumber: string) => {
     setMeterNumber(meterNumber);
-    setSelectedDisco(discos.find(d => d.code === disco)?.id || "");
-    setMeterType(meterType);
     setError("");
     setPinError("");
   };
@@ -419,26 +952,12 @@ export function ElectricityClient({
     }
   };
 
-  // ✅ Reset form - keeps selected disco and meter type
-  const resetForm = () => {
-    setSelectedAmount(null);
-    setCustomAmount("");
-    setMeterNumber("");
-    setError("");
-    setSuccess(false);
-    setTransactionId("");
-    setTransactionData(null);
-    setPin("");
-    setPinError("");
-  };
-
   const getTotalAmount = () => {
-    const amount = selectedAmount || parseInt(customAmount);
-    return amount || 0;
+    return selectedAmount || parseInt(customAmount) || 0;
   };
 
   const handlePurchase = async () => {
-    // ✅ Validate PIN
+    // Validate PIN
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
       return;
@@ -449,14 +968,14 @@ export function ElectricityClient({
       return;
     }
 
-    const amount = selectedAmount || parseInt(customAmount);
+    const amount = getTotalAmount();
     if (!amount || amount < 100) {
       setError("Please enter a valid amount (minimum ₦100)");
       return;
     }
 
-    if (!meterNumber || meterNumber.length < 7) {
-      setError("Please enter a valid meter number (minimum 7 digits)");
+    if (!meterNumber || meterNumber.length < 10) {
+      setError("Please enter a valid meter number");
       return;
     }
 
@@ -476,16 +995,16 @@ export function ElectricityClient({
     setPinError("");
 
     try {
+      const disco = discos.find(d => d.id === selectedDisco);
+      
       const response = await fetch("/api/vendors/electricity/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           meterNumber: meterNumber,
-          meterType: meterType.toLowerCase(),
           amount: amount,
-          discoCode: currentDisco?.code || "IKEJA",
-          discoId: currentDisco?.discoId || 1,
-          phone: user.phone,
+          discoCode: disco?.code || "",
+          meterType: meterType,
           pin: pin,
         }),
       });
@@ -498,15 +1017,10 @@ export function ElectricityClient({
 
       setSuccess(true);
       setTransactionId(result.data?.transactionId || result.data?.reference);
-      setTransactionData({
-        amount: amount,
-        meterNumber: meterNumber,
-        disco: currentDisco?.name || "Unknown",
-        token: result.data?.token,
-      });
       setPin("");
+      setVerifiedMeter(null);
 
-      // Refresh user balance
+      // Refresh balance
       const balanceResponse = await fetch("/api/user/balance");
       const balanceData = await balanceResponse.json();
       if (balanceData.success) {
@@ -523,7 +1037,6 @@ export function ElectricityClient({
         setSavedMeters(metersResult.data);
       }
 
-      // ✅ Auto-clear success after 5 seconds
       setTimeout(() => {
         setSuccess(false);
       }, 5000);
@@ -554,114 +1067,216 @@ export function ElectricityClient({
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
       <div className="max-w-5xl mx-auto">
+        {/* QR Code Modal */}
+        {qrData && (
+          <QRCodeModal
+            isOpen={showQRModal}
+            onClose={() => {
+              setShowQRModal(false);
+              setQrData(null);
+            }}
+            identifier={qrData.identifier}
+            serviceType={qrData.serviceType}
+            provider={qrData.provider}
+            qrValue={qrData.qrValue}
+            onQuickOrder={handleQuickOrder}
+          />
+        )}
+
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Electricity</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Purchase electricity tokens for any DisCo in Nigeria
+            Purchase electricity tokens for any DisCo
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Form - 2 columns */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Saved Meters - replaces Recent Customers */}
+            {/* Saved Meters with QR Code */}
             {savedMeters.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <RecentMeters
+              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <SavedMeters
                   meters={savedMeters}
-                  onSelect={handleSelectMeter}
+                  onSelect={handleSelectSavedMeter}
+                  onViewQR={handleViewQR}
+                  onGetQRDisplayLink={handleGetQRDisplayLink}
                   isLoading={loadingMeters}
+                  baseUrl={getBaseUrl()}
                 />
               </div>
             )}
 
-            {/* DisCo Selection - Reduced size */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Select Distribution Company (DisCo)
+            {/* ✅ Combined Meter Number & DisCo Selection - SAME CARD */}
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Meter Details
               </h2>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5">
-                {discos.map((disco) => (
-                  <DisCoButton
-                    key={disco.id}
-                    disco={disco}
-                    isSelected={selectedDisco === disco.id}
-                    onClick={() => setSelectedDisco(disco.id)}
-                  />
-                ))}
+
+              {/* Meter Number Input */}
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                  <Smartphone className="h-5 w-5" />
+                </div>
+                <input
+                  id="meter-number-input"
+                  type="text"
+                  value={meterNumber}
+                  onChange={(e) => {
+                    setMeterNumber(e.target.value.replace(/[^0-9]/g, ""));
+                    setVerifiedMeter(null);
+                  }}
+                  placeholder="Enter your meter number"
+                  maxLength={15}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                />
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                  {meterNumber.length}/15
+                </div>
               </div>
-              {currentDisco && (
-                <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
-                  <MapPin className="h-3 w-3" />
-                  <span>Region: {currentDisco.region}</span>
-                  <span className="w-px h-3 bg-gray-300 dark:bg-gray-600" />
-                  <span>Meter Types: {currentDisco.meterTypes.join(", ")}</span>
+
+              {/* ✅ DisCo Dropdown */}
+              <div className="mt-4 relative" ref={dropdownRef}>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Select DisCo
+                </label>
+                <button
+                  onClick={() => setShowDiscoDropdown(!showDiscoDropdown)}
+                  className="w-full flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                >
+                  <div className="flex items-center gap-3">
+                    {currentDisco ? (
+                      <>
+                        <span className="text-xl">{currentDisco.logo}</span>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {currentDisco.name}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {currentDisco.region} • {currentDisco.code}
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-gray-500 dark:text-gray-400">
+                        Select a DisCo
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDownIcon className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${showDiscoDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Dropdown List */}
+                {showDiscoDropdown && (
+                  <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    {/* Search Input */}
+                    <div className="sticky top-0 bg-white dark:bg-gray-900 p-2 border-b border-gray-200 dark:border-gray-700">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Search DisCo..."
+                          className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    </div>
+
+                    {filteredDiscos.length > 0 ? (
+                      filteredDiscos.map((disco) => (
+                        <button
+                          key={disco.id}
+                          onClick={() => handleDiscoSelect(disco.id)}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0 ${
+                            selectedDisco === disco.id ? 'bg-blue-50 dark:bg-blue-950/40' : ''
+                          }`}
+                        >
+                          <span className="text-xl">{disco.logo}</span>
+                          <div className="flex-1 text-left">
+                            <p className={`font-medium ${selectedDisco === disco.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-white'}`}>
+                              {disco.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {disco.region} • {disco.code} • {disco.meterTypes.join(', ')}
+                            </p>
+                          </div>
+                          {selectedDisco === disco.id && (
+                            <Check className="h-5 w-5 text-blue-500" />
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-center text-sm text-gray-500 dark:text-gray-400">
+                        No DisCo found matching "{searchTerm}"
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Meter Type */}
+              {selectedDisco && currentDisco && (
+                <div className="mt-4">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Meter Type
+                  </label>
+                  <div className="mt-1.5 flex gap-2">
+                    {currentDisco.meterTypes.map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => handleMeterTypeChange(type)}
+                        className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                          meterType === type
+                            ? "bg-blue-500 text-white shadow-md"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Verification Status */}
+              {verifying && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Verifying meter...
+                </div>
+              )}
+
+              {verifiedMeter && (
+                <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">
+                        ✅ Verified: {verifiedMeter.customerName}
+                      </p>
+                      <p className="text-[10px] text-green-600 dark:text-green-300">
+                        Meter: {verifiedMeter.meterNumber} • Type: {verifiedMeter.meterType} • Status: {verifiedMeter.status}
+                      </p>
+                      {verifiedMeter.customerAddress && (
+                        <p className="text-[10px] text-green-600 dark:text-green-300">
+                          📍 {verifiedMeter.customerAddress}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Meter Number - Reduced size */}
+            {/* Amount Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Meter Number
+                Amount
               </h2>
-              <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                  <Lightbulb className="h-4 w-4" />
-                </div>
-                <input
-                  type="text"
-                  value={meterNumber}
-                  onChange={(e) => setMeterNumber(e.target.value.replace(/[^0-9]/g, ""))}
-                  placeholder="Enter your meter number"
-                  maxLength={15}
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-9 pr-3 py-2 text-sm font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
-                  {meterNumber.length}/15
-                </div>
-              </div>
-              <div className="mt-1.5 flex items-center gap-3 text-[10px] text-gray-500">
-                <span>Format: 12345678901</span>
-                <span className="w-px h-3 bg-gray-300 dark:bg-gray-600" />
-                <span>Minimum 7 digits</span>
-              </div>
-            </div>
-
-            {/* Meter Type - Reduced size */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Meter Type
-              </h2>
-              <div className="flex gap-2">
-                {["Prepaid", "Postpaid"].map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setMeterType(type)}
-                    className={`flex-1 rounded-lg border-2 p-2.5 text-center transition-all duration-200 ${
-                      meterType === type
-                        ? "border-blue-500 bg-blue-500 text-white shadow-md"
-                        : "border-gray-200 bg-white hover:border-[#1e293b]/50 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
-                    }`}
-                  >
-                    <span className={`text-sm font-semibold ${meterType === type ? "text-white" : "text-gray-900 dark:text-white"}`}>
-                      {type}
-                    </span>
-                    <p className={`text-[10px] ${meterType === type ? "text-white/70" : "text-gray-500 dark:text-gray-400"}`}>
-                      {type === "Prepaid" ? "Vend tokens instantly" : "Pay after consumption"}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Amount Selection - Reduced size */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Select Amount
-              </h2>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mb-3">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
                 {recommendedAmounts.map((amount) => (
                   <AmountButton
                     key={amount.value}
@@ -672,7 +1287,7 @@ export function ElectricityClient({
                 ))}
               </div>
               <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 text-sm">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">
                   ₦
                 </div>
                 <input
@@ -680,21 +1295,19 @@ export function ElectricityClient({
                   value={customAmount}
                   onChange={handleCustomAmountChange}
                   placeholder="Enter custom amount (min ₦100)"
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-7 pr-3 py-2 text-sm font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-8 pr-3 py-2.5 text-base font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
             </div>
           </div>
 
-          {/* Sidebar - Order Summary and Wallet Info */}
+          {/* Sidebar - Order Summary */}
           <div className="space-y-6">
-            {/* Order Summary */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sticky top-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Order Summary
               </h3>
               
-              {/* ✅ Status Messages - Inline */}
               <StatusMessage 
                 error={error} 
                 success={success} 
@@ -703,31 +1316,19 @@ export function ElectricityClient({
 
               {!error && !success && (
                 <div className="space-y-3 text-sm">
-                  {/* DisCo */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
+                      <Building className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">DisCo</span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">
-                      {currentDisco?.code || "Not selected"}
+                      {currentDisco?.name || "Not selected"}
                     </span>
                   </div>
 
-                  {/* Meter Type */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Meter Type</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {meterType}
-                    </span>
-                  </div>
-
-                  {/* Meter Number */}
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Lightbulb className="h-4 w-4 text-gray-400" />
+                      <Smartphone className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Meter Number</span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">
@@ -735,7 +1336,27 @@ export function ElectricityClient({
                     </span>
                   </div>
 
-                  {/* Amount */}
+                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600 dark:text-gray-400">Meter Type</span>
+                    </div>
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {meterType || "—"}
+                    </span>
+                  </div>
+
+                  {verifiedMeter && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-gray-400" />
+                        <span className="text-gray-600 dark:text-gray-400">Customer</span>
+                      </div>
+                      <span className="font-medium text-gray-900 dark:text-white text-xs">
+                        {verifiedMeter.customerName}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-gray-400" />
@@ -746,10 +1367,9 @@ export function ElectricityClient({
                     </span>
                   </div>
 
-                  {/* Service Fee */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-400" />
+                      <Shield className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
                     </div>
                     <span className="font-medium text-gray-500 dark:text-gray-400">
@@ -757,10 +1377,8 @@ export function ElectricityClient({
                     </span>
                   </div>
 
-                  {/* Wallet Balance */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                     </div>
                     <span className={`font-medium ${user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -768,15 +1386,13 @@ export function ElectricityClient({
                     </span>
                   </div>
 
-                  {/* Total */}
-                  <div className="flex items-center justify-between py-3 mt-2">
+                  <div className="flex items-center justify-between py-3 mt-2 border-t border-gray-200 dark:border-gray-700">
                     <span className="font-semibold text-gray-900 dark:text-white">Total</span>
                     <span className="text-xl font-bold text-[#1e293b] dark:text-white">
                       {totalAmount > 0 ? formatCurrency(totalAmount) : "—"}
                     </span>
                   </div>
 
-                  {/* Balance Warning */}
                   {totalAmount > 0 && user.walletBalance < totalAmount && (
                     <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
                       <p className="text-xs text-red-600 dark:text-red-400">
@@ -785,7 +1401,7 @@ export function ElectricityClient({
                     </div>
                   )}
 
-                  {/* ✅ Transaction PIN Input */}
+                  {/* Transaction PIN Input */}
                   <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       Transaction PIN
@@ -823,10 +1439,9 @@ export function ElectricityClient({
                 </div>
               )}
 
-              {/* Purchase Button */}
               <button
                 onClick={handlePurchase}
-                disabled={isLoading || !user.hasWallet || totalAmount === 0 || !selectedDisco || user.walletBalance < totalAmount || !pin || pin.length < 4}
+                disabled={isLoading || !user.hasWallet || totalAmount === 0 || !selectedDisco || !meterNumber || user.walletBalance < totalAmount || !pin || pin.length < 4}
                 className="w-full mt-4 rounded-xl bg-[#1e293b] py-4 text-lg font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#1e293b]/20"
               >
                 {isLoading ? (
@@ -842,12 +1457,6 @@ export function ElectricityClient({
                   </div>
                 )}
               </button>
-
-              {!user.hasWallet && !isEnsuringWallet && (
-                <p className="text-center text-sm text-yellow-600 dark:text-yellow-400 mt-2">
-                  ⚠️ You need a wallet to make purchases. Creating one...
-                </p>
-              )}
             </div>
 
             {/* Quick Tips */}
@@ -856,27 +1465,31 @@ export function ElectricityClient({
               <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Token is delivered instantly via SMS
+                  Enter your meter number to auto-verify
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Minimum purchase is ₦100
+                  Tokens are delivered instantly
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Service fee is included in the price
+                  Search and select your DisCo
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Tokens valid for 30 days
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#1e293b]">•</span>
-                  You'll receive token via SMS and email
+                  Verify meter before purchase
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
                   Saved meters for quick access
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
+                  View QR Code or get QR link for sharing
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
+                  Transaction PIN required for security
                 </li>
               </ul>
             </div>

@@ -10,50 +10,6 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// Helper function to get cable providers
-const getProviders = () => {
-  return [
-    {
-      id: "dstv",
-      name: "DSTV",
-      logo: "📡",
-      color: "#E50914",
-      packages: [
-        { id: "dstv-premium", name: "Premium", price: 37000, channels: "250+", validity: "30 days", packageCode: "dstv-premium" },
-        { id: "dstv-compact-plus", name: "Compact+", price: 25000, channels: "200+", validity: "30 days", packageCode: "dstv-compact-plus" },
-        { id: "dstv-compact", name: "Compact", price: 15000, channels: "150+", validity: "30 days", packageCode: "dstv-compact" },
-        { id: "dstv-confam", name: "Confam", price: 9500, channels: "120+", validity: "30 days", packageCode: "dstv-confam" },
-        { id: "dstv-yanga", name: "Yanga", price: 6000, channels: "80+", validity: "30 days", packageCode: "dstv-yanga" },
-        { id: "dstv-padi", name: "Padi", price: 3000, channels: "50+", validity: "30 days", packageCode: "dstv-padi" },
-      ],
-    },
-    {
-      id: "gotv",
-      name: "GOTV",
-      logo: "📺",
-      color: "#FF6B00",
-      packages: [
-        { id: "gotv-max", name: "Max", price: 18000, channels: "100+", validity: "30 days", packageCode: "gotv-max" },
-        { id: "gotv-plus", name: "Plus", price: 12000, channels: "70+", validity: "30 days", packageCode: "gotv-plus" },
-        { id: "gotv-value", name: "Value", price: 7500, channels: "50+", validity: "30 days", packageCode: "gotv-value" },
-        { id: "gotv-smallie", name: "Smallie", price: 3500, channels: "30+", validity: "30 days", packageCode: "gotv-smallie" },
-      ],
-    },
-    {
-      id: "startimes",
-      name: "Startimes",
-      logo: "⭐",
-      color: "#FFD700",
-      packages: [
-        { id: "startimes-premium", name: "Premium", price: 14500, channels: "90+", validity: "30 days", packageCode: "startimes-premium" },
-        { id: "startimes-standard", name: "Standard", price: 8500, channels: "60+", validity: "30 days", packageCode: "startimes-standard" },
-        { id: "startimes-basic", name: "Basic", price: 4500, channels: "35+", validity: "30 days", packageCode: "startimes-basic" },
-        { id: "startimes-nova", name: "Nova", price: 2500, channels: "20+", validity: "30 days", packageCode: "startimes-nova" },
-      ],
-    },
-  ];
-};
-
 export default async function CablePage() {
   console.log("📺 [CABLE] Starting cable page load...");
   
@@ -194,16 +150,12 @@ export default async function CablePage() {
     walletBalance: walletBalance,
   };
 
-  // Get providers
-  const providers = getProviders();
-
   console.log(`📤 [CABLE] Sending data to client: hasWallet=${userData.hasWallet}, balance=${userData.walletBalance}`);
   console.log("✅ [CABLE] Cable page load complete!");
 
   return (
     <CableClient
       user={userData}
-      providers={providers}
     />
   );
 }

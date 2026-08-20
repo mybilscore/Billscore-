@@ -1,48 +1,53 @@
-// src/app/api/webhooks/palmpay/route.ts
+import { NextResponse } from 'next/server';
+// import { getPalmPayService } from '~/lib/palmpay';
 
-import { NextRequest, NextResponse } from 'next/server';
 import { getPalmPayService } from '~/lib/palmpay/palmpay.service';
-import { PalmPayWebhookPayload } from '~/lib/palmpay/types';
 
-export async function POST(request: NextRequest) {
+export async function GET() {
   try {
-    // Get raw body for signature verification
-    const bodyText = await request.text();
-    const payload: PalmPayWebhookPayload = JSON.parse(bodyText);
-    
-    // Get signature from header
-    const signature = request.headers.get('X-Signature') || '';
-    
-    console.log('📨 Received PalmPay webhook:', {
-      orderNo: payload.orderNo,
-      orderStatus: payload.orderStatus,
-      amount: payload.orderAmount,
-      payerAccountNo: payload.payerAccountNo,
-    });
-
-    // Process webhook
     const palmPay = getPalmPayService();
-    const result = await palmPay.handleWebhook(payload, signature);
-
-    if (!result.verified) {
-      console.warn('⚠️ Webhook signature verification failed');
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    
+    // Test connection
+    const testResult = await palmPay.testConnection();
+    
+    // Try to create a test virtual account if in sandbox mode
+    let createResult = null;
+    if (!palmPay.isSimulationMode()) {
+      createResult = await palmPay.createVirtualAccount({
+        virtualAccountName: `Test Account ${Date.now()}`,
+        identityType: 'personal',
+        licenseNumber: '12345678901',
+        email: 'test@example.com',
+        customerName: 'Test User',
+        accountReference: `TEST_${Date.now()}`,
+      });
     }
-
-    // Return success to prevent retries
-    return new NextResponse('success', {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/plain',
+    
+    return NextResponse.json({
+      success: testResult.success,
+      mode: palmPay.isSimulationMode() ? 'simulation' : 'sandbox',
+      config: {
+        baseUrl: process.env.PALMPAY_BASE_URL,
+        appId: process.env.PALMPAY_AUTHORIZATION ? '✅ Set' : '❌ Missing',
+        merchantId: process.env.PALMPAY_MERCHANT_ID ? '✅ Set' : '❌ Missing',
+        publicKey: process.env.PALMPAY_PUBLIC_KEY ? '✅ Set' : '❌ Missing',
+        privateKey: process.env.PALMPAY_PRIVATE_KEY ? '✅ Set' : '❌ Missing',
       },
+      testResult,
+      createResult: createResult ? {
+        status: createResult.status,
+        respCode: createResult.respCode,
+        respMsg: createResult.respMsg,
+        data: createResult.data,
+      } : null,
     });
+    
   } catch (error: any) {
-    console.error('❌ Webhook processing error:', error);
-    return new NextResponse('error', {
-      status: 500,
-      headers: {
-        'Content-Type': 'text/plain',
-      },
-    });
+    console.error('❌ Test endpoint error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    }, { status: 500 });
   }
 }

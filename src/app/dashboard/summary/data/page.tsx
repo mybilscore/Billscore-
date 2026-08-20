@@ -1,9 +1,10 @@
-// app/dashboard/summary/data/page.tsx
+// app/dashboard/summary/data/page.tsx - UPDATED
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { DataSummaryClient } from "./page.client";
 import { TransactionStatus, VtuType, NetworkProvider } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
 
 export default async function DataSummaryPage() {
   console.log("📊 [DATA SUMMARY] Loading...");
@@ -31,6 +32,22 @@ export default async function DataSummaryPage() {
         deliveredAt: true,
         vendor: true,
         vendorReference: true,
+        // ✅ Additional fields for more details
+        vendorCommission: true,
+        vendorTotalAmount: true,
+        commissionRate: true,
+        commissionType: true,
+        channel: true,
+        metadata: true,
+        // ✅ Include wallet transaction for balance info
+        walletTransaction: {
+          select: {
+            balanceBefore: true,
+            balanceAfter: true,
+            reference: true,
+            description: true,
+          },
+        },
       },
     }),
     prisma.vtuTransaction.aggregate({
@@ -44,12 +61,28 @@ export default async function DataSummaryPage() {
     }),
   ]);
 
+  // ✅ Helper function to safely convert Decimal to number
+  const toNumber = (value: any): number | null => {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Decimal) return value.toNumber();
+    if (typeof value === 'number') return value;
+    const num = Number(value);
+    return isNaN(num) ? null : num;
+  };
+
   const formattedTransactions = transactions.map(t => ({
     ...t,
     amount: Number(t.amount),
     totalDebited: Number(t.totalDebited),
     createdAt: t.createdAt.toISOString(),
     deliveredAt: t.deliveredAt?.toISOString(),
+    vendorCommission: toNumber(t.vendorCommission),
+    vendorTotalAmount: toNumber(t.vendorTotalAmount),
+    commissionRate: toNumber(t.commissionRate),
+    balanceBefore: t.walletTransaction?.balanceBefore ? toNumber(t.walletTransaction.balanceBefore) : null,
+    balanceAfter: t.walletTransaction?.balanceAfter ? toNumber(t.walletTransaction.balanceAfter) : null,
+    walletReference: t.walletTransaction?.reference || null,
+    walletDescription: t.walletTransaction?.description || null,
   }));
 
   const totalSpent = Number(stats._sum.amount || 0);

@@ -1,4 +1,4 @@
-// app/dashboard/transactions/page.client.tsx
+// app/dashboard/transactions/page.client.tsx - UPDATED with Brand Colors
 
 "use client";
 
@@ -30,8 +30,34 @@ import {
   List,
   Grid,
   RefreshCw,
+  Wallet,
+  Copy,
+  TrendingUp,
+  Hash,
+  MapPin,
+  Globe,
+  Tag,
+  Calendar as CalendarIcon,
+  Check,
 } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
+
+// Brand Colors
+const BRAND_COLORS = {
+  primary: '#1e293b',
+  primaryLight: '#334155',
+  primaryDark: '#0f172a',
+  background: '#F8FAFC',
+  cardBackground: '#FFFFFF',
+  primaryText: '#0F172A',
+  secondaryText: '#64748B',
+  border: '#E8EAF0',
+  success: '#16a34a',
+  warning: '#d97706',
+  error: '#dc2626',
+  info: '#0D3B8E',
+};
 
 // Types
 interface Transaction {
@@ -43,14 +69,26 @@ interface Transaction {
   status: string;
   phoneNumber: string | null;
   network: string | null;
+  networkPlan: string | null;
+  meterNumber: string | null;
+  meterType: string | null;
+  token: string | null;
+  vendor: string | null;
   vendorReference: string | null;
+  vendorCommission: number | null;
+  scheduledFor: string | null;
+  deliveredAt: string | null;
   createdAt: string;
   updatedAt: string;
-  deliveredAt: string | null;
   user: {
     fullName: string;
     phone: string;
   };
+  balanceBefore: number | null;
+  balanceAfter: number | null;
+  walletReference: string | null;
+  walletDescription: string | null;
+  hasWalletTransaction: boolean;
 }
 
 interface TransactionStats {
@@ -84,17 +122,29 @@ interface TransactionsClientProps {
   typeBreakdown: TypeBreakdown[];
 }
 
-const formatCurrency = (amount: number) => {
+const formatCurrency = (amount: number | null | undefined) => {
+  if (amount === null || amount === undefined || isNaN(amount)) {
+    return "—";
+  }
   return new Intl.NumberFormat("en-NG", {
     style: "currency",
     currency: "NGN",
     minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(amount);
 };
 
 const formatDate = (dateString: string) => {
   try {
     return format(new Date(dateString), "MMM d, yyyy h:mm a");
+  } catch {
+    return dateString;
+  }
+};
+
+const formatDateShort = (dateString: string) => {
+  try {
+    return format(new Date(dateString), "MMM d, h:mm a");
   } catch {
     return dateString;
   }
@@ -159,26 +209,28 @@ const getTypeLabel = (type: string) => {
   return labels[type] || type;
 };
 
-// Stats Card Component
+// ✅ Stats Card Component with Brand Colors
 const StatsCard = ({
   title,
   value,
   icon: Icon,
   color,
   subtitle,
+  iconBg,
 }: {
   title: string;
   value: string | number;
   icon: any;
   color: string;
   subtitle?: string;
+  iconBg?: string;
 }) => {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+          <p className="text-2xl font-bold" style={{ color: color }}>
             {value}
           </p>
           {subtitle && (
@@ -187,8 +239,11 @@ const StatsCard = ({
             </p>
           )}
         </div>
-        <div className={`rounded-full p-2 ${color}`}>
-          <Icon className="h-5 w-5 text-white" />
+        <div 
+          className="rounded-full p-2.5"
+          style={{ backgroundColor: iconBg || color + '15' }}
+        >
+          <Icon className="h-5 w-5" style={{ color: color }} />
         </div>
       </div>
     </div>
@@ -198,6 +253,21 @@ const StatsCard = ({
 // Transaction Row Component
 const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyToken = (token: string) => {
+    navigator.clipboard.writeText(token);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+    toast.success("Token copied to clipboard!");
+  };
+
+  const hasBalanceBefore = transaction.balanceBefore !== null && 
+                          transaction.balanceBefore !== undefined && 
+                          !isNaN(transaction.balanceBefore);
+  const hasBalanceAfter = transaction.balanceAfter !== null && 
+                         transaction.balanceAfter !== undefined && 
+                         !isNaN(transaction.balanceAfter);
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-800 last:border-0">
@@ -215,19 +285,48 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
           </span>
         </div>
 
-        {/* Product */}
-        <div className="col-span-2 flex items-center text-sm text-gray-600 dark:text-gray-400">
-          <span className="truncate">{transaction.product}</span>
+        {/* Product / Details */}
+        <div className="col-span-3 flex flex-col">
+          <span className="text-sm text-gray-900 dark:text-white truncate">
+            {transaction.product}
+          </span>
+          {transaction.meterNumber && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+              <Hash className="h-3 w-3" />
+              {transaction.meterNumber}
+            </span>
+          )}
+          {transaction.phoneNumber && !transaction.meterNumber && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+              <Phone className="h-3 w-3" />
+              {transaction.phoneNumber}
+            </span>
+          )}
+          {transaction.networkPlan && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+              <Wifi className="h-3 w-3" />
+              {transaction.networkPlan}
+            </span>
+          )}
+          {transaction.network && !transaction.networkPlan && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+              <Globe className="h-3 w-3" />
+              {transaction.network}
+            </span>
+          )}
         </div>
 
         {/* Amount */}
-        <div className="col-span-2 flex items-center text-sm font-medium text-gray-900 dark:text-white">
-          {formatCurrency(transaction.amount)}
-        </div>
-
-        {/* Phone/Network */}
-        <div className="col-span-2 flex items-center text-sm text-gray-600 dark:text-gray-400">
-          {transaction.phoneNumber || transaction.network || "—"}
+        <div className="col-span-2 flex flex-col">
+          <span className="text-sm font-medium text-gray-900 dark:text-white">
+            {formatCurrency(transaction.amount)}
+          </span>
+          {transaction.vendorCommission !== null && transaction.vendorCommission > 0 && (
+            <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+              <TrendingUp className="h-3 w-3" />
+              +{formatCurrency(transaction.vendorCommission)}
+            </span>
+          )}
         </div>
 
         {/* Status */}
@@ -238,9 +337,23 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
           </span>
         </div>
 
-        {/* Date */}
-        <div className="col-span-1 flex items-center text-xs text-gray-500 dark:text-gray-400">
-          {formatDate(transaction.createdAt)}
+        {/* Delivery/Schedule Info */}
+        <div className="col-span-2 flex flex-col text-xs">
+          <span className="text-gray-500 dark:text-gray-400">
+            {formatDateShort(transaction.createdAt)}
+          </span>
+          {transaction.deliveredAt && (
+            <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
+              <CheckCircle className="h-3 w-3" />
+              Delivered
+            </span>
+          )}
+          {transaction.scheduledFor && !transaction.deliveredAt && (
+            <span className="text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+              <CalendarIcon className="h-3 w-3" />
+              Scheduled
+            </span>
+          )}
         </div>
 
         {/* Expand */}
@@ -277,14 +390,52 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
                 {formatCurrency(transaction.amount)}
               </span>
             </div>
-          </div>
-          <div className="col-span-6 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400">Total Debited</span>
               <span className="font-medium text-gray-900 dark:text-white">
                 {formatCurrency(transaction.totalDebited)}
               </span>
             </div>
+            
+            {transaction.meterNumber && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Meter Number</span>
+                <span className="font-mono text-xs text-gray-900 dark:text-white">
+                  {transaction.meterNumber}
+                </span>
+              </div>
+            )}
+            
+            {transaction.meterType && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Meter Type</span>
+                <span className="text-gray-900 dark:text-white">{transaction.meterType}</span>
+              </div>
+            )}
+            
+            {transaction.phoneNumber && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Phone Number</span>
+                <span className="text-gray-900 dark:text-white">{transaction.phoneNumber}</span>
+              </div>
+            )}
+            
+            {transaction.networkPlan && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Plan</span>
+                <span className="text-gray-900 dark:text-white">{transaction.networkPlan}</span>
+              </div>
+            )}
+            
+            {transaction.network && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Network</span>
+                <span className="text-gray-900 dark:text-white">{transaction.network}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="col-span-6 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400">Status</span>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(transaction.status)}`}>
@@ -292,22 +443,107 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
                 {transaction.status}
               </span>
             </div>
+            
+            {transaction.token && (
+              <div className="flex justify-between text-sm items-center">
+                <span className="text-gray-500 dark:text-gray-400">Token</span>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs font-mono text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
+                    {transaction.token}
+                  </code>
+                  <button
+                    onClick={() => handleCopyToken(transaction.token!)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Copy token"
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-green-500" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {transaction.vendor && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Vendor</span>
+                <span className="text-gray-900 dark:text-white">{transaction.vendor}</span>
+              </div>
+            )}
+            
+            {transaction.vendorCommission !== null && transaction.vendorCommission > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Commission</span>
+                <span className="text-green-600 dark:text-green-400 font-medium">
+                  +{formatCurrency(transaction.vendorCommission)}
+                </span>
+              </div>
+            )}
+            
+            {transaction.scheduledFor && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Scheduled For</span>
+                <span className="text-gray-900 dark:text-white">{formatDate(transaction.scheduledFor)}</span>
+              </div>
+            )}
+            {transaction.deliveredAt && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Delivered At</span>
+                <span className="text-gray-900 dark:text-white">{formatDate(transaction.deliveredAt)}</span>
+              </div>
+            )}
+            
             {transaction.vendorReference && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Vendor Ref</span>
-                <span className="font-mono text-xs text-gray-900 dark:text-white">
+                <span className="font-mono text-xs text-gray-900 dark:text-white truncate max-w-[150px]">
                   {transaction.vendorReference}
                 </span>
               </div>
             )}
+            
+            {transaction.walletReference && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Wallet Ref</span>
+                <span className="font-mono text-xs text-gray-900 dark:text-white truncate max-w-[150px]">
+                  {transaction.walletReference}
+                </span>
+              </div>
+            )}
+            
+            {hasBalanceBefore && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                  <Wallet className="h-3 w-3" />
+                  Balance Before
+                </span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {formatCurrency(transaction.balanceBefore)}
+                </span>
+              </div>
+            )}
+            {hasBalanceAfter && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                  <Wallet className="h-3 w-3" />
+                  Balance After
+                </span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {formatCurrency(transaction.balanceAfter)}
+                </span>
+              </div>
+            )}
+            
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400">Created</span>
               <span className="text-gray-900 dark:text-white">{formatDate(transaction.createdAt)}</span>
             </div>
-            {transaction.deliveredAt && (
+            {transaction.updatedAt !== transaction.createdAt && (
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500 dark:text-gray-400">Delivered</span>
-                <span className="text-gray-900 dark:text-white">{formatDate(transaction.deliveredAt)}</span>
+                <span className="text-gray-500 dark:text-gray-400">Updated</span>
+                <span className="text-gray-900 dark:text-white">{formatDate(transaction.updatedAt)}</span>
               </div>
             )}
           </div>
@@ -337,7 +573,6 @@ export function TransactionsClient({
 
   const totalPages = Math.ceil(totalTransactions / pageSize);
 
-  // Fetch transactions with filters
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     try {
@@ -362,7 +597,6 @@ export function TransactionsClient({
     }
   }, [currentPage, pageSize, searchTerm, filterType, filterStatus]);
 
-  // Refetch when filters change
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
@@ -389,11 +623,11 @@ export function TransactionsClient({
     fetchTransactions();
   };
 
-  // Get unique transaction types for filter
   const transactionTypes = Array.from(new Set(transactions.map((t) => t.type)));
-
-  // Get unique statuses for filter
   const statuses = ["SUCCESS", "FAILED", "PENDING", "PROCESSING"];
+
+  // ✅ Brand color for stats
+  const brandColor = '#1e293b';
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
@@ -425,33 +659,37 @@ export function TransactionsClient({
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* ✅ Stats Cards with Brand Colors */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatsCard
             title="Total Transactions"
             value={stats.total}
             icon={Activity}
-            color="bg-blue-500"
+            color={brandColor}
+            iconBg={brandColor + '10'}
             subtitle={`₦${stats.totalAmount.toLocaleString()} total`}
           />
           <StatsCard
             title="Successful"
             value={stats.successCount}
             icon={CheckCircle}
-            color="bg-green-500"
+            color={BRAND_COLORS.success}
+            iconBg={BRAND_COLORS.success + '15'}
             subtitle={`${stats.total > 0 ? Math.round((stats.successCount / stats.total) * 100) : 0}% success rate`}
           />
           <StatsCard
             title="Pending"
             value={stats.pendingCount}
             icon={Clock}
-            color="bg-yellow-500"
+            color={BRAND_COLORS.warning}
+            iconBg={BRAND_COLORS.warning + '15'}
           />
           <StatsCard
             title="Failed"
             value={stats.failedCount}
             icon={XCircle}
-            color="bg-red-500"
+            color={BRAND_COLORS.error}
+            iconBg={BRAND_COLORS.error + '15'}
           />
         </div>
 
@@ -473,7 +711,6 @@ export function TransactionsClient({
         {/* Filters */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
-            {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -485,7 +722,6 @@ export function TransactionsClient({
               />
             </div>
 
-            {/* Filter Toggle */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -496,7 +732,6 @@ export function TransactionsClient({
             </button>
           </div>
 
-          {/* Filter Options */}
           {showFilters && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
               <div>
@@ -559,26 +794,21 @@ export function TransactionsClient({
         ) : (
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             {viewMode === "list" ? (
-              // List View
               <div>
-                {/* Header */}
                 <div className="grid grid-cols-12 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
                   <div className="col-span-2">Type</div>
-                  <div className="col-span-2">Product</div>
+                  <div className="col-span-3">Product / Details</div>
                   <div className="col-span-2">Amount</div>
-                  <div className="col-span-2">Phone/Network</div>
                   <div className="col-span-2">Status</div>
-                  <div className="col-span-1">Date</div>
+                  <div className="col-span-2">Date</div>
                   <div className="col-span-1"></div>
                 </div>
 
-                {/* Rows */}
                 {transactions.map((transaction) => (
                   <TransactionRow key={transaction.id} transaction={transaction} />
                 ))}
               </div>
             ) : (
-              // Grid View
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
                 {transactions.map((transaction) => (
                   <div
@@ -612,22 +842,37 @@ export function TransactionsClient({
                           {formatCurrency(transaction.amount)}
                         </span>
                       </div>
-                      {transaction.phoneNumber && (
+                      
+                      {transaction.meterNumber && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500 dark:text-gray-400">Meter</span>
+                          <span className="font-mono text-xs text-gray-900 dark:text-white">
+                            {transaction.meterNumber}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {transaction.phoneNumber && !transaction.meterNumber && (
                         <div className="flex justify-between">
                           <span className="text-gray-500 dark:text-gray-400">Phone</span>
                           <span className="text-gray-900 dark:text-white">{transaction.phoneNumber}</span>
                         </div>
                       )}
-                      {transaction.network && (
+                      
+                      {transaction.networkPlan && (
                         <div className="flex justify-between">
-                          <span className="text-gray-500 dark:text-gray-400">Network</span>
-                          <span className="text-gray-900 dark:text-white">{transaction.network}</span>
+                          <span className="text-gray-500 dark:text-gray-400">Plan</span>
+                          <span className="text-gray-900 dark:text-white">{transaction.networkPlan}</span>
                         </div>
                       )}
+                      
                       <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <span>{formatDate(transaction.createdAt)}</span>
+                        <span>{formatDateShort(transaction.createdAt)}</span>
                         {transaction.deliveredAt && (
-                          <span>✓ Delivered</span>
+                          <span className="text-green-600">✓ Delivered</span>
+                        )}
+                        {transaction.scheduledFor && !transaction.deliveredAt && (
+                          <span className="text-yellow-600">⏳ Scheduled</span>
                         )}
                       </div>
                     </div>

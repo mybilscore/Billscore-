@@ -25,6 +25,10 @@ export default async function SettingsPage() {
     },
   });
 
+  if (!userData) {
+    return null;
+  }
+
   const hasWallet = userData?.wallet ? true : userData?.hasWallet || false;
   const walletBalance = userData?.wallet?.walletBalance 
     ? Number(userData.wallet.walletBalance) 
@@ -49,18 +53,25 @@ export default async function SettingsPage() {
     where: { userId: user.id, isActive: true },
   });
 
+  // Check if user has a PIN set
+  const hasPin = !!userData?.pinHash;
+
   return (
     <SettingsClient
       user={{
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email || "",
-        phone: user.phone,
-        role: user.role,
+        id: userData.id,
+        fullName: userData.fullName, // ✅ Use fullName from database
+        name: userData.fullName, // Also pass as name for compatibility
+        email: userData.email || "",
+        phone: userData.phone,
+        role: userData.role,
         hasWallet,
         walletBalance,
         isDeveloper,
-        referralCode: user.referralCode || "",
+        referralCode: userData.referralCode || "",
+        hasPin,
+        isVerified: userData.isVerified,
+        kycStatus: userData.kycStatus,
       }}
       developerData={{
         accountType: developerData?.accountType || "BASIC",

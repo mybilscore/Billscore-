@@ -1,4 +1,4 @@
-// app/dashboard/wallet/transactions/page.client.tsx
+// app/dashboard/wallet/transactions/page.client.tsx - UPDATED with Brand Colors
 
 "use client";
 
@@ -33,6 +33,22 @@ import {
   Download,
 } from "lucide-react";
 import Link from "next/link";
+
+// Brand Colors
+const BRAND_COLORS = {
+  primary: '#1e293b',
+  primaryLight: '#334155',
+  primaryDark: '#0f172a',
+  background: '#F8FAFC',
+  cardBackground: '#FFFFFF',
+  primaryText: '#0F172A',
+  secondaryText: '#64748B',
+  border: '#E8EAF0',
+  success: '#16a34a',
+  warning: '#d97706',
+  error: '#dc2626',
+  info: '#0D3B8E',
+};
 
 interface WalletTransaction {
   id: string;
@@ -249,26 +265,28 @@ const getCategoryLabel = (category: string) => {
   }
 };
 
-// Stats Card Component
+// ✅ Stats Card Component with Brand Colors
 const StatsCard = ({
   title,
   value,
   icon: Icon,
   color,
   subtitle,
+  iconBg,
 }: {
   title: string;
   value: string | number;
   icon: any;
   color: string;
   subtitle?: string;
+  iconBg?: string;
 }) => {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+          <p className="text-2xl font-bold" style={{ color: color }}>
             {value}
           </p>
           {subtitle && (
@@ -277,8 +295,11 @@ const StatsCard = ({
             </p>
           )}
         </div>
-        <div className={`rounded-full p-2 ${color}`}>
-          <Icon className="h-5 w-5 text-white" />
+        <div 
+          className="rounded-full p-2.5"
+          style={{ backgroundColor: iconBg || color + '15' }}
+        >
+          <Icon className="h-5 w-5" style={{ color: color }} />
         </div>
       </div>
     </div>
@@ -423,24 +444,19 @@ export function WalletTransactionsClient({
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all");
 
+  const brandColor = BRAND_COLORS.primary;
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
-      // Search filter
       const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (t.vtuTransaction?.product?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
         (t.vtuTransaction?.phoneNumber?.toLowerCase() || "").includes(searchTerm.toLowerCase());
 
-      // Type filter
       const matchesType = filterType === "all" || t.type === filterType;
-
-      // Status filter
       const matchesStatus = filterStatus === "all" || t.status === filterStatus;
-
-      // Category filter
       const matchesCategory = filterCategory === "all" || t.category === filterCategory;
 
-      // Date range filter
       let matchesDate = true;
       if (dateRange !== "all") {
         const now = new Date();
@@ -512,32 +528,36 @@ export function WalletTransactionsClient({
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* ✅ Stats Cards with Brand Colors */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatsCard
             title="Total Volume"
             value={formatCurrency(stats.totalVolume)}
             icon={Wallet}
-            color="bg-blue-500"
+            color={brandColor}
+            iconBg={brandColor + '10'}
             subtitle={`${stats.totalCount} transactions`}
           />
           <StatsCard
             title="Total Credits"
             value={formatCurrency(stats.creditTotal)}
             icon={ArrowDownLeft}
-            color="bg-green-500"
+            color={BRAND_COLORS.success}
+            iconBg={BRAND_COLORS.success + '15'}
           />
           <StatsCard
             title="Total Debits"
             value={formatCurrency(stats.debitTotal)}
             icon={ArrowUpRight}
-            color="bg-red-500"
+            color={BRAND_COLORS.error}
+            iconBg={BRAND_COLORS.error + '15'}
           />
           <StatsCard
             title="Net Balance"
             value={formatCurrency(stats.creditTotal - stats.debitTotal)}
             icon={TrendingUp}
-            color={stats.creditTotal > stats.debitTotal ? "bg-emerald-500" : "bg-rose-500"}
+            color={stats.creditTotal > stats.debitTotal ? BRAND_COLORS.success : BRAND_COLORS.error}
+            iconBg={stats.creditTotal > stats.debitTotal ? BRAND_COLORS.success + '15' : BRAND_COLORS.error + '15'}
           />
         </div>
 
@@ -578,7 +598,6 @@ export function WalletTransactionsClient({
         {/* Filters */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-3">
-            {/* Search */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -590,7 +609,6 @@ export function WalletTransactionsClient({
               />
             </div>
 
-            {/* Type Filter */}
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
@@ -602,7 +620,6 @@ export function WalletTransactionsClient({
               ))}
             </select>
 
-            {/* Status Filter */}
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
@@ -614,7 +631,6 @@ export function WalletTransactionsClient({
               ))}
             </select>
 
-            {/* Category Filter */}
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
@@ -626,7 +642,6 @@ export function WalletTransactionsClient({
               ))}
             </select>
 
-            {/* Date Range */}
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
@@ -638,7 +653,6 @@ export function WalletTransactionsClient({
             </select>
           </div>
 
-          {/* Active Filters Display */}
           {(filterType !== "all" || filterStatus !== "all" || filterCategory !== "all" || dateRange !== "all" || searchTerm) && (
             <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
               <span className="text-xs text-gray-500 dark:text-gray-400">Active filters:</span>
@@ -706,7 +720,6 @@ export function WalletTransactionsClient({
             </div>
           ) : (
             <div>
-              {/* Table Header */}
               <div className="grid grid-cols-12 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
                 <div className="col-span-2">Type</div>
                 <div className="col-span-3">Description</div>
@@ -717,12 +730,10 @@ export function WalletTransactionsClient({
                 <div className="col-span-1">Date</div>
               </div>
 
-              {/* Rows */}
               {filteredTransactions.map((transaction) => (
                 <TransactionRow key={transaction.id} transaction={transaction} />
               ))}
 
-              {/* Footer */}
               <div className="p-3 bg-gray-50 dark:bg-gray-800/50 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700 flex justify-between">
                 <span>
                   Showing {filteredTransactions.length} of {transactions.length} transactions

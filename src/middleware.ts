@@ -3,10 +3,25 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Define allowed origins for CORS (optional, can be removed if not needed)
+// Define allowed origins for CORS
 const ALLOWED_ORIGINS = ['http://localhost:3001', 'http://localhost:3000'];
 const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const ALLOWED_HEADERS = ['Content-Type', 'x-api-key', 'Authorization', 'Accept'];
+
+// ✅ List of public routes that don't require authentication
+const PUBLIC_ROUTES = [
+  '/auth',
+  '/qr/display',
+  '/qr',
+  '/buy-now',
+  '/documentation',
+  '/',
+];
+
+// ✅ Check if a path is public
+const isPublicRoute = (path: string) => {
+  return PUBLIC_ROUTES.some(route => path.startsWith(route));
+};
 
 export default withAuth(
   async function middleware(req: NextRequest) {
@@ -37,6 +52,12 @@ export default withAuth(
       });
     }
 
+    // ========== PUBLIC ROUTES - Allow without authentication ==========
+    if (isPublicRoute(path)) {
+      console.log(`✅ Public route: ${path} - allowing access`);
+      return NextResponse.next();
+    }
+
     // ========== API ROUTES ==========
     if (path.startsWith("/api")) {
       console.log(" API route - adding CORS headers");
@@ -49,22 +70,9 @@ export default withAuth(
       return response;
     }
 
-    // ========== PUBLIC ROUTES ==========
-    // Auth routes (sign-in, sign-up, etc.)
-    if (path.startsWith("/auth")) {
-      console.log(" Auth route - allowing");
-      return NextResponse.next();
-    }
-
-    // Static assets (images, etc.)
+    // ========== STATIC ASSETS ==========
     if (path.match(/\.(svg|png|jpg|jpeg|gif|webp|ico)$/)) {
       console.log(" Static asset - allowing");
-      return NextResponse.next();
-    }
-
-    // Documentation / public pages
-    if (path === "/documentation" || path.startsWith("/documentation/")) {
-      console.log(" Documentation route - allowing public access");
       return NextResponse.next();
     }
 
@@ -87,8 +95,7 @@ export default withAuth(
       return NextResponse.redirect(signInUrl);
     }
 
-    // ========== ROLE-BASED ACCESS (optional) ==========
-    // Example: restrict /admin to ADMIN or SUPER_ADMIN
+    // ========== ROLE-BASED ACCESS ==========
     if (path.startsWith("/admin")) {
       if (token.role !== "ADMIN" && token.role !== "SUPER_ADMIN") {
         console.log(" User not authorized for admin, redirecting to /dashboard");
@@ -105,7 +112,8 @@ export default withAuth(
   {
     callbacks: {
       authorized: ({ token }) => {
-        // Always return true to let the middleware logic handle authorization
+        // ✅ Always return true to let the middleware logic handle authorization
+        // The actual authorization is handled in the middleware function above
         return true;
       },
     },

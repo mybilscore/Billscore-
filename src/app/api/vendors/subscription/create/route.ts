@@ -1,10 +1,7 @@
-// app/api/vendors/subscription/create/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { 
-  SubscriptionType, 
   MeterType, 
   TokenStatus, 
   TransactionStatus, 
@@ -17,12 +14,42 @@ import {
   DeliveryChannel,   
   JobType,           
   JobStatus,
-  DisCo, // ✅ Import DisCo enum
+  DisCo,
+  VtuVendor,
+  CustomerType,
+  RefundStatus,
 } from "@prisma/client";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+import { compare } from "bcrypt";
+import { CacheService } from "~/lib/cache/cache.service";
 
-// ✅ Map string to DisCo enum
-function mapDiscoCode(discoCode: string): DisCo {
+// ============================================================
+// MINIMAL LOGGING
+// ============================================================
+
+const isDev = process.env.NODE_ENV === 'development';
+const isDebug = process.env.DEBUG === 'true';
+
+function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
+  if (level === 'error') {
+    console.error(`❌ ${message}`, data || '');
+    return;
+  }
+  if (level === 'warn') {
+    console.warn(`⚠️ ${message}`, data || '');
+    return;
+  }
+  if (!isDev && !isDebug) return;
+  console.log(`✅ ${message}`, data || '');
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
+  if (!discoCode) return null;
+  
   const discoMap: Record<string, DisCo> = {
     'IKEJA': DisCo.IKEJA,
     'EKO': DisCo.EKO,
@@ -35,38 +62,213 @@ function mapDiscoCode(discoCode: string): DisCo {
     'JOS': DisCo.JOS,
     'PORT_HARCOURT': DisCo.PORT_HARCOURT,
     'PORTHARCOURT': DisCo.PORT_HARCOURT,
-    'KADUNA': DisCo.KADUNA,
   };
   
-  const normalized = discoCode?.toUpperCase()?.trim() || '';
-  const mapped = discoMap[normalized];
-  
-  if (!mapped) {
-    console.warn(`⚠️ Unknown DisCo: "${discoCode}", defaulting to ABUJA`);
-    return DisCo.ABUJA;
-  }
-  
-  return mapped;
+  const normalized = discoCode.toUpperCase().trim();
+  return discoMap[normalized] || null;
 }
 
+function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
+  if (!vendorCode) return null;
+  const normalized = vendorCode.toUpperCase();
+  const vendorMap: Record<string, VtuVendor> = {
+    'VTPASS': VtuVendor.VTPASS,
+    'GIDIGITAL': VtuVendor.GIDIGITAL,
+    'MONIEPOINT': VtuVendor.MONIEPOINT,
+    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
+    'QUICKTELLER': VtuVendor.QUICKTELLER,
+    'BILAL_SADA': VtuVendor.BILAL_SADA,
+    'LEGITDATAWAY': VtuVendor.VTPASS,
+    'BILALSADA': VtuVendor.BILAL_SADA,
+  };
+  return vendorMap[normalized] || null;
+}
+
+// ============================================================
+// REFUND HELPER
+// ============================================================
+
+async function processRefund(
+  transaction: any,
+  user: any,
+  amount: number,
+  reason: string,
+  reasonCode: string = "VENDOR_FAILURE",
+  initiatedBy: string = "SYSTEM"
+) {
+  const existingRefund = await prisma.refund.findFirst({
+    where: { 
+      transactionId: transaction.id,
+      status: { not: 'CANCELLED' }
+    }
+  });
+
+  if (existingRefund) return existingRefund;
+
+  const wallet = await prisma.wallet.findUnique({
+    where: { userId: user.id },
+  });
+
+  if (!wallet) throw new Error("Wallet not found");
+
+  const refundReference = `REF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  const refund = await prisma.refund.create({
+    data: {
+      refundReference,
+      transactionId: transaction.id,
+      userId: user.id,
+      amount: amount,
+      fee: 0,
+      totalRefunded: amount,
+      status: RefundStatus.PROCESSING,
+      type: "AUTOMATIC",
+      reason: reason,
+      reasonCode: reasonCode,
+      initiatedBy: initiatedBy,
+      walletId: wallet.id,
+      initiatedAt: new Date(),
+      metadata: {
+        originalTransaction: {
+          id: transaction.id,
+          amount: transaction.amount,
+          product: transaction.product,
+          createdAt: transaction.createdAt,
+        },
+      },
+    },
+  });
+
+  await prisma.refundAuditLog.create({
+    data: {
+      refundId: refund.id,
+      action: 'CREATED',
+      performedBy: initiatedBy,
+      notes: `Refund initiated for transaction ${transaction.id}`,
+    },
+  });
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          walletBalance: {
+            increment: amount,
+          },
+        },
+      });
+
+      const wt = await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          userId: user.id,
+          type: "CREDIT",
+          amount: amount,
+          balanceBefore: wallet.walletBalance,
+          balanceAfter: wallet.walletBalance + amount,
+          reference: refundReference,
+          description: `Refund for failed subscription: ${reason}`,
+          status: TransactionStatus.SUCCESS,
+          category: "REFUND",
+          metadata: {
+            refundId: refund.id,
+            transactionId: transaction.id,
+            refundType: "AUTOMATIC",
+          },
+        },
+      });
+
+      await tx.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          totalRefunded: amount,
+          refundStatus: RefundStatus.COMPLETED,
+          refundId: refund.id,
+          metadata: {
+            ...transaction.metadata,
+            refund: {
+              id: refund.id,
+              processedAt: new Date().toISOString(),
+              amount: amount,
+              reason: reason,
+              reasonCode: reasonCode,
+            },
+          },
+        },
+      });
+
+      await tx.refund.update({
+        where: { id: refund.id },
+        data: {
+          status: RefundStatus.COMPLETED,
+          walletTransactionId: wt.id,
+          processedBy: initiatedBy,
+          processedAt: new Date(),
+          completedAt: new Date(),
+        },
+      });
+
+      await tx.refundAuditLog.create({
+        data: {
+          refundId: refund.id,
+          action: 'COMPLETED',
+          performedBy: initiatedBy,
+          notes: `Refund completed - amount: ${amount}`,
+        },
+      });
+    });
+
+    await prisma.refundNotification.create({
+      data: {
+        refundId: refund.id,
+        userId: user.id,
+        type: "COMPLETED",
+        channel: "MOBILE_PUSH",
+        message: `Your refund of ₦${amount} for subscription has been processed.`,
+        metadata: {
+          refundId: refund.id,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return refund;
+
+  } catch (error: any) {
+    log('error', `Refund failed: ${error.message}`);
+
+    await prisma.refund.update({
+      where: { id: refund.id },
+      data: {
+        status: RefundStatus.FAILED,
+        metadata: {
+          ...refund.metadata,
+          error: error.message,
+        },
+      },
+    });
+
+    throw error;
+  }
+}
+
+// ============================================================
+// MAIN API ROUTE - OPTIMIZED
+// ============================================================
+
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+
   try {
     const sessionUser = await requireAuth("/auth/sign-in");
     const body = await request.json();
-    const { serviceType, meterNumber, decoderNumber, discoCode, provider, amount, deliveryDate } = body;
+    const { meterNumber, discoCode, amount, deliveryDate, pin } = body;
 
-    console.log(`📝 [SUBSCRIPTION] Creating subscription:`, {
-      serviceType,
-      meterNumber,
-      decoderNumber,
-      discoCode,
-      provider,
-      amount,
-      deliveryDate,
-      userId: sessionUser.id,
-    });
+    // ============================================================
+    // VALIDATION
+    // ============================================================
 
-    // Validate required fields
     if (!amount || amount < 100) {
       return NextResponse.json({
         success: false,
@@ -81,7 +283,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Validate delivery date (minimum 3 days from today)
     const minDate = new Date();
     minDate.setDate(minDate.getDate() + 3);
     const selectedDate = new Date(deliveryDate);
@@ -93,58 +294,213 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Validate service-specific fields
-    if (serviceType === "electricity" && !meterNumber) {
+    if (!meterNumber) {
       return NextResponse.json({
         success: false,
-        error: "Meter number is required for electricity",
+        error: "Meter number is required",
       }, { status: 400 });
     }
 
-    if (serviceType === "cable" && !decoderNumber) {
+    if (!discoCode) {
       return NextResponse.json({
         success: false,
-        error: "Decoder number is required for cable TV",
+        error: "DisCo is required",
       }, { status: 400 });
     }
 
-    if (serviceType === "electricity" && !discoCode) {
+    if (!pin || pin.length < 4) {
       return NextResponse.json({
         success: false,
-        error: "DisCo is required for electricity",
+        error: "Please enter your 4-6 digit transaction PIN",
       }, { status: 400 });
     }
 
-    if (serviceType === "cable" && !provider) {
-      return NextResponse.json({
-        success: false,
-        error: "Provider is required for cable TV",
-      }, { status: 400 });
+    // ============================================================
+    // PARALLEL FETCH: user + customer + balance
+    // ============================================================
+    const userId = sessionUser.id;
+
+    const [cachedUser, cachedCustomer, cachedBalance] = await Promise.all([
+      CacheService.getUser(userId).catch(() => null),
+      CacheService.getCustomer(userId, sessionUser.phone).catch(() => null),
+      CacheService.getBalance(userId).catch(() => null),
+    ]);
+
+    let user = cachedUser;
+    let customer = cachedCustomer;
+    let walletBalance = cachedBalance?.balance;
+
+    // Fallback to database if cache misses
+    if (!user) {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          pinHash: true,
+          pinAttempts: true,
+          pinLockedUntil: true,
+          hasWallet: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          wallet: {
+            select: {
+              id: true,
+              walletBalance: true,
+            },
+          },
+        },
+      });
+
+      if (!dbUser) {
+        return NextResponse.json({
+          success: false,
+          error: "User not found",
+        }, { status: 404 });
+      }
+
+      user = {
+        id: dbUser.id,
+        pinHash: dbUser.pinHash,
+        pinAttempts: dbUser.pinAttempts,
+        pinLockedUntil: dbUser.pinLockedUntil,
+        hasWallet: dbUser.hasWallet,
+        fullName: dbUser.fullName,
+        email: dbUser.email,
+        phone: dbUser.phone,
+        wallet: dbUser.wallet || null,
+      };
+
+      CacheService.setUser(userId, user).catch(() => {});
     }
 
-    // Get user with wallet
-    const user = await prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      include: { wallet: true },
-    });
+    if (!customer) {
+      customer = await prisma.customer.findUnique({
+        where: {
+          userId_phone: {
+            userId: user.id,
+            phone: user.phone,
+          },
+        },
+      });
 
-    if (!user || !user.wallet) {
+      if (!customer) {
+        customer = await CacheService.createCustomer({
+          userId: user.id,
+          phone: user.phone,
+          fullName: user.fullName || null,
+          email: user.email || null,
+          customerType: CustomerType.REGULAR,
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        });
+      } else {
+        CacheService.setCustomer(user.id, user.phone, customer).catch(() => {});
+      }
+    }
+
+    if (walletBalance === undefined || walletBalance === null) {
+      const wallet = user.wallet;
+      walletBalance = wallet ? Number(wallet.walletBalance) : 0;
+    }
+
+    if (!user.wallet) {
       return NextResponse.json({
         success: false,
-        error: "User or wallet not found",
+        error: "Wallet not found",
       }, { status: 404 });
     }
 
-    const walletBalance = Number(user.wallet.walletBalance);
-    const walletId = user.wallet.id;
+    // ============================================================
+    // PIN VERIFICATION
+    // ============================================================
 
-    // ✅ Check if user has sufficient balance
+    if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
+      const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
+      return NextResponse.json({
+        success: false,
+        error: `Account locked. Please try again in ${remainingMinutes} minute(s).`,
+      }, { status: 403 });
+    }
+
+    if (!user.pinHash) {
+      return NextResponse.json({
+        success: false,
+        error: "You don't have a transaction PIN set. Please set one in your profile.",
+      }, { status: 400 });
+    }
+
+    const isValidPin = await compare(pin, user.pinHash);
+    if (!isValidPin) {
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          pinAttempts: {
+            increment: 1,
+          },
+        },
+        select: { pinAttempts: true },
+      });
+
+      const attemptsLeft = 5 - (updatedUser.pinAttempts || 0);
+      
+      let errorMessage = `Invalid PIN. ${attemptsLeft} attempt(s) remaining.`;
+      let statusCode = 401;
+      
+      if (attemptsLeft <= 0) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000),
+          },
+        });
+        errorMessage = "Too many failed PIN attempts. Account locked for 15 minutes.";
+        statusCode = 403;
+      }
+
+      return NextResponse.json({
+        success: false,
+        error: errorMessage,
+        attemptsLeft,
+      }, { status: statusCode });
+    }
+
+    // Reset PIN attempts on success
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        pinAttempts: 0,
+        pinLockedUntil: null,
+      },
+    });
+
+    // ============================================================
+    // Check balance
+    // ============================================================
+
     if (walletBalance < amount) {
       return NextResponse.json({
         success: false,
-        error: `Insufficient balance. Available: ₦${walletBalance.toFixed(2)}, Required: ₦${amount.toFixed(2)}`,
+        error: `Insufficient balance. Available: ₦${walletBalance.toFixed(2)}`,
       }, { status: 400 });
     }
+
+    const discoEnum = mapDiscoCode(discoCode);
+    if (!discoEnum) {
+      return NextResponse.json({
+        success: false,
+        error: "Invalid DisCo selected",
+      }, { status: 400 });
+    }
+
+    const walletId = user.wallet.id;
+
+    // ============================================================
+    // PURCHASE TOKEN WITH TIMEOUT
+    // ============================================================
 
     let token = null;
     let tokenSaved = false;
@@ -152,105 +508,195 @@ export async function POST(request: NextRequest) {
     let deliveryStatus = "SCHEDULED";
     let vtuTransactionId = null;
     let tokenVaultId = null;
+    let vendorId: string | null = null;
+    let vendorEnum: VtuVendor | null = null;
+    let wasDebited = false;
+    
+    let vendorCommission: number | null = null;
+    let vendorTotalAmount: number | null = null;
+    let commissionRate: number | null = null;
+    let commissionType: string | null = null;
+    let commissionDetails: any = null;
+    let costPrice: number | null = null;
+    let grossProfit: number | null = null;
+    let profitMargin: number | null = null;
+    let platformCommission: number | null = null;
 
-    // ✅ Map discoCode to DisCo enum
-    const discoEnum = mapDiscoCode(discoCode);
+    try {
+      const vendorService = getVendorService();
 
-    // ✅ FOR ELECTRICITY: Purchase token immediately (but don't deduct from wallet yet)
-    if (serviceType === "electricity") {
-      try {
-        console.log(`⚡ [SUBSCRIPTION] Attempting to purchase electricity token for ${meterNumber}...`);
+      const TIMEOUT_MS = 25000;
+      const vendorPromise = vendorService.buyElectricity(
+        {
+          meterNumber: meterNumber,
+          amount: amount,
+          discoCode: discoCode,
+          meterType: "Prepaid",
+          phone: user.phone,
+        },
+        user.id
+      );
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Vendor timeout after 25 seconds')), TIMEOUT_MS);
+      });
+
+      const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
+
+      // Extract commission data
+      if (result.data) {
+        vendorCommission = result.data.commission || null;
+        vendorTotalAmount = result.data.totalAmount || null;
         
-        const vendorService = getVendorService();
-        const result = await vendorService.buyElectricity(
-          {
-            meterNumber: meterNumber,
-            amount: amount,
-            discoCode: discoCode,
-            meterType: "Prepaid",
-            phone: user.phone,
-          },
-          user.id
-        );
-
-        if (result.success) {
-          token = result.data?.token;
-          vendorReference = result.vendorReference;
-          tokenSaved = true;
-          deliveryStatus = "TOKEN_PURCHASED";
-          console.log(`✅ [SUBSCRIPTION] Token purchased successfully for ${meterNumber}`);
-        } else {
-          console.log(`⚠️ [SUBSCRIPTION] Token purchase failed for ${meterNumber}:`, result.error);
-          deliveryStatus = "PENDING_PURCHASE";
+        if (result.metadata?.commissionDetails) {
+          commissionDetails = result.metadata.commissionDetails;
+          commissionRate = commissionDetails.rate ? parseFloat(commissionDetails.rate) : null;
+          commissionType = commissionDetails.rate_type || null;
         }
-      } catch (error: any) {
-        console.error(`❌ [SUBSCRIPTION] Error purchasing token:`, error);
+        
+        costPrice = vendorTotalAmount ?? amount;
+        grossProfit = amount - costPrice;
+        profitMargin = amount > 0 ? (grossProfit / amount) * 100 : 0;
+        platformCommission = grossProfit;
+      }
+
+      vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
+
+      if (result.vendor) {
+        const vendorRecord = await prisma.vendor.findFirst({
+          where: { code: result.vendor as string },
+          select: { id: true },
+        });
+        if (vendorRecord) {
+          vendorId = vendorRecord.id;
+        }
+      }
+
+      if (result.success && result.data?.token) {
+        token = result.data.token;
+        vendorReference = result.vendorReference;
+        tokenSaved = true;
+        wasDebited = true;
+        deliveryStatus = "TOKEN_PURCHASED";
+        log('info', `Token purchased for ${meterNumber}`);
+      } else {
+        log('warn', `Token purchase failed: ${result.error}`);
         deliveryStatus = "PENDING_PURCHASE";
       }
+    } catch (error: any) {
+      log('error', `Token purchase error: ${error.message}`);
+      deliveryStatus = "PENDING_PURCHASE";
     }
 
-    // ✅ Create subscription with proper DisCo enum
-    const subscription = await prisma.subscription.create({
+    // ============================================================
+    // CREATE PREORDER
+    // ============================================================
+
+    const preOrder = await prisma.preOrder.create({
       data: {
         userId: user.id,
-        type: serviceType === "electricity" ? SubscriptionType.ELECTRICITY : SubscriptionType.CABLE_TV,
-        disCo: serviceType === "electricity" ? discoEnum : null, // ✅ Use mapped enum
-        meterNumber: serviceType === "electricity" ? meterNumber : null,
-        meterType: serviceType === "electricity" ? MeterType.HOME : null,
-        meterName: serviceType === "electricity" ? `${discoCode} Meter` : null,
-        decoderNumber: serviceType === "cable" ? decoderNumber : null,
-        decoderType: serviceType === "cable" ? provider : null,
-        packageName: serviceType === "cable" ? "Standard" : null,
+        disCo: discoEnum,
+        meterNumber: meterNumber,
+        meterType: MeterType.HOME,
+        meterName: `${discoCode} Meter`,
         amount: amount,
         serviceFee: 0,
-        renewalDay: selectedDate.getDate(),
-        isActive: true,
-        isPaused: false,
-        nextRenewalDate: selectedDate,
-        lastRenewalDate: null,
-        channel: "MOBILE_APP",
-        apiKeyId: null,
+        totalDebited: 0,
+        deliveryDate: selectedDate,
+        status: tokenSaved ? PreOrderStatus.PURCHASED : PreOrderStatus.PENDING,
+        isCancelled: false,
+        channel: ChannelType.MOBILE_APP,
+        metadata: {
+          serviceType: "electricity",
+          isSubscription: true,
+          isReserved: true,
+          reservedAmount: amount,
+          scheduledDate: deliveryDate,
+          tokenPurchased: tokenSaved,
+          token: token,
+          walletId: walletId,
+          paymentPending: true,
+          source: "SubscriptionAPI",
+          wasDebited: wasDebited,
+          commission: {
+            vendorCommission,
+            vendorTotalAmount,
+            commissionRate,
+            platformProfit: platformCommission,
+          },
+        },
       },
     });
 
-    console.log(`✅ [SUBSCRIPTION] Subscription created: ${subscription.id}`);
+    // ============================================================
+    // IF TOKEN PURCHASED, CREATE VTU TRANSACTION AND TOKEN VAULT
+    // ============================================================
 
-    // ✅ If token was purchased successfully, create VtuTransaction and TokenVault
     if (tokenSaved && token) {
-      // Create VtuTransaction (PENDING since money isn't deducted yet)
       const vtuTransaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
           transactionType: VtuType.ELECTRICITY_PREORDER,
-          product: discoCode,
+          product: discoCode || "ELECTRICITY",
           amount: amount,
           totalDebited: amount,
-          meterNumber: meterNumber!,
-          meterType: MeterType.HOME,
+          meterNumber: meterNumber,
           status: TransactionStatus.PENDING,
+          vendor: vendorEnum,
           vendorReference: vendorReference,
+          vendorId: vendorId || undefined,
           token: token,
-          deliveredAt: null,
           scheduledFor: selectedDate,
           channel: ChannelType.MOBILE_APP,
-          subscriptionId: subscription.id,
+          preOrder: { connect: { id: preOrder.id } },
+          vendorCommission: vendorCommission,
+          vendorTotalAmount: vendorTotalAmount,
+          commissionRate: commissionRate,
+          commissionType: commissionType,
+          commissionMetadata: commissionDetails,
+          costPrice: costPrice,
+          sellingPrice: amount,
+          grossProfit: grossProfit,
+          profitMargin: profitMargin,
+          platformCommission: platformCommission,
+          platformTotalAmount: amount,
+          netProfit: grossProfit,
+          totalCommission: (vendorCommission || 0) + (platformCommission || 0),
+          effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
           metadata: {
-            subscriptionId: subscription.id,
+            preOrderId: preOrder.id,
             deliveryDate: deliveryDate,
             vendorReference: vendorReference,
-            serviceType: serviceType,
+            serviceType: "electricity",
             isSubscription: true,
             isScheduled: true,
             tokenPurchased: true,
             paymentPending: true,
+            source: "SubscriptionAPI",
+            wasDebited: true,
+            commission: {
+              vendorCommission,
+              vendorTotalAmount,
+              commissionRate,
+              commissionType,
+              commissionDetails: commissionDetails,
+              platformCommission: platformCommission,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
+              costPrice: costPrice,
+              sellingPrice: amount,
+            },
           },
         },
       });
 
       vtuTransactionId = vtuTransaction.id;
-      console.log(`📝 [SUBSCRIPTION] VtuTransaction created (PENDING): ${vtuTransaction.id}`);
 
-      // Create TokenVault with the token
+      await prisma.preOrder.update({
+        where: { id: preOrder.id },
+        data: { transactionId: vtuTransaction.id },
+      });
+
       const tokenExpiry = new Date();
       tokenExpiry.setDate(tokenExpiry.getDate() + 30);
 
@@ -260,8 +706,8 @@ export async function POST(request: NextRequest) {
           transactionId: vtuTransaction.id,
           token: token,
           tokenType: TokenType.ELECTRICITY,
-          meterNumber: meterNumber!,
-          disCo: discoEnum, // ✅ Use mapped enum
+          meterNumber: meterNumber,
+          disCo: discoEnum,
           amount: amount,
           validFrom: new Date(),
           validUntil: tokenExpiry,
@@ -271,30 +717,35 @@ export async function POST(request: NextRequest) {
           isRefunded: false,
           metadata: {
             vendorReference: vendorReference,
-            subscriptionId: subscription.id,
+            preOrderId: preOrder.id,
             deliveryDate: deliveryDate,
-            serviceType: serviceType,
+            serviceType: "electricity",
             isScheduled: true,
             paymentPending: true,
+            source: "SubscriptionAPI",
+            wasDebited: true,
+            commission: {
+              vendorCommission,
+              vendorTotalAmount,
+              commissionRate,
+              platformProfit: platformCommission,
+            },
           },
         },
       });
 
       tokenVaultId = tokenVault.id;
-      console.log(`💾 [SUBSCRIPTION] Token stored in vault (PENDING): ${tokenVault.id}`);
 
-      // Update VtuTransaction with token vault reference
-      await prisma.vtuTransaction.update({
-        where: { id: vtuTransaction.id },
-        data: {
-          tokenVault: {
-            connect: { id: tokenVault.id },
-          },
-        },
+      await prisma.preOrder.update({
+        where: { id: preOrder.id },
+        data: { tokenVaultId: tokenVault.id },
       });
     }
 
-    // ✅ RESERVE the amount using SYSTEM transaction (doesn't deduct from wallet)
+    // ============================================================
+    // RESERVE AMOUNT
+    // ============================================================
+
     const reserveTransaction = await prisma.walletTransaction.create({
       data: {
         walletId: user.wallet.id,
@@ -302,18 +753,18 @@ export async function POST(request: NextRequest) {
         type: WalletTransactionType.SYSTEM,
         amount: amount,
         balanceBefore: walletBalance,
-        balanceAfter: walletBalance, // Balance stays the same!
-        reference: `RESERVE_${subscription.id}`,
+        balanceAfter: walletBalance,
+        reference: `RESERVE_${preOrder.id}`,
         description: tokenSaved 
-          ? `🔒 Token purchased & reserved for ${serviceType} delivery on ${new Date(deliveryDate).toLocaleDateString()}`
-          : `🔒 Reserved for ${serviceType} delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
+          ? `🔒 Token purchased & reserved for delivery on ${new Date(deliveryDate).toLocaleDateString()}`
+          : `🔒 Reserved for electricity delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
         status: TransactionStatus.PENDING,
-        category: serviceType === "electricity" ? WalletCategory.ELECTRICITY : WalletCategory.CABLE_TV,
+        category: WalletCategory.ELECTRICITY,
         channel: ChannelType.MOBILE_APP,
         metadata: {
-          subscriptionId: subscription.id,
+          preOrderId: preOrder.id,
           deliveryDate: deliveryDate,
-          serviceType: serviceType,
+          serviceType: "electricity",
           isReserved: true,
           amountReserved: amount,
           status: "RESERVED",
@@ -324,54 +775,30 @@ export async function POST(request: NextRequest) {
           token: token,
           walletId: walletId,
           paymentPending: true,
+          source: "SubscriptionAPI",
+          wasDebited: wasDebited,
+          commission: {
+            vendorCommission,
+            vendorTotalAmount,
+            commissionRate,
+            platformProfit: platformCommission,
+          },
         },
       },
     });
 
-    console.log(`🔒 [SUBSCRIPTION] Amount reserved (PENDING): ${amount} (${reserveTransaction.reference})`);
+    // ============================================================
+    // SCHEDULE DELIVERY JOB
+    // ============================================================
 
-    // ✅ Create PreOrder for tracking
-    if (serviceType === "electricity") {
-      await prisma.preOrder.create({
-        data: {
-          userId: user.id,
-          disCo: discoEnum, // ✅ Use mapped enum
-          meterNumber: meterNumber,
-          meterType: MeterType.HOME,
-          meterName: `${discoCode} Meter`,
-          amount: amount,
-          serviceFee: 0,
-          totalDebited: 0, // ✅ Not debited yet (0)
-          deliveryDate: selectedDate,
-          status: tokenSaved ? PreOrderStatus.PURCHASED : PreOrderStatus.PENDING,
-          transactionId: vtuTransactionId,
-          tokenVaultId: tokenVaultId,
-          isCancelled: false,
-          channel: ChannelType.MOBILE_APP,
-          metadata: {
-            subscriptionId: subscription.id,
-            isReserved: true,
-            reservedAmount: amount,
-            scheduledDate: deliveryDate,
-            tokenPurchased: tokenSaved,
-            token: token,
-            walletId: walletId,
-            paymentPending: true,
-          },
-        },
-      });
-      console.log(`📝 [SUBSCRIPTION] Pre-order created (PENDING)`);
-    }
-
-    // ✅ Schedule delivery job
     await prisma.job.create({
       data: {
         type: JobType.SUBSCRIPTION_PROCESSING,
         status: JobStatus.PENDING,
         payload: {
-          subscriptionId: subscription.id,
+          preOrderId: preOrder.id,
           userId: user.id,
-          serviceType: serviceType,
+          serviceType: "electricity",
           amount: amount,
           deliveryDate: deliveryDate,
           walletId: walletId,
@@ -380,10 +807,16 @@ export async function POST(request: NextRequest) {
           vtuTransactionId: vtuTransactionId,
           token: token,
           tokenPurchased: tokenSaved,
+          wasDebited: wasDebited,
           meterNumber: meterNumber,
-          decoderNumber: decoderNumber,
           discoCode: discoCode,
-          provider: provider,
+          source: "SubscriptionAPI",
+          commission: {
+            vendorCommission,
+            vendorTotalAmount,
+            commissionRate,
+            platformProfit: platformCommission,
+          },
         },
         priority: 5,
         maxAttempts: 3,
@@ -391,17 +824,26 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log(`🔄 [SUBSCRIPTION] Delivery job scheduled for ${selectedDate.toISOString()}`);
+    // ============================================================
+    // INVALIDATE CACHE
+    // ============================================================
 
-    // ✅ Return success (wallet balance unchanged)
+    await Promise.all([
+      CacheService.invalidateWallet(user.id),
+      CacheService.invalidateUser(user.id),
+      CacheService.invalidateCustomer(user.id, user.phone),
+      CacheService.invalidateSavedMeters(user.id),
+    ]);
+
+    const totalTime = Date.now() - startTime;
+    log('info', `Subscription created in ${totalTime}ms`);
+
     return NextResponse.json({
       success: true,
       data: {
-        id: subscription.id,
-        type: subscription.type,
-        amount: Number(subscription.amount),
-        renewalDay: subscription.renewalDay,
-        nextRenewalDate: subscription.nextRenewalDate,
+        id: preOrder.id,
+        type: "electricity",
+        amount: Number(preOrder.amount),
         scheduledDate: deliveryDate,
         deliveryStatus: deliveryStatus,
         tokenPurchased: tokenSaved,
@@ -409,17 +851,26 @@ export async function POST(request: NextRequest) {
         tokenVaultId: tokenVaultId,
         vtuTransactionId: vtuTransactionId,
         amountReserved: amount,
-        walletBalance: walletBalance, // ✅ Balance unchanged
+        walletBalance: walletBalance,
         reservedAmount: amount,
         walletId: walletId,
+        wasDebited: wasDebited,
+        commission: {
+          vendorCommission: vendorCommission,
+          vendorTotalAmount: vendorTotalAmount,
+          commissionRate: commissionRate,
+          platformProfit: platformCommission,
+          grossProfit: grossProfit,
+          profitMargin: profitMargin,
+        },
         message: tokenSaved 
-          ? "✅ Subscription created! Token purchased and reserved. Balance will be deducted on delivery date."
-          : "📅 Subscription created! Token will be purchased before delivery date.",
+          ? "✅ Token purchased and reserved! Balance will be deducted on delivery date."
+          : "📅 Subscription created! Token purchase will be completed before delivery date.",
       },
     }, { status: 201 });
 
   } catch (error: any) {
-    console.error("❌ [SUBSCRIPTION] Error:", error);
+    log('error', 'Subscription creation failed', error.message);
     return NextResponse.json({
       success: false,
       error: error.message || "Failed to create subscription",

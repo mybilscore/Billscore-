@@ -1,6 +1,6 @@
 // ============================================================
-// BILSCORE PLATFORM - COMPLETE PRISMA SCHEMA WITH SECURITY
-// Version: 4.5
+// BILSCORE PLATFORM - COMPLETE PRISMA SCHEMA WITH REFUND SYSTEM
+// Version: 5.0 - Fixed All Relations (Final)
 // Database: MySQL 8.0+
 // ============================================================
 
@@ -41,6 +41,7 @@ enum ChannelType {
   TELEGRAM
   MESSENGER
   API
+  WEB_APP  
 }
 
 enum Language {
@@ -364,6 +365,7 @@ enum WalletCategory {
   QR_PAYMENT
   SYSTEM
   ADMIN_ADJUSTMENT
+  REFUND
 }
 
 enum TicketPriority {
@@ -560,7 +562,87 @@ enum BlockReason {
 }
 
 // ============================================================
-// SECURITY TABLES (FIXED)
+// DYNAMIC PLAN MANAGEMENT ENUMS
+// ============================================================
+
+enum PlanType {
+  SME
+  GIFTING
+  COOPERATE_GIFTING
+  CORPORATE
+  PREMIUM
+  STANDARD
+  BASIC
+}
+
+enum ValidityUnit {
+  HOURS
+  DAYS
+  MONTHS
+  YEARS
+  MINUTES
+}
+
+enum PlanStatus {
+  ACTIVE
+  INACTIVE
+  DEPRECATED
+  COMING_SOON
+}
+
+enum PlanCategory {
+  DATA
+  AIRTIME
+  VOICE
+  SMS
+  BUNDLE
+  ROAMING
+  SPECIAL
+}
+
+// ============================================================
+// REFUND SYSTEM ENUMS
+// ============================================================
+
+enum RefundStatus {
+  NONE
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+  CANCELLED
+  PARTIAL
+  MANUAL_REVIEW
+}
+
+enum RefundType {
+  AUTOMATIC
+  MANUAL
+  USER_REQUESTED
+  ADMIN_INITIATED
+  SYSTEM_CORRECTION
+}
+
+enum RefundApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+enum RefundNotificationType {
+  INITIATED
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+// ============================================================
+// SECURITY TABLES
 // ============================================================
 
 model RegistrationAttempt {
@@ -602,7 +684,7 @@ model AuditLog {
   timestamp     DateTime  @default(now())
   createdAt     DateTime  @default(now())
 
-  // Relations - FIXED: Removed direct securityEvents relation
+  // Relations
   user          User?     @relation("UserAudit", fields: [userId], references: [id])
 
   @@index([userId])
@@ -637,7 +719,7 @@ model SecurityEvent {
   eventType     SecurityEventType
   ipAddress     String
   userAgent     String?
-  sessionId     String?             // Single definition
+  sessionId     String?
   location      String?
   deviceId      String?
   details       Json?
@@ -652,15 +734,11 @@ model SecurityEvent {
 
   // Relations
   user          User?               @relation("UserSecurityEvents", fields: [userId], references: [id])
-  
   registrationAttemptId String?
   registrationAttempt RegistrationAttempt? @relation(fields: [registrationAttemptId], references: [id])
-  
   rateLimitId   String?
   rateLimit     RateLimit?          @relation(fields: [rateLimitId], references: [id])
-  
   session       Session?            @relation(fields: [sessionId], references: [id])
-  
   blockedIPId   String?
   blockedIP     BlockedIP?          @relation(fields: [blockedIPId], references: [id])
 
@@ -686,7 +764,7 @@ model BlockedIP {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // Relations - FIXED: Added opposite relation
+  // Relations
   securityEvents SecurityEvent[]
 
   @@index([ipAddress])
@@ -698,10 +776,10 @@ model BlockedIP {
 model SecurityAlert {
   id            String    @id @default(uuid())
   type          String
-  severity      String    // CRITICAL, HIGH, MEDIUM, LOW
+  severity      String
   message       String
   details       Json?
-  source        String?   // IP, User, System
+  source        String?
   sourceId      String?
   isResolved    Boolean   @default(false)
   resolvedAt    DateTime?
@@ -721,7 +799,7 @@ model SecurityAlert {
 }
 
 // ============================================================
-// CORE TABLES (UPDATED WITH SECURITY RELATIONS)
+// CORE TABLES
 // ============================================================
 
 model User {
@@ -822,17 +900,21 @@ model User {
   commissionSettings    CommissionSetting[]
   customerAnalytics     CustomerAnalytics[]
 
-  // Security relations - FIXED: Removed blockedIPs direct relation
-  // Users are linked to BlockedIP through SecurityEvents
+  // Security relations
   securityEvents        SecurityEvent[]    @relation("UserSecurityEvents")
   securityAlerts        SecurityAlert[]
 
+  // ✅ REFUND SYSTEM RELATIONS
+  refunds               Refund[]        @relation("UserRefunds")
+  refundApprovals       RefundApproval[] @relation("UserApprovals")
+  refundAuditLogs       RefundAuditLog[] @relation("UserAuditLogs")
+  refundNotifications   RefundNotification[]
+  initiatedRefunds      Refund[]        @relation("InitiatedRefunds")
+  processedRefunds      Refund[]        @relation("ProcessedRefunds")
+  approvedRefunds       Refund[]        @relation("ApprovedRefunds")
+
   @@map("users")
 }
-
-// ============================================================
-// REMAINING MODELS (UNCHANGED)
-// ============================================================
 
 model Channel {
   id                String        @id @default(uuid())
@@ -882,6 +964,7 @@ model Wallet {
   user              User            @relation(fields: [userId], references: [id])
   transactions      WalletTransaction[]
   fundingHistory    WalletFunding[]
+  refunds           Refund[]        @relation("WalletRefunds")
 
   @@index([userId])
   @@index([accountNumber])
@@ -950,6 +1033,10 @@ model WalletTransaction {
   
   creditTransferId  String?               @unique
   creditTransfer    WalletTransfer?       @relation("CreditTransfer", fields: [creditTransferId], references: [id])
+
+  // ✅ REFUND RELATION – fields/references on THIS side (WalletTransaction holds the foreign key)
+  refundId          String?               @unique
+  refund            Refund?               @relation("WalletTransactionRefund", fields: [refundId], references: [id], map: "wallet_transaction_refund_fkey")
 
   @@index([walletId])
   @@index([userId])
@@ -1568,6 +1655,10 @@ model Vendor {
   selectedTransactions  VtuTransaction[]        @relation("SelectedVendor")
   vendorTransactions    VtuTransaction[]        @relation("VendorTransactions")
 
+  // Plan management relations
+  dataPlans             DataPlan[]              @relation("PlanVendor")
+  planImports           PlanImportLog[]         @relation("PlanImportVendor")
+
   @@map("vendors")
 }
 
@@ -1744,7 +1835,7 @@ model VendorSelectionLog {
 }
 
 // ============================================================
-// VTU TRANSACTIONS
+// VTU TRANSACTIONS - WITH REFUND SUPPORT
 // ============================================================
 
 model VtuTransaction {
@@ -1752,21 +1843,31 @@ model VtuTransaction {
   userId                String
   transactionType       VtuType
   product               String
+  
+  // Amount tracking
   amount                Decimal
   serviceFee            Decimal               @default(0)
-  totalDebited          Decimal
-
+  totalDebited          Decimal               @default(0)
+  
+  // Refund tracking
+  totalRefunded         Decimal               @default(0)
+  refundStatus          RefundStatus          @default(NONE)
+  refundId              String?               @unique
+  
+  // Vendor selection & fallback
   selectedVendorId      String?
   vendorPriorityUsed    Int?
   fallbackAttempts      Int                   @default(0)
   failedVendors         Json?
 
+  // Vendor info
   vendor                VtuVendor?
   vendorReference       String?
   status                TransactionStatus     @default(PENDING)
   retryCount            Int                   @default(0)
   maxRetries            Int                   @default(3)
 
+  // Service details
   meterNumber           String?
   meterType             MeterType?
   meterName             String?
@@ -1777,19 +1878,43 @@ model VtuTransaction {
   tokenValidUntil       DateTime?
   scheduledFor          DateTime?
   deliveredAt           DateTime?
+  
+  // Bulk & channel
   isBulkPurchase        Boolean               @default(false)
   bulkQuantity          Int?
   channel               ChannelType?
   apiKeyId              String?
   qrPaymentId           String?               @unique
+  
+  // Commission & Revenue Tracking
+  vendorCommission      Decimal?              @default(0)
+  vendorTotalAmount     Decimal?              @default(0)
+  commissionRate        Decimal?              @default(0)
+  commissionType        String?
+  commissionComputation String?
+  commissionMetadata    Json?
+  costPrice             Decimal?              @default(0)
+  sellingPrice          Decimal?              @default(0)
+  grossProfit           Decimal?              @default(0)
+  profitMargin          Decimal?              @default(0)
+  platformCommission    Decimal?              @default(0)
+  platformTotalAmount   Decimal?              @default(0)
+  netProfit             Decimal?              @default(0)
+  totalCommission       Decimal?              @default(0)
+  effectiveRate         Decimal?              @default(0)
+  
+  // Metadata
   metadata              Json?
+  
+  // Timestamps
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
 
   // Relations
   user                  User                  @relation(fields: [userId], references: [id])
-  
   selectedVendor        Vendor?               @relation("SelectedVendor", fields: [selectedVendorId], references: [id])
+  vendorInfo            Vendor?               @relation("VendorTransactions", fields: [vendorId], references: [id])
+  vendorId              String?
   
   walletTransactionId   String?               @unique
   walletTransaction     WalletTransaction?    @relation("WalletToVtu")
@@ -1799,20 +1924,35 @@ model VtuTransaction {
   
   qrPayment             QRPayment?            @relation("QRToVtu")
   
-  vendorId              String?
-  vendorInfo            Vendor?               @relation("VendorTransactions", fields: [vendorId], references: [id])
-  
   preOrder              PreOrder?
   tokenVault            TokenVault?
-  apiKey                DeveloperApiKey?      @relation(fields: [apiKeyId], references: [id])
-  attempts              VtuTransactionAttempt[]
   
+  apiKey                DeveloperApiKey?      @relation(fields: [apiKeyId], references: [id])
+  
+  attempts              VtuTransactionAttempt[]
   customerTransaction   CustomerTransaction?  @relation("VtuToCustomer")
+
+  dataPlanId            String?
+  dataPlan              DataPlan?             @relation(fields: [dataPlanId], references: [id])
+
+  // ✅ REFUND RELATION - NO fields/references here (fields/references on Refund side)
+  refund                Refund?               @relation("TransactionRefund")
 
   @@index([userId])
   @@index([status])
   @@index([createdAt])
   @@index([selectedVendorId])
+  @@index([dataPlanId])
+  @@index([vendorCommission])
+  @@index([grossProfit])
+  @@index([profitMargin])
+  @@index([vendor])
+  @@index([transactionType])
+  @@index([createdAt, status])
+  @@index([vendor, createdAt])
+  @@index([transactionType, createdAt])
+  @@index([status, vendorCommission])
+  @@index([refundStatus])
   @@map("vtu_transactions")
 }
 
@@ -2310,6 +2450,8 @@ model DailyMetric {
   walletFundingCount    Int             @default(0)
   walletFundingVolume   Decimal         @default(0)
   walletTransfers       Int             @default(0)
+  refundsProcessed      Int             @default(0)
+  refundsAmount         Decimal         @default(0)
   metadata              Json?
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
@@ -2412,13 +2554,14 @@ model EmailLog {
 }
 
 // ============================================================
-// USER SESSIONS & AUTH (UPDATED)
+// USER SESSIONS & AUTH
 // ============================================================
 
 model Session {
   id                    String          @id @default(uuid())
   userId                String
-  token                 String          @unique
+  tokenHash             String          @unique
+  token                 String          @db.Text
   deviceInfo            String?
   ipAddress             String?
   userAgent             String?
@@ -2435,7 +2578,7 @@ model Session {
   securityEvents        SecurityEvent[]
 
   @@index([userId])
-  @@index([token])
+  @@index([tokenHash])
   @@index([isActive])
   @@map("sessions")
 }
@@ -3485,4 +3628,277 @@ model SavedDecoder {
   @@index([userId])
   @@index([isDefault])
   @@map("saved_decoders")
+}
+
+// ============================================================
+// DYNAMIC PLAN MANAGEMENT TABLES
+// ============================================================
+
+model DataPlan {
+  id                    String          @id @default(uuid())
+  
+  // Plan identification
+  network               NetworkProvider
+  planType              PlanType        @default(GIFTING)
+  planCategory          PlanCategory    @default(DATA)
+  name                  String
+  amountMB              Int
+  description           String?
+  
+  // Pricing
+  ourPrice              Decimal         @default(0)
+  vendorPrice           Decimal         @default(0)
+  
+  // Validity
+  validity              Int
+  validityUnit          ValidityUnit    @default(DAYS)
+  
+  // Status
+  isActive              Boolean         @default(true)
+  status                PlanStatus      @default(ACTIVE)
+  
+  // Vendor-agnostic fields
+  vendorId              String?
+  vendorPlanId          String?
+  vendorNetworkCode     String?
+  vendorPlanType        String?
+  vendorMetadata        Json?
+  
+  // Import tracking
+  importBatch           String?
+  lastSyncedAt          DateTime?
+  
+  // Audit
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  networkConfig         NetworkConfig?  @relation(fields: [network], references: [network])
+  vendor                Vendor?         @relation("PlanVendor", fields: [vendorId], references: [id])
+  priceHistory          PlanPriceHistory[]
+  transactions          VtuTransaction[]
+
+  @@unique([vendorId, vendorPlanId])
+  @@index([network])
+  @@index([vendorId])
+  @@index([isActive])
+  @@index([status])
+  @@index([importBatch])
+  @@map("data_plans")
+}
+
+model NetworkConfig {
+  id                    String          @id @default(uuid())
+  network               NetworkProvider @unique
+  code                  String
+  displayName           String
+  logo                  String?
+  color                 String?
+  isActive              Boolean         @default(true)
+  priority              Int             @default(1)
+  vendorNetworkMapping  Json?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  plans                 DataPlan[]
+
+  @@map("network_configs")
+}
+
+model PlanPriceHistory {
+  id                    String          @id @default(uuid())
+  dataPlanId            String
+  oldPrice              Decimal
+  newPrice              Decimal
+  changedBy             String
+  changeReason          String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  dataPlan              DataPlan        @relation(fields: [dataPlanId], references: [id])
+
+  @@index([dataPlanId])
+  @@index([createdAt])
+  @@map("plan_price_histories")
+}
+
+model PlanImportLog {
+  id                    String          @id @default(uuid())
+  vendorId              String?
+  vendorCode            String
+  totalRecords          Int
+  successfulRecords     Int
+  failedRecords         Int
+  errors                Json
+  source                String
+  importedBy            String?
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  vendor                Vendor?         @relation("PlanImportVendor", fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@index([vendorCode])
+  @@index([createdAt])
+  @@map("plan_import_logs")
+}
+
+// ============================================================
+// REFUND SYSTEM TABLES
+// ============================================================
+
+model Refund {
+  id                    String            @id @default(uuid())
+  refundReference       String            @unique
+  transactionId         String            @unique   // one-to-one with VtuTransaction
+  userId                String
+  
+  // Refund details
+  amount                Decimal
+  fee                   Decimal           @default(0)
+  totalRefunded         Decimal
+  
+  // Status tracking
+  status                RefundStatus      @default(PENDING)
+  type                  RefundType        @default(AUTOMATIC)
+  reason                String
+  reasonCode            String?
+  
+  // Processing details
+  initiatedBy           String?
+  approvedBy            String?
+  approvedAt            DateTime?
+  processedBy           String?
+  
+  // Wallet tracking
+  walletTransactionId   String?           @unique
+  walletId              String?
+  
+  // Timestamps
+  initiatedAt           DateTime          @default(now())
+  processedAt           DateTime?
+  completedAt           DateTime?
+  
+  // Metadata
+  metadata              Json?
+  notes                 String?
+  
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  // ✅ TRANSACTION RELATION – fields/references HERE (required side)
+  transaction           VtuTransaction    @relation("TransactionRefund", fields: [transactionId], references: [id], map: "refund_transaction_fkey")
+  
+  // User relations
+  user                  User              @relation("UserRefunds", fields: [userId], references: [id])
+  initiatedByUser       User?             @relation("InitiatedRefunds", fields: [initiatedBy], references: [id])
+  approvedByUser        User?             @relation("ApprovedRefunds", fields: [approvedBy], references: [id])
+  processedByUser       User?             @relation("ProcessedRefunds", fields: [processedBy], references: [id])
+  
+  // ✅ WALLET TRANSACTION RELATION – NO fields/references here (fields on WalletTransaction)
+  walletTransaction     WalletTransaction? @relation("WalletTransactionRefund")
+  
+  // Wallet relation
+  wallet                Wallet?           @relation("WalletRefunds", fields: [walletId], references: [id])
+  
+  // One-to-many relations
+  approvalWorkflow      RefundApproval[]
+  auditLogs             RefundAuditLog[]
+  notifications         RefundNotification[]
+  attachments           RefundAttachment[]
+
+  @@index([transactionId])
+  @@index([userId])
+  @@index([status])
+  @@index([refundReference])
+  @@index([createdAt])
+  @@index([type])
+  @@map("refunds")
+}
+
+model RefundApproval {
+  id                    String                @id @default(uuid())
+  refundId              String
+  approverId            String
+  level                 Int                   @default(1)
+  status                RefundApprovalStatus  @default(PENDING)
+  comments              String?
+  approvedAt            DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  // Relations
+  refund                Refund                @relation(fields: [refundId], references: [id])
+  approver              User                  @relation("UserApprovals", fields: [approverId], references: [id])
+
+  @@index([refundId])
+  @@index([approverId])
+  @@index([status])
+  @@map("refund_approvals")
+}
+
+model RefundAuditLog {
+  id                    String            @id @default(uuid())
+  refundId              String
+  action                String
+  performedBy           String
+  changes               Json?
+  notes                 String?
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime          @default(now())
+
+  // Relations
+  refund                Refund            @relation(fields: [refundId], references: [id])
+  user                  User              @relation("UserAuditLogs", fields: [performedBy], references: [id])
+
+  @@index([refundId])
+  @@index([createdAt])
+  @@index([action])
+  @@map("refund_audit_logs")
+}
+
+model RefundNotification {
+  id                    String                @id @default(uuid())
+  refundId              String
+  userId                String
+  type                  RefundNotificationType
+  sentAt                DateTime              @default(now())
+  delivered             Boolean               @default(false)
+  channel               DeliveryChannel
+  message               String
+  metadata              Json?
+
+  // Relations
+  refund                Refund                @relation(fields: [refundId], references: [id])
+  user                  User                  @relation(fields: [userId], references: [id])
+
+  @@index([refundId])
+  @@index([userId])
+  @@index([type])
+  @@map("refund_notifications")
+}
+
+model RefundAttachment {
+  id                    String          @id @default(uuid())
+  refundId              String
+  url                   String
+  filename              String
+  mimeType              String
+  size                  Int
+  uploadedBy            String
+  description           String?
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  refund                Refund          @relation(fields: [refundId], references: [id])
+
+  @@index([refundId])
+  @@map("refund_attachments")
 }

@@ -1,20 +1,20 @@
 // app/api/auth/register/route.ts
+// FIXED - Let PalmPay create the wallet
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
 import { z } from "zod";
+import { registrationBruteForce } from "~/lib/brute-force";
+import { auditLogger, AuditActions } from "~/lib/audit-log";
+import { withRateLimit } from "~/lib/rate-limt";
 import { 
-  registrationBruteForce,
-  loginBruteForce 
-} from "~/lib/brute-force";
-import { 
-  auditLogger, 
-  AuditActions 
-} from "~/lib/audit-log";
-import { registrationRateLimiter, withRateLimit } from "~/lib/rate-limt";
+  createPalmPayVirtualAccountForUser, 
+  isPalmPaySimulationMode 
+} from "~/lib/palmpay/palmpay-wallet.service";
 
 // ============================================================
-// VALIDATION SCHEMA - SUPPORTS BOTH confirmPassword AND pin
+// VALIDATION SCHEMA
 // ============================================================
 
 const registrationSchema = z.object({
@@ -50,11 +50,6 @@ function generateReferralCode(): string {
   return code;
 }
 
-async function generateVirtualAccountNumber(): Promise<string> {
-  const random = Math.floor(1000000000 + Math.random() * 9000000000);
-  return random.toString().padStart(10, "0");
-}
-
 async function isUsernameAvailable(username: string): Promise<boolean> {
   const existing = await prisma.user.findUnique({
     where: { username: username.toLowerCase().trim() },
@@ -64,7 +59,7 @@ async function isUsernameAvailable(username: string): Promise<boolean> {
 }
 
 // ============================================================
-// RATE LIMITING MIDDLEWARE
+// RATE LIMITING
 // ============================================================
 
 async function checkRateLimit(request: NextRequest): Promise<{
@@ -77,23 +72,10 @@ async function checkRateLimit(request: NextRequest): Promise<{
   const key = `register:${ip}`;
   
   const result = await withRateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: 5,           // 5 attempts
-    blockDurationMs: 24 * 60 * 60 * 1000, // 24 hours block
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 5,
+    blockDurationMs: 24 * 60 * 60 * 1000,
   })(request, key);
-
-  if (!result.allowed) {
-    await auditLogger.log({
-      action: AuditActions.RATE_LIMIT_EXCEEDED,
-      metadata: {
-        ip,
-        key,
-        remaining: result.remaining,
-        resetAt: result.resetAt,
-      },
-      ipAddress: ip as string,
-    });
-  }
 
   return result;
 }
@@ -116,12 +98,7 @@ export async function POST(request: NextRequest) {
           code: 'RATE_LIMIT_EXCEEDED',
           resetAt: rateLimit.resetAt,
         },
-        { 
-          status: 429,
-          headers: {
-            'Retry-After': Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000).toString(),
-          },
-        }
+        { status: 429 }
       );
     }
 
@@ -129,23 +106,12 @@ export async function POST(request: NextRequest) {
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
     const userAgent = request.headers.get('user-agent') || 'unknown';
 
-    console.log("📝 Registration request:", {
-      username: body.username,
-      email: body.email,
-      fullName: body.fullName,
-      phone: body.phone,
-      hasPassword: !!body.password,
-      hasConfirmPassword: !!body.confirmPassword,
-      hasPin: !!body.pin,
-      referralCode: body.referralCode,
-    });
-
     // ============================================================
     // STEP 2: BRUTE FORCE PROTECTION
     // ============================================================
     const emailBlocked = await registrationBruteForce.isBlocked(body.email, ip as string);
     if (emailBlocked.blocked) {
-      await auditLogger.log({
+      auditLogger.log({
         action: AuditActions.BRUTE_FORCE_ATTEMPT,
         userId: body.email,
         metadata: {
@@ -156,7 +122,7 @@ export async function POST(request: NextRequest) {
         },
         ipAddress: ip as string,
         userAgent,
-      });
+      }).catch(() => {});
 
       return NextResponse.json(
         {
@@ -174,36 +140,40 @@ export async function POST(request: NextRequest) {
     // ============================================================
     const validated = registrationSchema.parse(body);
 
-    // Check if password and confirmPassword match
+    // Check passwords match
     if (validated.confirmPassword && validated.password !== validated.confirmPassword) {
       await registrationBruteForce.recordFailedAttempt(
         body.email,
         ip as string,
         { reason: 'password_mismatch' }
       );
-
       return NextResponse.json(
-        { 
-          success: false, 
-          error: "Passwords do not match",
-          code: 'PASSWORD_MISMATCH',
-        },
+        { success: false, error: "Passwords do not match", code: 'PASSWORD_MISMATCH' },
         { status: 400 }
       );
     }
 
     // ============================================================
-    // STEP 4: Check if user already exists
+    // STEP 4: PARALLEL CHECKS
     // ============================================================
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: validated.email },
-          { phone: validated.phone },
-          ...(validated.username ? [{ username: validated.username.toLowerCase().trim() }] : []),
-        ],
-      },
-    });
+    const checks: Promise<any>[] = [
+      prisma.user.findFirst({
+        where: {
+          OR: [
+            { email: validated.email },
+            { phone: validated.phone },
+            ...(validated.username ? [{ username: validated.username.toLowerCase().trim() }] : []),
+          ],
+        },
+        select: { id: true, email: true, phone: true, username: true },
+      }),
+    ];
+
+    if (validated.username) {
+      checks.push(isUsernameAvailable(validated.username));
+    }
+
+    const [existingUser, usernameAvailable] = await Promise.all(checks);
 
     if (existingUser) {
       let field = "";
@@ -218,33 +188,24 @@ export async function POST(request: NextRequest) {
       );
 
       return NextResponse.json(
-        { 
-          success: false, 
-          error: `${field} already in use`,
-          code: 'DUPLICATE_USER',
-          field,
-        },
+        { success: false, error: `${field} already in use`, code: 'DUPLICATE_USER', field },
+        { status: 409 }
+      );
+    }
+
+    if (validated.username && !usernameAvailable) {
+      return NextResponse.json(
+        { success: false, error: "Username is already taken. Please choose another one." },
         { status: 409 }
       );
     }
 
     // ============================================================
-    // STEP 5: Handle username
+    // STEP 5: Generate username if not provided
     // ============================================================
     let finalUsername = validated.username?.toLowerCase().trim();
 
-    if (finalUsername) {
-      const available = await isUsernameAvailable(finalUsername);
-      if (!available) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: "Username is already taken. Please choose another one." 
-          },
-          { status: 409 }
-        );
-      }
-    } else {
+    if (!finalUsername) {
       const base = validated.fullName
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '')
@@ -264,32 +225,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`🆔 Final username: ${finalUsername}`);
-
     // ============================================================
     // STEP 6: Hash password and PIN
     // ============================================================
     const hashedPassword = await hash(validated.password, 10);
-    
-    let pinToUse = validated.pin;
-    let hashedPin = null;
-    
-    if (pinToUse) {
-      hashedPin = await hash(pinToUse, 10);
-      console.log("🔐 PIN provided and hashed");
-    } else {
-      const defaultPin = "1234";
-      hashedPin = await hash(defaultPin, 10);
-      console.log("🔐 No PIN provided, using default: 1234");
-    }
+    const defaultPin = "1234";
+    const pinToUse = validated.pin || defaultPin;
+    const hashedPin = await hash(pinToUse, 10);
 
-    // ============================================================
-    // STEP 7: Generate referral code
-    // ============================================================
     const referralCode = generateReferralCode();
 
     // ============================================================
-    // STEP 8: Create user
+    // STEP 7: CREATE USER ONLY (NO WALLET YET)
     // ============================================================
     const user = await prisma.user.create({
       data: {
@@ -315,9 +262,187 @@ export async function POST(request: NextRequest) {
     console.log(`✅ User created: ${user.id}`);
 
     // ============================================================
-    // STEP 9: LOG AUDIT - USER REGISTERED
+    // STEP 8: RECORD SUCCESSFUL ATTEMPT
     // ============================================================
-    await auditLogger.log({
+    try {
+      await registrationBruteForce.recordSuccessfulAttempt(body.email, ip as string);
+    } catch (e) {
+      // Ignore if record doesn't exist
+      console.log('⚠️ Registration attempt record not found, skipping');
+    }
+
+    // ============================================================
+    // STEP 9: CREATE PALMPAY WALLET (Synchronous - required)
+    // ============================================================
+    let wallet: any = null;
+    let virtualAccountNo: string | null = null;
+    let isSimulation = false;
+    let palmpayError: string | null = null;
+
+    try {
+      console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
+      
+      const result = await createPalmPayVirtualAccountForUser(
+        user.id,
+        {
+          fullName: validated.fullName,
+          email: validated.email,
+          phone: validated.phone,
+          role: validated.role,
+        }
+      );
+
+      wallet = result.wallet;
+      virtualAccountNo = result.virtualAccount.virtualAccountNo;
+      isSimulation = isPalmPaySimulationMode();
+
+      console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
+      console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
+      
+    } catch (error: any) {
+      console.error('❌ PalmPay virtual account creation failed:', error);
+      palmpayError = error.message;
+      
+      // ✅ If PalmPay fails, create a fallback wallet
+      const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+      
+      wallet = await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          accountNumber: accountNumber,
+          bankName: "BILSCORE",
+          accountName: user.fullName,
+          walletBalance: 0,
+          ledgerBalance: 0,
+          currency: "NGN",
+          isActive: true,
+          kycLevel: 1,
+          metadata: {
+            createdVia: "registration_fallback",
+            palmpayError: palmpayError,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      // Update user
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { hasWallet: true },
+      });
+
+      console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
+    }
+
+    // ============================================================
+    // STEP 10: CREDIT WELCOME BONUS
+    // ============================================================
+    const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
+
+    if (wallet) {
+      // Check if welcome bonus was already credited
+      const existingBonus = await prisma.walletTransaction.findFirst({
+        where: {
+          walletId: wallet.id,
+          reference: { startsWith: 'WELCOME_BONUS_' },
+        },
+      });
+
+      if (!existingBonus) {
+        const currentBalance = Number(wallet.walletBalance || 0);
+
+        await prisma.$transaction([
+          prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              walletBalance: { increment: WELCOME_BONUS },
+              ledgerBalance: { increment: WELCOME_BONUS },
+            },
+          }),
+          prisma.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              userId: user.id,
+              type: "CREDIT",
+              amount: WELCOME_BONUS,
+              balanceBefore: currentBalance,
+              balanceAfter: currentBalance + WELCOME_BONUS,
+              reference: `WELCOME_BONUS_${user.id}`,
+              description: `🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+              status: "SUCCESS",
+              category: "SYSTEM",
+              metadata: {
+                isWelcomeBonus: true,
+                amount: WELCOME_BONUS,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          }),
+        ]);
+
+        // Update user
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { 
+            walletBalance: currentBalance + WELCOME_BONUS,
+          },
+        });
+
+        console.log(`🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} credited`);
+      }
+    }
+
+    // ============================================================
+    // STEP 11: REFERRAL BONUS (Non-blocking)
+    // ============================================================
+    let referralBonus = 0;
+
+    if (validated.referralCode && wallet) {
+      (async () => {
+        try {
+          const referrer = await prisma.user.findUnique({
+            where: { referralCode: validated.referralCode },
+            include: { wallet: true },
+          });
+
+          if (referrer && referrer.wallet) {
+            referralBonus = 500;
+            
+            await prisma.$transaction([
+              prisma.wallet.update({
+                where: { id: referrer.wallet.id },
+                data: {
+                  walletBalance: {
+                    increment: referralBonus,
+                  },
+                },
+              }),
+              prisma.walletTransaction.create({
+                data: {
+                  walletId: referrer.wallet.id,
+                  userId: referrer.id,
+                  type: "CREDIT",
+                  amount: referralBonus,
+                  balanceBefore: Number(referrer.wallet.walletBalance),
+                  balanceAfter: Number(referrer.wallet.walletBalance) + referralBonus,
+                  reference: `REFERRAL_${user.id}`,
+                  description: `Referral bonus for ${user.fullName}`,
+                  status: "SUCCESS",
+                  category: "SYSTEM",
+                },
+              }),
+            ]);
+          }
+        } catch (e) {
+          console.error('❌ Referral bonus failed:', e);
+        }
+      })();
+    }
+
+    // ============================================================
+    // STEP 12: AUDIT LOG (Non-blocking)
+    // ============================================================
+    auditLogger.log({
       userId: user.id,
       action: AuditActions.USER_REGISTERED,
       metadata: {
@@ -331,130 +456,13 @@ export async function POST(request: NextRequest) {
       },
       ipAddress: ip as string,
       userAgent,
-    });
+    }).catch(() => {});
 
     // ============================================================
-    // STEP 10: RECORD SUCCESSFUL ATTEMPT
+    // STEP 13: Return success response
     // ============================================================
-    await registrationBruteForce.recordSuccessfulAttempt(body.email, ip as string);
+    const finalWalletBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
-    // ============================================================
-    // STEP 11: Create wallet for user WITH WELCOME BONUS
-    // ============================================================
-    const accountNumber = await generateVirtualAccountNumber();
-    
-    // ✅ NEW: Define welcome bonus amount
-    const WELCOME_BONUS = 20000; // ₦20,000
-    
-    // ✅ UPDATED: Create wallet with welcome bonus
-    const wallet = await prisma.wallet.create({
-      data: {
-        userId: user.id,
-        accountNumber: accountNumber,
-        bankName: "PALMPAY",
-        accountName: user.fullName,
-        walletBalance: WELCOME_BONUS, // ✅ Set welcome bonus
-        ledgerBalance: WELCOME_BONUS, // ✅ Set welcome bonus
-        currency: "NGN",
-        isActive: true,
-        kycLevel: 1,
-        metadata: {
-          createdVia: "registration",
-          timestamp: new Date().toISOString(),
-          welcomeBonus: WELCOME_BONUS, // ✅ Store welcome bonus in metadata
-        },
-      },
-    });
-
-    console.log(`💰 Wallet created: ${wallet.id} (${wallet.accountNumber})`);
-    console.log(`🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} credited`);
-
-    // Update user to mark wallet as created and set wallet balance
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { 
-        hasWallet: true,
-        walletBalance: WELCOME_BONUS, // ✅ Update user's wallet balance
-      },
-    });
-
-    // ✅ NEW: Create welcome bonus transaction
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "CREDIT",
-        amount: WELCOME_BONUS,
-        balanceBefore: 0,
-        balanceAfter: WELCOME_BONUS,
-        reference: `WELCOME_BONUS_${user.id}`,
-        description: `🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
-        status: "SUCCESS",
-        category: "SYSTEM",
-        metadata: {
-          isWelcomeBonus: true,
-          amount: WELCOME_BONUS,
-          timestamp: new Date().toISOString(),
-        },
-      },
-    });
-
-    // ============================================================
-    // STEP 12: Handle referral bonus if applicable
-    // ============================================================
-    let referralBonus = 0;
-    
-    if (validated.referralCode) {
-      const referrer = await prisma.user.findUnique({
-        where: { referralCode: validated.referralCode },
-        include: { wallet: true },
-      });
-
-      if (referrer && referrer.wallet) {
-        referralBonus = 500;
-        
-        await prisma.$transaction([
-          prisma.wallet.update({
-            where: { id: referrer.wallet.id },
-            data: {
-              walletBalance: {
-                increment: referralBonus,
-              },
-            },
-          }),
-          prisma.walletTransaction.create({
-            data: {
-              walletId: referrer.wallet.id,
-              userId: referrer.id,
-              type: "CREDIT",
-              amount: referralBonus,
-              balanceBefore: Number(referrer.wallet.walletBalance),
-              balanceAfter: Number(referrer.wallet.walletBalance) + referralBonus,
-              reference: `REFERRAL_${user.id}`,
-              description: `Referral bonus for ${user.fullName}`,
-              status: "SUCCESS",
-              category: "SYSTEM",
-            },
-          }),
-        ]);
-
-        console.log(`🎁 Referral bonus awarded: ₦${referralBonus} to ${referrer.username}`);
-
-        await auditLogger.log({
-          userId: referrer.id,
-          action: AuditActions.REFERRAL_BONUS,
-          metadata: {
-            referredUser: user.id,
-            referredEmail: user.email,
-            bonusAmount: referralBonus,
-          },
-        });
-      }
-    }
-
-    // ============================================================
-    // STEP 13: Return success response - UPDATED
-    // ============================================================
     return NextResponse.json({
       success: true,
       message: `Registration successful! Your wallet has been created with a ₦${WELCOME_BONUS.toLocaleString()} welcome bonus.`,
@@ -467,34 +475,39 @@ export async function POST(request: NextRequest) {
         role: user.role,
         referralCode: user.referralCode,
         hasWallet: true,
-        walletBalance: WELCOME_BONUS,
+        walletBalance: finalWalletBalance,
       },
-      wallet: {
+      wallet: wallet ? {
         id: wallet.id,
         accountNumber: wallet.accountNumber,
         bankName: wallet.bankName,
         accountName: wallet.accountName,
-        walletBalance: WELCOME_BONUS,
-      },
+        walletBalance: finalWalletBalance,
+        isPalmPay: wallet.bankName === 'PALMPAY',
+      } : null,
+      virtualAccount: virtualAccountNo ? {
+        accountNumber: virtualAccountNo,
+        isSimulation: isSimulation,
+      } : null,
       referralBonus: referralBonus,
-      welcomeBonus: WELCOME_BONUS, // ✅ Include welcome bonus in response
+      welcomeBonus: WELCOME_BONUS,
+      palmpayError: palmpayError,
+      isSimulationMode: isSimulation,
     }, { status: 201 });
 
   } catch (error: any) {
     console.error("❌ Registration error:", error);
 
-    // Record failed attempt on validation or other errors
-    if (error.name !== "ZodError" && error.code !== "P2002") {
-      try {
-        const body = await request.json().catch(() => ({}));
-        await registrationBruteForce.recordFailedAttempt(
-          body.email || 'unknown',
-          request.headers.get('x-forwarded-for') || 'unknown',
-          { error: error.message }
-        );
-      } catch (e) {
-        // Ignore - already failing
-      }
+    // Record failed attempt
+    try {
+      const body = await request.json().catch(() => ({}));
+      await registrationBruteForce.recordFailedAttempt(
+        body.email || 'unknown',
+        request.headers.get('x-forwarded-for') || 'unknown',
+        { error: error.message }
+      );
+    } catch (e) {
+      // Ignore
     }
 
     // Zod validation errors
@@ -503,14 +516,6 @@ export async function POST(request: NextRequest) {
         field: err.path.join('.'),
         message: err.message,
       }));
-
-      await auditLogger.log({
-        action: 'VALIDATION_ERROR',
-        metadata: {
-          errors,
-          ip: request.headers.get('x-forwarded-for') || 'unknown',
-        },
-      });
 
       return NextResponse.json(
         {
@@ -543,16 +548,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Log unknown errors
-    await auditLogger.log({
-      action: 'REGISTRATION_ERROR',
-      metadata: {
-        error: error.message,
-        stack: error.stack,
-        ip: request.headers.get('x-forwarded-for') || 'unknown',
-      },
-    });
-
     return NextResponse.json(
       {
         success: false,
@@ -582,8 +577,8 @@ export async function GET(request: NextRequest) {
 
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
     const result = await withRateLimit({
-      windowMs: 60 * 1000, // 1 minute
-      maxRequests: 30,     // 30 requests
+      windowMs: 60 * 1000,
+      maxRequests: 30,
     })(request, `username:${ip}`);
 
     if (!result.allowed) {

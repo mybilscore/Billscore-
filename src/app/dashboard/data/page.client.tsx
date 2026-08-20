@@ -1,8 +1,8 @@
-// app/dashboard/buy/data/page.client.tsx - UPDATED with inline messages
+// app/dashboard/buy/data/page.client.tsx - UPDATED WITH DROPDOWN
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Phone,
   Wifi,
@@ -18,18 +18,17 @@ import {
   Shield,
   Sparkles,
   ShoppingBag,
-  RotateCcw,
-  CheckCircle2,
   History,
   ChevronDown,
   ChevronUp,
   Star,
-  Layers,
   Tag,
   Gift,
   Lock,
   Eye,
   EyeOff,
+  Layers,
+  Search,
 } from "lucide-react";
 
 interface Plan {
@@ -39,6 +38,9 @@ interface Plan {
   price: number;
   validity: string;
   planCode: string;
+  vendorPrice?: number;
+  description?: string;
+  amountMB?: number;
 }
 
 interface Category {
@@ -68,6 +70,15 @@ interface Customer {
   isFavorite: boolean;
 }
 
+interface NetworkInfo {
+  id: string;
+  name: string;
+  code: string;
+  color: string;
+  logo: string;
+  network: string;
+}
+
 interface DataClientProps {
   user: {
     id: string;
@@ -80,6 +91,12 @@ interface DataClientProps {
   };
   providers: Provider[];
   defaultProvider: string;
+  vendorInfo?: {
+    id: string;
+    name: string;
+    code: string;
+  } | null;
+  networks?: NetworkInfo[];
 }
 
 const formatCurrency = (amount: number) => {
@@ -105,13 +122,62 @@ const formatDate = (dateString: string | null) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Reduced Size Service Detection
+// ✅ Detect network from phone number
+const detectNetworkFromPhone = (phone: string, networks: NetworkInfo[] = []) => {
+  if (!phone || phone.length < 4) return null;
+
+  const prefixes: { [key: string]: string } = {
+    '070': 'MTN',
+    '080': 'MTN',
+    '081': 'MTN',
+    '090': 'MTN',
+    '091': 'MTN',
+    '0701': 'AIRTEL',
+    '0708': 'AIRTEL',
+    '0802': 'AIRTEL',
+    '0808': 'AIRTEL',
+    '0812': 'AIRTEL',
+    '0901': 'AIRTEL',
+    '0902': 'AIRTEL',
+    '0907': 'AIRTEL',
+    '0805': 'GLO',
+    '0807': 'GLO',
+    '0811': 'GLO',
+    '0815': 'GLO',
+    '0905': 'GLO',
+    '0909': 'GLO',
+    '0809': 'NINEMOBILE',
+    '0817': 'NINEMOBILE',
+    '0818': 'NINEMOBILE',
+    '0908': 'NINEMOBILE',
+    '0903': 'NINEMOBILE',
+    '0904': 'NINEMOBILE',
+  };
+
+  const prefix = phone.slice(0, 4);
+  const shortPrefix = phone.slice(0, 3);
+
+  const detected = prefixes[prefix] || prefixes[shortPrefix] || null;
+  
+  if (detected && networks.length > 0) {
+    const matchedNetwork = networks.find(n => 
+      n.name === detected || n.code === detected || n.network === detected
+    );
+    if (matchedNetwork) {
+      return matchedNetwork;
+    }
+  }
+  
+  return null;
+};
+
+// ✅ Service Detection Component
 const ServiceDetection = ({
   phoneNumber,
   detectedNetwork,
 }: {
   phoneNumber: string;
-  detectedNetwork: string | null;
+  detectedNetwork: NetworkInfo | null;
 }) => {
   if (!phoneNumber || phoneNumber.length < 4) return null;
 
@@ -120,7 +186,7 @@ const ServiceDetection = ({
       <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
       <span className="text-xs text-blue-700 dark:text-blue-300">
         {detectedNetwork ? (
-          <>Detected: <strong>{detectedNetwork}</strong></>
+          <>📡 <strong>{detectedNetwork.name}</strong> detected</>
         ) : (
           <>Enter a valid phone number to detect network</>
         )}
@@ -129,112 +195,7 @@ const ServiceDetection = ({
   );
 };
 
-// ✅ Reduced Size Recent Customers Component
-const RecentCustomers = ({
-  customers,
-  onSelect,
-  isLoading,
-}: {
-  customers: Customer[];
-  onSelect: (phone: string) => void;
-  isLoading: boolean;
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-2">
-        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-      </div>
-    );
-  }
-
-  if (!customers || customers.length === 0) {
-    return (
-      <div className="text-center py-2 text-xs text-gray-500 dark:text-gray-400">
-        No recent customers yet.
-      </div>
-    );
-  }
-
-  const displayCustomers = isExpanded ? customers : customers.slice(0, 3);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <History className="h-3.5 w-3.5 text-gray-500" />
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-            Recent Customers
-          </span>
-          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full dark:bg-blue-900/30 dark:text-blue-400">
-            {customers.length}
-          </span>
-        </div>
-        {customers.length > 3 && (
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-0.5"
-          >
-            {isExpanded ? (
-              <>
-                Show less <ChevronUp className="h-3 w-3" />
-              </>
-            ) : (
-              <>
-                View all <ChevronDown className="h-3 w-3" />
-              </>
-            )}
-          </button>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        {displayCustomers.map((customer) => (
-          <button
-            key={customer.id}
-            onClick={() => onSelect(customer.phone)}
-            className="w-full flex items-center justify-between rounded-lg border border-gray-100 p-2 text-left transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 group"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
-                  {customer.fullName || "Unknown"}
-                </p>
-                {customer.isFavorite && (
-                  <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
-                )}
-                {customer.customerType === "VIP" && (
-                  <span className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded dark:bg-purple-900/30 dark:text-purple-400">
-                    VIP
-                  </span>
-                )}
-                {customer.customerType === "WHOLESALE" && (
-                  <span className="text-[8px] bg-green-100 text-green-700 px-1 py-0.5 rounded dark:bg-green-900/30 dark:text-green-400">
-                    Bulk
-                  </span>
-                )}
-              </div>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {customer.phone}
-              </p>
-            </div>
-            <div className="text-right flex-shrink-0 ml-2">
-              <p className="text-xs font-medium text-gray-900 dark:text-white">
-                {formatCurrency(customer.totalSpent)}
-              </p>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {customer.totalTransactions} tx • {formatDate(customer.lastTransactionAt)}
-              </p>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// ✅ SMALLER Provider Button - Reduced size
+// ✅ Provider Button (Same as Airtime)
 const ProviderButton = ({
   provider,
   isSelected,
@@ -296,7 +257,7 @@ const ProviderButton = ({
   );
 };
 
-// ✅ Clickable Category Tags (Text-based, no border/padding heavy)
+// ✅ Category Tag
 const CategoryTag = ({
   category,
   isSelected,
@@ -312,14 +273,14 @@ const CategoryTag = ({
     if (selected) return "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40";
     if (name === "SME") return "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30";
     if (name === "GIFTING") return "text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30";
-    if (name === "COOPERATE GIFTING") return "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30";
+    if (name === "COOPERATE_GIFTING") return "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30";
     return "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800";
   };
 
   const getIcon = (name: string) => {
     if (name === "SME") return <Tag className="h-3 w-3" />;
     if (name === "GIFTING") return <Gift className="h-3 w-3" />;
-    if (name === "COOPERATE GIFTING") return <Layers className="h-3 w-3" />;
+    if (name === "COOPERATE_GIFTING") return <Layers className="h-3 w-3" />;
     return <Tag className="h-3 w-3" />;
   };
 
@@ -341,7 +302,7 @@ const CategoryTag = ({
   );
 };
 
-// ✅ Reduced Size Plan Card - More compact
+// ✅ Plan Card
 const PlanCard = ({
   plan,
   isSelected,
@@ -354,7 +315,7 @@ const PlanCard = ({
   return (
     <button
       onClick={onClick}
-      className={`group relative rounded-lg border-2 p-2.5 text-left transition-all duration-200 ${
+      className={`group relative rounded-lg border-2 p-2.5 text-left transition-all duration-200 min-h-[70px] ${
         isSelected
           ? "border-blue-500 bg-blue-500 text-white shadow-md scale-[1.02]"
           : "border-gray-200 bg-white hover:border-[#1e293b]/30 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
@@ -365,7 +326,7 @@ const PlanCard = ({
           <Check className="h-3 w-3 text-white" />
         </div>
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col h-full justify-between">
         <div className="flex-1 min-w-0">
           <h4 className={`text-sm font-bold truncate ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
             {plan.data}
@@ -374,9 +335,9 @@ const PlanCard = ({
             {plan.name}
           </p>
         </div>
-        <div className={`text-right ml-2 flex-shrink-0 ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
+        <div className={`text-left mt-1 ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
           <p className="text-sm font-bold">{formatCurrency(plan.price)}</p>
-          <p className={`text-[9px] ${isSelected ? "text-white/70" : "text-gray-400"}`}>
+          <p className={`text-[8px] ${isSelected ? "text-white/70" : "text-gray-400"}`}>
             {plan.validity}
           </p>
         </div>
@@ -385,7 +346,7 @@ const PlanCard = ({
   );
 };
 
-// ✅ Status Message Component - Inline like Airtime
+// ✅ Status Message Component
 const StatusMessage = ({ 
   error, 
   success, 
@@ -435,6 +396,8 @@ export function DataClient({
   user: initialUser,
   providers,
   defaultProvider,
+  vendorInfo,
+  networks = [],
 }: DataClientProps) {
   const [user, setUser] = useState(initialUser);
   const [selectedProvider, setSelectedProvider] = useState<string>(defaultProvider);
@@ -452,12 +415,18 @@ export function DataClient({
     plan: string;
   } | null>(null);
   const [isEnsuringWallet, setIsEnsuringWallet] = useState(false);
-  const [detectedNetwork, setDetectedNetwork] = useState<string | null>(null);
+  const [detectedNetwork, setDetectedNetwork] = useState<NetworkInfo | null>(null);
   const [recentCustomers, setRecentCustomers] = useState<Customer[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
+  
+  // ✅ Dropdown states
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const currentProvider = providers.find((p) => p.id === selectedProvider);
   const currentCategory = currentProvider?.categories.find(c => c.id === selectedCategory);
@@ -478,67 +447,46 @@ export function DataClient({
   // Auto-detect network from phone number
   useEffect(() => {
     if (phoneNumber.length >= 4) {
-      const detectNetwork = (number: string) => {
-        const prefixes: { [key: string]: string } = {
-          '070': 'MTN',
-          '080': 'MTN',
-          '081': 'MTN',
-          '090': 'MTN',
-          '091': 'MTN',
-          '0701': 'AIRTEL',
-          '0708': 'AIRTEL',
-          '0802': 'AIRTEL',
-          '0808': 'AIRTEL',
-          '0812': 'AIRTEL',
-          '0901': 'AIRTEL',
-          '0902': 'AIRTEL',
-          '0907': 'AIRTEL',
-          '0805': 'GLO',
-          '0807': 'GLO',
-          '0811': 'GLO',
-          '0815': 'GLO',
-          '0905': 'GLO',
-          '0909': 'GLO',
-          '0809': '9MOBILE',
-          '0817': '9MOBILE',
-          '0818': '9MOBILE',
-          '0908': '9MOBILE',
-          '0903': '9MOBILE',
-          '0904': '9MOBILE',
-        };
-
-        const prefix = number.slice(0, 4);
-        const shortPrefix = number.slice(0, 3);
-
-        const detected = prefixes[prefix] || prefixes[shortPrefix] || null;
-        
-        if (detected) {
-          const matchedProvider = providers.find(p => p.name === detected);
-          if (matchedProvider) {
-            setDetectedNetwork(detected);
-            setSelectedProvider(matchedProvider.id);
-            setSelectedPlan(null);
-            return;
-          }
+      const detected = detectNetworkFromPhone(phoneNumber, networks);
+      setDetectedNetwork(detected);
+      
+      if (detected) {
+        const matchedProvider = providers.find(p => 
+          p.name === detected.name || p.code === detected.code
+        );
+        if (matchedProvider) {
+          setSelectedProvider(matchedProvider.id);
+          setSelectedPlan(null);
         }
-        setDetectedNetwork(null);
-      };
-
-      detectNetwork(phoneNumber);
+      }
     } else {
       setDetectedNetwork(null);
     }
-  }, [phoneNumber, providers]);
+  }, [phoneNumber, networks, providers]);
+
+  // ✅ Filter customers when typing
+  useEffect(() => {
+    if (phoneNumber.length > 0) {
+      const filtered = recentCustomers.filter(c => 
+        c.phone.includes(phoneNumber) || 
+        (c.fullName && c.fullName.toLowerCase().includes(phoneNumber.toLowerCase()))
+      );
+      setFilteredCustomers(filtered);
+    } else {
+      setFilteredCustomers(recentCustomers);
+    }
+  }, [phoneNumber, recentCustomers]);
 
   // Fetch recent customers
   useEffect(() => {
     const fetchRecentCustomers = async () => {
       setLoadingCustomers(true);
       try {
-        const response = await fetch("/api/customers/recent?limit=5");
+        const response = await fetch("/api/customers/recent?limit=10");
         const result = await response.json();
         if (result.success) {
           setRecentCustomers(result.data.customers);
+          setFilteredCustomers(result.data.customers);
         }
       } catch (error) {
         console.error("Failed to fetch recent customers:", error);
@@ -548,6 +496,20 @@ export function DataClient({
     };
 
     fetchRecentCustomers();
+  }, []);
+
+  // ✅ Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
   // Ensure wallet exists on mount
@@ -598,10 +560,32 @@ export function DataClient({
     setPinError("");
   };
 
-  const handleSelectCustomer = (phone: string) => {
-    setPhoneNumber(phone);
+  // ✅ Handle selecting a customer from dropdown
+  const handleSelectCustomer = (customer: Customer) => {
+    setPhoneNumber(customer.phone);
+    setShowDropdown(false);
     setError("");
     setPinError("");
+  };
+
+  // ✅ Handle input focus
+  const handleInputFocus = () => {
+    if (filteredCustomers.length > 0) {
+      setShowDropdown(true);
+    }
+  };
+
+  // ✅ Handle input change
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, "");
+    setPhoneNumber(value);
+    setError("");
+    setPinError("");
+    if (value.length > 0 && filteredCustomers.length > 0) {
+      setShowDropdown(true);
+    } else {
+      setShowDropdown(false);
+    }
   };
 
   const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -612,7 +596,6 @@ export function DataClient({
     }
   };
 
-  // ✅ Reset form - keeps selected provider and category
   const resetForm = () => {
     setSelectedPlan(null);
     setPhoneNumber("");
@@ -676,6 +659,7 @@ export function DataClient({
           provider: currentProvider?.code || "MTN",
           amount: selectedPlan.price,
           pin: pin,
+          planId: selectedPlan.id,
         }),
       });
 
@@ -694,6 +678,7 @@ export function DataClient({
         plan: selectedPlan.data,
       });
       setPin("");
+      setShowDropdown(false);
 
       // Refresh user balance
       const balanceResponse = await fetch("/api/user/balance");
@@ -706,13 +691,14 @@ export function DataClient({
       }
 
       // Refresh recent customers
-      const customersResponse = await fetch("/api/customers/recent?limit=5");
+      const customersResponse = await fetch("/api/customers/recent?limit=10");
       const customersResult = await customersResponse.json();
       if (customersResult.success) {
         setRecentCustomers(customersResult.data.customers);
+        setFilteredCustomers(customersResult.data.customers);
       }
 
-      // ✅ Auto-clear success after 5 seconds
+      // Auto-clear success after 5 seconds
       setTimeout(() => {
         setSuccess(false);
       }, 5000);
@@ -738,7 +724,7 @@ export function DataClient({
     );
   }
 
-  const isAutoDetected = detectedNetwork && providers.find(p => p.name === detectedNetwork)?.id === selectedProvider;
+  const isAutoDetected = detectedNetwork && providers.find(p => p.name === detectedNetwork.name)?.id === selectedProvider;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
@@ -748,98 +734,142 @@ export function DataClient({
           <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Get the best data bundles from all networks
+            {vendorInfo && (
+              <span className="text-xs text-gray-400 ml-2">
+                • Powered by {vendorInfo.name}
+              </span>
+            )}
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Form - 2 columns */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Recent Customers - Reduced size */}
-            {recentCustomers.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <RecentCustomers
-                  customers={recentCustomers}
-                  onSelect={handleSelectCustomer}
-                  isLoading={loadingCustomers}
-                />
-              </div>
-            )}
-
-            {/* ✅ Phone Number Input - MOVED FIRST */}
+            {/* ✅ Phone Number & Network Provider - SAME CARD with dropdown */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Recipient Phone Number
+                Recipient Details
               </h2>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  <Phone className="h-5 w-5" />
-                </div>
-                <input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ""))}
-                  placeholder="08012345678"
-                  maxLength={11}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-                  {phoneNumber.length}/11
-                </div>
-              </div>
               
+              {/* Phone Number Input with Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                    <Phone className="h-5 w-5" />
+                  </div>
+                  <input
+                    ref={inputRef}
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={handlePhoneChange}
+                    onFocus={handleInputFocus}
+                    placeholder="Enter phone number or search recent"
+                    maxLength={11}
+                    className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 flex items-center gap-2">
+                    {loadingCustomers && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {phoneNumber.length > 0 && recentCustomers.length > 0 && (
+                      <span className="text-[10px] text-blue-500">
+                        {filteredCustomers.length} matches
+                      </span>
+                    )}
+                    <span>{phoneNumber.length}/11</span>
+                  </div>
+                </div>
+
+                {/* ✅ Dropdown for recent customers */}
+                {showDropdown && filteredCustomers.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <div className="sticky top-0 bg-gray-50 px-3 py-2 border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                      <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400">
+                        Recent Customers ({filteredCustomers.length})
+                      </p>
+                    </div>
+                    {filteredCustomers.map((customer) => (
+                      <button
+                        key={customer.id}
+                        onClick={() => handleSelectCustomer(customer)}
+                        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                            <User className="h-4 w-4 text-gray-600 dark:text-gray-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {customer.fullName || "Unknown"}
+                              </p>
+                              {customer.isFavorite && (
+                                <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                              )}
+                              {customer.customerType === "VIP" && (
+                                <span className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded dark:bg-purple-900/30 dark:text-purple-400 flex-shrink-0">
+                                  VIP
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {customer.phone}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-2">
+                          <p className="text-xs font-medium text-gray-900 dark:text-white">
+                            {formatCurrency(customer.totalSpent)}
+                          </p>
+                          <p className="text-[9px] text-gray-400">
+                            {customer.totalTransactions} tx
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Service Detection */}
               <ServiceDetection 
                 phoneNumber={phoneNumber} 
                 detectedNetwork={detectedNetwork} 
               />
 
-              {/* Customer Info if exists */}
-              {phoneNumber.length >= 10 && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-1.5 dark:bg-gray-800">
-                  <User className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-xs text-gray-600 dark:text-gray-400">
-                    {recentCustomers.find(c => c.phone === phoneNumber)?.fullName 
-                      ? `Customer: ${recentCustomers.find(c => c.phone === phoneNumber)?.fullName}`
-                      : "New customer - will be saved automatically"
-                    }
-                  </span>
+              {/* Network Selection */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Network Provider
+                  </label>
+                  {detectedNetwork && (
+                    <span className="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <Check className="h-3 w-3" />
+                      Auto-detected
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-
-            {/* ✅ Network Provider Selection - REDUCED SIZE */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                Network Provider
-              </h2>
-              {detectedNetwork ? (
-                <div className="mb-2 rounded-lg bg-green-50 px-3 py-1.5 dark:bg-green-950/30">
-                  <p className="text-xs text-green-700 dark:text-green-400">
-                    ✅ Auto-detected: <strong>{detectedNetwork}</strong>
-                  </p>
-                  <p className="text-[10px] text-green-600 dark:text-green-400/80">
-                    You can still manually select a different network below
-                  </p>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {providers.map((provider) => (
+                    <ProviderButton
+                      key={provider.id}
+                      provider={provider}
+                      isSelected={selectedProvider === provider.id}
+                      onClick={() => handleProviderSelect(provider.id)}
+                      isAutoDetected={isAutoDetected}
+                    />
+                  ))}
                 </div>
-              ) : (
-                <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
-                  Enter a phone number above to auto-detect the network, or select manually
-                </p>
-              )}
-              <div className="grid grid-cols-4 gap-1.5">
-                {providers.map((provider) => (
-                  <ProviderButton
-                    key={provider.id}
-                    provider={provider}
-                    isSelected={selectedProvider === provider.id}
-                    onClick={() => handleProviderSelect(provider.id)}
-                    isAutoDetected={isAutoDetected}
-                  />
-                ))}
+                {!detectedNetwork && phoneNumber.length >= 4 && (
+                  <p className="mt-2 text-[10px] text-yellow-600 dark:text-yellow-400">
+                    ⚠️ Could not detect network. Please select manually.
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* ✅ Categories - Clickable Tags (Text-based) */}
+            {/* Categories */}
             {currentProvider && currentProvider.categories.length > 0 && (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-2">
@@ -864,7 +894,7 @@ export function DataClient({
               </div>
             )}
 
-            {/* ✅ Data Plans - Compact Grid */}
+            {/* Data Plans - 5 columns */}
             {currentCategory && plans.length > 0 && (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-2">
@@ -875,7 +905,7 @@ export function DataClient({
                     {plans.length} plans
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-[400px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 max-h-[500px] overflow-y-auto pr-1">
                   {plans.map((plan) => (
                     <PlanCard
                       key={plan.id}
@@ -889,15 +919,13 @@ export function DataClient({
             )}
           </div>
 
-          {/* Sidebar - Order Summary and Wallet Info */}
+          {/* Sidebar - Order Summary */}
           <div className="space-y-6">
-            {/* Order Summary */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sticky top-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Order Summary
               </h3>
               
-              {/* ✅ Status Messages - Inline like Airtime */}
               <StatusMessage 
                 error={error} 
                 success={success} 
@@ -906,7 +934,7 @@ export function DataClient({
 
               {!error && !success && (
                 <div className="space-y-3 text-sm">
-                  {/* Phone Number - First */}
+                  {/* Phone Number */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-gray-400" />
@@ -967,16 +995,6 @@ export function DataClient({
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
-                    </div>
-                    <span className="font-medium text-gray-500 dark:text-gray-400">
-                      {selectedPlan ? formatCurrency(0) : "—"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                     </div>
@@ -992,7 +1010,7 @@ export function DataClient({
                     </span>
                   </div>
 
-                  {/* ✅ Transaction PIN Input */}
+                  {/* Transaction PIN Input */}
                   <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       Transaction PIN
@@ -1078,15 +1096,15 @@ export function DataClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
+                  Search recent customers by name or number
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
                   Click categories to filter plans
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
                   Plans vary by network and category
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#1e293b]">•</span>
-                  Recent customers saved for quick access
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>

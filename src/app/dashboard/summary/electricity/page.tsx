@@ -1,9 +1,10 @@
-// app/dashboard/summary/electricity/page.tsx
+// app/dashboard/summary/electricity/page.tsx - UPDATED
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { ElectricitySummaryClient } from "./page.client";
 import { TransactionStatus, VtuType } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
 
 export default async function ElectricitySummaryPage() {
   console.log("⚡ [ELECTRICITY SUMMARY] Loading...");
@@ -35,6 +36,22 @@ export default async function ElectricitySummaryPage() {
         vendor: true,
         vendorReference: true,
         scheduledFor: true,
+        // ✅ Additional fields for more details
+        vendorCommission: true,
+        vendorTotalAmount: true,
+        commissionRate: true,
+        commissionType: true,
+        channel: true,
+        metadata: true,
+        // ✅ Include wallet transaction for balance info
+        walletTransaction: {
+          select: {
+            balanceBefore: true,
+            balanceAfter: true,
+            reference: true,
+            description: true,
+          },
+        },
       },
     }),
     prisma.vtuTransaction.aggregate({
@@ -50,6 +67,15 @@ export default async function ElectricitySummaryPage() {
     }),
   ]);
 
+  // ✅ Helper function to safely convert Decimal to number
+  const toNumber = (value: any): number | null => {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Decimal) return value.toNumber();
+    if (typeof value === 'number') return value;
+    const num = Number(value);
+    return isNaN(num) ? null : num;
+  };
+
   const formattedTransactions = transactions.map(t => ({
     ...t,
     amount: Number(t.amount),
@@ -57,6 +83,13 @@ export default async function ElectricitySummaryPage() {
     createdAt: t.createdAt.toISOString(),
     deliveredAt: t.deliveredAt?.toISOString(),
     scheduledFor: t.scheduledFor?.toISOString(),
+    vendorCommission: toNumber(t.vendorCommission),
+    vendorTotalAmount: toNumber(t.vendorTotalAmount),
+    commissionRate: toNumber(t.commissionRate),
+    balanceBefore: t.walletTransaction?.balanceBefore ? toNumber(t.walletTransaction.balanceBefore) : null,
+    balanceAfter: t.walletTransaction?.balanceAfter ? toNumber(t.walletTransaction.balanceAfter) : null,
+    walletReference: t.walletTransaction?.reference || null,
+    walletDescription: t.walletTransaction?.description || null,
   }));
 
   const totalSpent = Number(stats._sum.amount || 0);

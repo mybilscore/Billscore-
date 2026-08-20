@@ -11,7 +11,8 @@ export async function POST(request: NextRequest) {
 
     console.log(`🌱 Seeding VTpass ${environment} vendor...`);
 
-    // Get credentials from environment
+    // Get credentials based on environment
+    // Sandbox uses SANDBOX variables, Live uses LIVE variables
     const apiKey = environment === 'sandbox' 
       ? process.env.VTPASS_SANDBOX_API_KEY 
       : process.env.VTPASS_LIVE_API_KEY;
@@ -24,31 +25,31 @@ export async function POST(request: NextRequest) {
       ? process.env.VTPASS_SANDBOX_PUBLIC_KEY
       : process.env.VTPASS_LIVE_PUBLIC_KEY;
     
-    // ✅ Fix: Remove /api from base URL since we'll add it in endpoints
-    const rawApiUrl = environment === 'sandbox'
-      ? process.env.VTPASS_SANDBOX_API_URL || 'https://sandbox.vtpass.com/'
-      : process.env.VTPASS_LIVE_API_URL || 'https://vtpass.com/';
-    const apiBaseUrl = rawApiUrl.replace(/\/$/, '');
+    // Base URL
+    const apiBaseUrl = environment === 'sandbox'
+      ? 'https://sandbox.vtpass.com/api'
+      : 'https://vtpass.com/api';
 
+    console.log(`🌐 [Seed] Environment: ${environment}`);
     console.log(`🌐 [Seed] API Base URL: ${apiBaseUrl}`);
     console.log(`🔑 [Seed] API Key: ${apiKey ? '✅ Set' : '❌ Missing'}`);
     console.log(`🔑 [Seed] Secret Key: ${secretKey ? '✅ Set' : '❌ Missing'}`);
-    console.log(`🔑 [Seed] Public Key: ${publicKey ? '✅ Set' : '❌ Missing'}`);
 
     if (!apiKey) {
       console.error(`❌ VTPASS_${environment.toUpperCase()}_API_KEY not set`);
       return NextResponse.json({
         success: false,
-        error: `VTPASS_${environment.toUpperCase()}_API_KEY not set in environment variables`,
+        error: `VTPASS_${environment.toUpperCase()}_API_KEY not set in environment variables. Please set it in your .env file.`,
+        required: `VTPASS_${environment.toUpperCase()}_API_KEY`,
       }, { status: 400 });
     }
 
-    // Create or update vendor
+    // ✅ FIX: Use code as the unique identifier for upsert
     const vendor = await prisma.vendor.upsert({
       where: { code: 'VTPASS' },
       update: {
         name: `VTpass ${environment.charAt(0).toUpperCase() + environment.slice(1)}`,
-        apiBaseUrl: apiBaseUrl,  // ✅ Now this is just the domain
+        apiBaseUrl: apiBaseUrl,
         type: VtuVendor.VTPASS,
         authType: 'API_KEY',
         authConfig: {
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
           apiKey: apiKey,
           secretKey: secretKey || '',
           publicKey: publicKey || '',
+          environment: environment,
         },
         priority: 1,
         status: VendorStatus.ACTIVE,
@@ -63,12 +65,21 @@ export async function POST(request: NextRequest) {
         avgResponseTime: 0,
         failureCount: 0,
         consecutiveFailures: 0,
+        metadata: {
+          environment: environment,
+          lastSeededAt: new Date().toISOString(),
+          credentials: {
+            apiKeySet: !!apiKey,
+            secretKeySet: !!secretKey,
+            publicKeySet: !!publicKey,
+          },
+        },
       },
       create: {
-        id: `vtpass-${environment}-001`,
+        id: `vtpass-${environment}-${Date.now()}`,
         code: 'VTPASS',
         name: `VTpass ${environment.charAt(0).toUpperCase() + environment.slice(1)}`,
-        apiBaseUrl: apiBaseUrl,  // ✅ Now this is just the domain
+        apiBaseUrl: apiBaseUrl,
         type: VtuVendor.VTPASS,
         authType: 'API_KEY',
         authConfig: {
@@ -76,6 +87,7 @@ export async function POST(request: NextRequest) {
           apiKey: apiKey,
           secretKey: secretKey || '',
           publicKey: publicKey || '',
+          environment: environment,
         },
         priority: 1,
         status: VendorStatus.ACTIVE,
@@ -83,17 +95,27 @@ export async function POST(request: NextRequest) {
         avgResponseTime: 0,
         failureCount: 0,
         consecutiveFailures: 0,
+        metadata: {
+          environment: environment,
+          seededAt: new Date().toISOString(),
+          credentials: {
+            apiKeySet: !!apiKey,
+            secretKeySet: !!secretKey,
+            publicKeySet: !!publicKey,
+          },
+        },
       },
     });
 
-    console.log(`✅ Vendor ${vendor.id} created/updated with API URL: ${vendor.apiBaseUrl}`);
+    console.log(`✅ Vendor ${vendor.id} created/updated with ${environment} credentials`);
 
-    // Create vendor services
+    // Services to create
     const services = [
       { serviceType: VtuType.AIRTIME, priority: 1 },
       { serviceType: VtuType.DATA, priority: 2 },
       { serviceType: VtuType.ELECTRICITY_INSTANT, priority: 3 },
       { serviceType: VtuType.CABLE_TV, priority: 4 },
+      { serviceType: VtuType.EDUCATION, priority: 5 },
     ];
 
     for (const service of services) {
@@ -107,6 +129,11 @@ export async function POST(request: NextRequest) {
         update: {
           isActive: true,
           priority: service.priority,
+          metadata: {
+            endpoint: '/pay',
+            method: 'POST',
+            environment: environment,
+          },
         },
         create: {
           vendorId: vendor.id,
@@ -114,6 +141,11 @@ export async function POST(request: NextRequest) {
           isActive: true,
           priority: service.priority,
           markup: 0,
+          metadata: {
+            endpoint: '/pay',
+            method: 'POST',
+            environment: environment,
+          },
         },
       });
     }
@@ -135,12 +167,16 @@ export async function POST(request: NextRequest) {
           code: completeVendor?.code,
           apiBaseUrl: completeVendor?.apiBaseUrl,
           status: completeVendor?.status,
+          priority: completeVendor?.priority,
+          environment: environment,
           services: completeVendor?.services.map(s => ({
             serviceType: s.serviceType,
             isActive: s.isActive,
             priority: s.priority,
+            metadata: s.metadata,
           })),
         },
+        environment: environment,
       },
     });
 
@@ -156,35 +192,38 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const vendor = await prisma.vendor.findUnique({
+    const vendors = await prisma.vendor.findMany({
       where: { code: 'VTPASS' },
       include: { services: true },
     });
 
-    if (!vendor) {
+    if (!vendors || vendors.length === 0) {
       return NextResponse.json({
         success: false,
         message: 'VTpass vendor not configured',
       }, { status: 404 });
     }
 
-    const safeVendor = {
+    const safeVendors = vendors.map(vendor => ({
       id: vendor.id,
       name: vendor.name,
       code: vendor.code,
       apiBaseUrl: vendor.apiBaseUrl,
       status: vendor.status,
       priority: vendor.priority,
+      environment: vendor.metadata?.environment || 'unknown',
+      metadata: vendor.metadata,
       services: vendor.services.map(s => ({
         serviceType: s.serviceType,
         isActive: s.isActive,
         priority: s.priority,
+        metadata: s.metadata,
       })),
-    };
+    }));
 
     return NextResponse.json({
       success: true,
-      data: safeVendor,
+      data: safeVendors,
     });
 
   } catch (error: any) {

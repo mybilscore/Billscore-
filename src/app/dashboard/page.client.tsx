@@ -148,7 +148,7 @@ const iconMap: Record<string, any> = {
 };
 
 // ============================================
-// FUND WALLET MODAL
+// FUND WALLET MODAL - WITH DETAILED INSTRUCTIONS
 // ============================================
 const FundWalletModal = ({
   isOpen,
@@ -277,20 +277,30 @@ const FundWalletModal = ({
               </div>
             </div>
 
-            {/* Instructions */}
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/30 dark:bg-blue-900/20">
-              <div className="flex items-start gap-2">
+            {/* 📝 Detailed Instructions - Step by Step */}
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/30 dark:bg-blue-900/20">
+              <div className="flex items-center gap-2 mb-3">
                 <span className="text-blue-500 text-sm">💡</span>
-                <div>
-                  <p className="text-xs font-medium text-blue-700 dark:text-blue-400">How to fund:</p>
-                  <ol className="mt-1 text-xs text-blue-600 dark:text-blue-400/80 space-y-0.5 list-decimal list-inside">
-                    <li>Copy the account number above</li>
-                    <li>Make a transfer from your bank app</li>
-                    <li>Your wallet will be credited instantly</li>
-                    <li>You'll receive a confirmation notification</li>
-                  </ol>
-                </div>
+                <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">How to fund your wallet:</p>
               </div>
+              <ol className="space-y-2 text-sm text-blue-600 dark:text-blue-400/80">
+                <li className="flex items-start gap-3">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-200 dark:bg-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0 mt-0.5">1</span>
+                  <span>Copy the account number above</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-200 dark:bg-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0 mt-0.5">2</span>
+                  <span>Make a transfer from your bank app</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-200 dark:bg-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0 mt-0.5">3</span>
+                  <span>Your wallet will be credited instantly</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-200 dark:bg-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0 mt-0.5">4</span>
+                  <span>You'll receive a confirmation notification</span>
+                </li>
+              </ol>
             </div>
           </div>
 
@@ -327,7 +337,7 @@ const FundWalletModal = ({
 };
 
 // ============================================
-// WALLET CONTAINER COMPONENT - WITH RESERVED AMOUNT
+// WALLET CONTAINER COMPONENT - COMPACT WITH TRANSFER INFO
 // ============================================
 const WalletContainer = ({
   hasWallet,
@@ -406,7 +416,7 @@ const WalletContainer = ({
         </div>
       </div>
 
-      {/* ✅ Reserved Amount & Available Balance */}
+      {/* Reserved Amount & Available Balance */}
       {hasWallet && reservedAmount > 0 && (
         <div className="mt-2 rounded-lg bg-amber-50 p-2.5 dark:bg-amber-900/20">
           <div className="flex items-center justify-between">
@@ -427,75 +437,78 @@ const WalletContainer = ({
         </div>
       )}
 
-      {/* Account Details */}
+      {/* Transfer Account Info - Compact */}
       {hasWallet && (
-        <div className="mt-3 rounded-lg bg-gray-50 p-3 dark:bg-gray-800/50">
-          <div className="grid grid-cols-3 gap-2">
+        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <Banknote className="h-3.5 w-3.5 text-[#1e293b] dark:text-gray-400" />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Transfer to fund wallet</span>
+            </div>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Instant</span>
+          </div>
+          
+          {/* Account Details - Compact Grid */}
+          <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
               <p className="text-[9px] uppercase tracking-wider text-gray-400">Bank</p>
-              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{bankName}</p>
+              <p className="font-semibold text-gray-900 dark:text-white truncate">{bankName}</p>
             </div>
             <div>
               <p className="text-[9px] uppercase tracking-wider text-gray-400">Account</p>
-              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate" title={accountName}>
+              <p className="font-medium text-gray-900 dark:text-white truncate" title={accountName}>
                 {accountName.length > 12 ? accountName.substring(0, 12) + '...' : accountName}
               </p>
             </div>
             <div>
               <p className="text-[9px] uppercase tracking-wider text-gray-400">Number</p>
               <div className="flex items-center gap-1">
-                <p className="text-xs font-mono font-semibold text-gray-900 dark:text-white tracking-wider truncate">
-                  {maskedAccount}
-                </p>
+                <span className="font-mono font-semibold text-[#1e293b] dark:text-white tracking-wider text-xs truncate">
+                  {showFullAccount ? formatAccountNumber(accountNumber) : maskedAccount}
+                </span>
                 <button
                   onClick={() => setShowFullAccount(!showFullAccount)}
-                  className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+                  className="p-0.5 text-gray-400 hover:text-[#1e293b] transition-colors flex-shrink-0"
                   title={showFullAccount ? "Hide account" : "Show account"}
                 >
-                  {showFullAccount ? (
-                    <EyeOff className="h-3 w-3" />
-                  ) : (
-                    <Eye className="h-3 w-3" />
-                  )}
+                  {showFullAccount ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                 </button>
                 <button
                   onClick={handleCopyAccount}
                   className="p-0.5 text-gray-400 hover:text-[#1e293b] transition-colors flex-shrink-0"
                   title="Copy account number"
                 >
-                  {copied ? (
-                    <Check className="h-3 w-3 text-emerald-500" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
+                  {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                 </button>
               </div>
             </div>
           </div>
+
+          {/* Simple Instruction Line */}
+          <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+            💡 Copy account number and transfer from your bank app for instant credit
+          </p>
+
+          {/* Fund Wallet Button */}
+          <button
+            onClick={onFundWallet}
+            className="mt-2 w-full rounded-lg bg-[#1e293b] px-3 py-2 text-xs font-medium text-white hover:bg-[#0f172a] transition-all hover:scale-[1.02] flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            <Banknote className="h-3.5 w-3.5" />
+            Fund Wallet
+          </button>
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {hasWallet ? (
-          <>
-            <button
-              onClick={onFundWallet}
-              className="flex-1 rounded-lg bg-[#1e293b] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0f172a] transition-all hover:scale-[1.02] flex items-center justify-center gap-1.5 shadow-sm"
-            >
-              <Banknote className="h-3.5 w-3.5" />
-              Fund Wallet
-            </button>
-          </>
-        ) : (
-          <button
-            disabled
-            className="w-full rounded-lg bg-gray-300 px-3 py-1.5 text-xs font-medium text-gray-500 cursor-not-allowed"
-          >
-            No Wallet Available
-          </button>
-        )}
-      </div>
+      {/* Fallback when no wallet */}
+      {!hasWallet && (
+        <button
+          disabled
+          className="mt-3 w-full rounded-lg bg-gray-300 px-4 py-2.5 text-sm font-medium text-gray-500 cursor-not-allowed"
+        >
+          No Wallet Available
+        </button>
+      )}
 
       {/* Quick Info */}
       {hasWallet && (
@@ -747,20 +760,13 @@ const ReferralSection = ({ referralStats }: { referralStats: ReferralStats }) =>
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <Gift className="h-5 w-5 text-amber-500" />
+            
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Refer & Earn</h3>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Share your referral link and earn <span className="font-medium text-emerald-600">₦50</span> per signup
+            Share your referral link and earn <span className="font-medium text-emerald-600">earn 2% on first deposits</span>
           </p>
         </div>
-        <Link
-          href="/dashboard/referral"
-          className="text-sm text-[#1e293b] dark:text-gray-300 hover:underline flex items-center gap-1"
-        >
-          View All
-          <ArrowUpRight className="h-4 w-4" />
-        </Link>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -978,10 +984,10 @@ export function DashboardClient({ initialData }: ClientProps) {
     { label: "Buy Data", icon: "Wifi", description: "Data bundles for all networks", href: "/dashboard/data" },
     { label: "Buy Electricity", icon: "Zap", description: "Instant electricity tokens", href: "/dashboard/electricity" },
     { label: "Cable TV", icon: "Tv", description: "DSTV, GOTV, Startimes", href: "/dashboard/cable" },
-    { label: "Bulk SMS", icon: "Send", description: "Send SMS to multiple contacts", href: "/dashboard/bulk-sms" },
-    { label: "Exams", icon: "GraduationCap", description: "WAEC, NECO, JAMB registration", href: "/dashboard/exams" },
-    { label: "Exam Result", icon: "FileText", description: "Check exam results", href: "/dashboard/exam-result" },
-    { label: "Bulk Purchase", icon: "Package", description: "Buy multiple units", href: "/dashboard/bulk" },
+    { label: "Bulk SMS", icon: "Send", description: "Send SMS to multiple contacts", href: "/dashboard/education" },
+    { label: "Exams", icon: "GraduationCap", description: "WAEC, NECO, JAMB registration", href: "dashboard/education" },
+    { label: "Exam Result", icon: "FileText", description: "Check exam results", href: "" },
+    { label: "Bill Scheduller", icon: "Package", description: "Buy multiple units", href: "/dashboard/subscriptions" },
   ];
 
   return (

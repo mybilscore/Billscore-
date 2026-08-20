@@ -10,8 +10,138 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// Helper function to get DisCo data
-const getDiscos = () => {
+// ✅ Fetch DisCos dynamically from VTpass API
+async function fetchDiscosFromVTpass(): Promise<any[]> {
+  try {
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-categories"
+      : "https://sandbox.vtpass.com/api/service-categories";
+    
+    const response = await fetch(baseUrl, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`Failed to fetch service categories: ${response.status}`);
+      return getFallbackDiscos();
+    }
+
+    const data = await response.json();
+    
+    if (data.response_description === "000" && data.content) {
+      const electricityCategory = data.content.find(
+        (cat: any) => cat.identifier === "electricity-bill"
+      );
+      
+      if (!electricityCategory) {
+        console.warn("Electricity category not found in VTpass response");
+        return getFallbackDiscos();
+      }
+
+      const isProductionServices = process.env.NODE_ENV === "production";
+      const servicesUrl = isProductionServices
+        ? "https://vtpass.com/api/services?identifier=electricity-bill"
+        : "https://sandbox.vtpass.com/api/services?identifier=electricity-bill";
+      
+      const servicesResponse = await fetch(servicesUrl, {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!servicesResponse.ok) {
+        console.warn(`Failed to fetch electricity services: ${servicesResponse.status}`);
+        return getFallbackDiscos();
+      }
+
+      const servicesData = await servicesResponse.json();
+      
+      if (servicesData.response_description === "000" && servicesData.content) {
+        const discos = servicesData.content.map((service: any) => {
+          let code = service.serviceID || "";
+          let name = service.name || "";
+          code = code.replace("-electric", "").toUpperCase();
+          const displayName = name.replace(" Payment", "").replace(" Distribution Company", "").replace("Electricity", "").trim();
+          
+          let region = "Nigeria";
+          if (name.includes("Abuja")) region = "FCT";
+          else if (name.includes("Ikeja") || name.includes("Lagos") || name.includes("Eko")) region = "Lagos";
+          else if (name.includes("Kano")) region = "Kano";
+          else if (name.includes("Port Harcourt")) region = "Rivers";
+          else if (name.includes("Jos")) region = "Plateau";
+          else if (name.includes("Ibadan")) region = "Oyo";
+          else if (name.includes("Kaduna")) region = "Kaduna";
+          else if (name.includes("Benin")) region = "Edo";
+          else if (name.includes("Enugu")) region = "Enugu";
+          
+          const logoMap: Record<string, string> = {
+            "IKEJA": "⚡",
+            "EKO": "🔌",
+            "ABUJA": "💡",
+            "KANO": "🔋",
+            "PHCN": "⚡",
+            "IBADAN": "💡",
+            "BENIN": "🔌",
+            "ENUGU": "💡",
+            "JOS": "⚡",
+            "PORT_HARCOURT": "💡",
+            "KADUNA": "🔌",
+            "DEFAULT": "⚡",
+          };
+          
+          const colorMap: Record<string, string> = {
+            "IKEJA": "#FF6B00",
+            "EKO": "#00A3E0",
+            "ABUJA": "#8B0000",
+            "KANO": "#008000",
+            "PHCN": "#FFD700",
+            "IBADAN": "#FF4500",
+            "BENIN": "#4B0082",
+            "ENUGU": "#8B4513",
+            "JOS": "#8B4513",
+            "PORT_HARCOURT": "#FFD700",
+            "KADUNA": "#4B0082",
+            "DEFAULT": "#1e293b",
+          };
+
+          const meterTypes = ["Prepaid", "Postpaid"];
+          
+          return {
+            id: code.toLowerCase(),
+            name: displayName || code,
+            code: code,
+            region: region,
+            logo: logoMap[code] || logoMap["DEFAULT"],
+            color: colorMap[code] || colorMap["DEFAULT"],
+            meterTypes: meterTypes,
+            serviceID: service.serviceID,
+            discoId: Math.floor(Math.random() * 100) + 1,
+            isFromVTpass: true,
+          };
+        });
+
+        const validDiscos = discos
+          .filter((d: any) => d.code && d.code.length > 1)
+          .sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+        console.log(`✅ [VTpass] Fetched ${validDiscos.length} DisCos from API`);
+        return validDiscos;
+      }
+    }
+
+    console.warn("Failed to parse VTpass response, using fallback discos");
+    return getFallbackDiscos();
+  } catch (error) {
+    console.error("❌ Error fetching DisCos from VTpass:", error);
+    return getFallbackDiscos();
+  }
+}
+
+// ✅ Fallback DisCos
+function getFallbackDiscos() {
   return [
     {
       id: "ikeja",
@@ -21,7 +151,9 @@ const getDiscos = () => {
       logo: "⚡",
       color: "#FF6B00",
       meterTypes: ["Prepaid", "Postpaid"],
-      discoId: 1, // LegitDataway ID
+      discoId: 1,
+      isFromVTpass: false,
+      serviceID: "ikeja-electric",
     },
     {
       id: "eko",
@@ -32,56 +164,8 @@ const getDiscos = () => {
       color: "#00A3E0",
       meterTypes: ["Prepaid", "Postpaid"],
       discoId: 2,
-    },
-    {
-      id: "kano",
-      name: "Kano Electric",
-      code: "KANO",
-      region: "Kano",
-      logo: "🔋",
-      color: "#008000",
-      meterTypes: ["Prepaid"],
-      discoId: 3,
-    },
-    {
-      id: "portharcourt",
-      name: "Port Harcourt Electric",
-      code: "PORTHARCOURT",
-      region: "Rivers",
-      logo: "💡",
-      color: "#FFD700",
-      meterTypes: ["Prepaid", "Postpaid"],
-      discoId: 4,
-    },
-    {
-      id: "jos",
-      name: "Jos Electric",
-      code: "JOS",
-      region: "Plateau",
-      logo: "⚡",
-      color: "#8B4513",
-      meterTypes: ["Prepaid"],
-      discoId: 5,
-    },
-    {
-      id: "ibadan",
-      name: "Ibadan Electric",
-      code: "IBADAN",
-      region: "Oyo",
-      logo: "💡",
-      color: "#FF4500",
-      meterTypes: ["Prepaid"],
-      discoId: 6,
-    },
-    {
-      id: "kaduna",
-      name: "Kaduna Electric",
-      code: "KADUNA",
-      region: "Kaduna",
-      logo: "🔌",
-      color: "#4B0082",
-      meterTypes: ["Prepaid"],
-      discoId: 7,
+      isFromVTpass: false,
+      serviceID: "eko-electric",
     },
     {
       id: "abuja",
@@ -92,18 +176,78 @@ const getDiscos = () => {
       color: "#8B0000",
       meterTypes: ["Prepaid", "Postpaid"],
       discoId: 8,
+      isFromVTpass: false,
+      serviceID: "abuja-electric",
+    },
+    {
+      id: "kano",
+      name: "Kano Electric",
+      code: "KANO",
+      region: "Kano",
+      logo: "🔋",
+      color: "#008000",
+      meterTypes: ["Prepaid"],
+      discoId: 3,
+      isFromVTpass: false,
+      serviceID: "kano-electric",
+    },
+    {
+      id: "portharcourt",
+      name: "Port Harcourt Electric",
+      code: "PORTHARCOURT",
+      region: "Rivers",
+      logo: "💡",
+      color: "#FFD700",
+      meterTypes: ["Prepaid", "Postpaid"],
+      discoId: 4,
+      isFromVTpass: false,
+      serviceID: "portharcourt-electric",
+    },
+    {
+      id: "jos",
+      name: "Jos Electric",
+      code: "JOS",
+      region: "Plateau",
+      logo: "⚡",
+      color: "#8B4513",
+      meterTypes: ["Prepaid"],
+      discoId: 5,
+      isFromVTpass: false,
+      serviceID: "jos-electric",
+    },
+    {
+      id: "ibadan",
+      name: "Ibadan Electric",
+      code: "IBADAN",
+      region: "Oyo",
+      logo: "💡",
+      color: "#FF4500",
+      meterTypes: ["Prepaid"],
+      discoId: 6,
+      isFromVTpass: false,
+      serviceID: "ibadan-electric",
+    },
+    {
+      id: "kaduna",
+      name: "Kaduna Electric",
+      code: "KADUNA",
+      region: "Kaduna",
+      logo: "🔌",
+      color: "#4B0082",
+      meterTypes: ["Prepaid"],
+      discoId: 7,
+      isFromVTpass: false,
+      serviceID: "kaduna-electric",
     },
   ];
-};
+}
 
 export default async function ElectricityPage() {
   console.log("⚡ [ELECTRICITY] Starting electricity page load...");
   
-  // Get authenticated user from session
   const sessionUser = await requireAuth("/auth/sign-in");
-  console.log(`👤 [ELECTRICITY] User authenticated: ${sessionUser.id} (${sessionUser.email})`);
+  console.log(`👤 [ELECTRICITY] User authenticated: ${sessionUser.id}`);
 
-  // Fetch fresh user data from database (including wallet)
   console.log("🔍 [ELECTRICITY] Fetching user data with wallet...");
   let user = await prisma.user.findUnique({
     where: { id: sessionUser.id },
@@ -125,7 +269,6 @@ export default async function ElectricityPage() {
     console.log(`💰 [ELECTRICITY] Wallet found - ID: ${user.wallet.id}, Balance: ${user.wallet.walletBalance}`);
   }
 
-  // Safely get wallet data with Decimal conversion
   let walletBalance = 0;
   let hasWallet = false;
   let accountNumber = "";
@@ -225,6 +368,11 @@ export default async function ElectricityPage() {
 
   console.log(`📊 [ELECTRICITY] Final wallet state: hasWallet=${hasWallet}, balance=${walletBalance}`);
 
+  // ✅ Fetch DisCos dynamically from VTpass
+  console.log("📡 [ELECTRICITY] Fetching DisCos from VTpass API...");
+  let discos = await fetchDiscosFromVTpass();
+  console.log(`✅ [ELECTRICITY] Loaded ${discos.length} DisCos`);
+
   // Prepare user data for the client
   const userData = {
     id: user.id,
@@ -236,8 +384,6 @@ export default async function ElectricityPage() {
     walletBalance: walletBalance,
   };
 
-  // Get discos and recommended amounts
-  const discos = getDiscos();
   const recommendedAmounts = [
     { label: "₦1,000", value: 1000 },
     { label: "₦2,000", value: 2000 },

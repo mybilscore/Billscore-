@@ -108,7 +108,7 @@ export const BilalSadaNetworkMap = {
   MTN: 1,
   GLO: 3,
   AIRTEL: 2,
-  '9MOBILE': 4,
+ NINEMOBILE: 4,
 } as const;
 
 // Data plan mapping (simplified - you'd expand this)

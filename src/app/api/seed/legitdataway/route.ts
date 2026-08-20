@@ -1,4 +1,4 @@
-// src/app/api/seed/legitdataway/route.ts
+// src/app/api/seed/legitdataway/route.ts - UPDATED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       update: {
         name: `LegitDataway ${mode.charAt(0).toUpperCase() + mode.slice(1)}`,
         apiBaseUrl: apiBaseUrl,
-        type: VtuVendor.VTPASS,
+        type: VtuVendor.VTPASS, // ✅ LegitDataway is also VTPASS type
         authType: 'BEARER_TOKEN',
         authConfig: {
           username: username,
@@ -41,9 +41,17 @@ export async function POST(request: NextRequest) {
         avgResponseTime: 0,
         failureCount: 0,
         consecutiveFailures: 0,
+        metadata: {
+          environment: mode,
+          lastSeededAt: new Date().toISOString(),
+          credentials: {
+            usernameSet: !!username,
+            passwordSet: !!password,
+          },
+        },
       },
       create: {
-        id: `legitdataway-${mode}-001`,
+        id: `legitdataway-${mode}-${Date.now()}`, // ✅ Include timestamp
         code: 'LEGITDATAWAY',
         name: `LegitDataway ${mode.charAt(0).toUpperCase() + mode.slice(1)}`,
         apiBaseUrl: apiBaseUrl,
@@ -60,17 +68,26 @@ export async function POST(request: NextRequest) {
         avgResponseTime: 0,
         failureCount: 0,
         consecutiveFailures: 0,
+        metadata: {
+          environment: mode,
+          seededAt: new Date().toISOString(),
+          credentials: {
+            usernameSet: !!username,
+            passwordSet: !!password,
+          },
+        },
       },
     });
 
     console.log(`✅ Vendor ${vendor.id} created/updated`);
 
-    // Create vendor services
+    // ✅ Add EDUCATION service (same as VTpass)
     const services = [
       { serviceType: VtuType.AIRTIME, priority: 1 },
       { serviceType: VtuType.DATA, priority: 2 },
       { serviceType: VtuType.ELECTRICITY_INSTANT, priority: 3 },
       { serviceType: VtuType.CABLE_TV, priority: 4 },
+      { serviceType: VtuType.EDUCATION, priority: 5 }, // ✅ ADDED
     ];
 
     for (const service of services) {
@@ -84,6 +101,11 @@ export async function POST(request: NextRequest) {
         update: {
           isActive: true,
           priority: service.priority,
+          metadata: {
+            endpoint: '/pay',
+            method: 'POST',
+            mode: mode,
+          },
         },
         create: {
           vendorId: vendor.id,
@@ -91,6 +113,11 @@ export async function POST(request: NextRequest) {
           isActive: true,
           priority: service.priority,
           markup: 0,
+          metadata: {
+            endpoint: '/pay',
+            method: 'POST',
+            mode: mode,
+          },
         },
       });
     }
@@ -112,11 +139,18 @@ export async function POST(request: NextRequest) {
           code: completeVendor?.code,
           apiBaseUrl: completeVendor?.apiBaseUrl,
           status: completeVendor?.status,
+          priority: completeVendor?.priority,
           services: completeVendor?.services.map(s => ({
             serviceType: s.serviceType,
             isActive: s.isActive,
             priority: s.priority,
+            metadata: s.metadata,
           })),
+        },
+        // ✅ Added nextSteps (like BilalSada)
+        nextSteps: {
+          importPlans: 'POST /api/seed/legitdataway-plans',
+          viewPlans: 'GET /api/plans?vendorId=' + vendor.id,
         },
       },
     });
@@ -152,10 +186,12 @@ export async function GET() {
       apiBaseUrl: vendor.apiBaseUrl,
       status: vendor.status,
       priority: vendor.priority,
+      environment: vendor.metadata?.environment || 'unknown',
       services: vendor.services.map(s => ({
         serviceType: s.serviceType,
         isActive: s.isActive,
         priority: s.priority,
+        metadata: s.metadata,
       })),
     };
 

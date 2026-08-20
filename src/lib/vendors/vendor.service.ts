@@ -1,4 +1,4 @@
-// lib/vendors/vendor.service.ts
+// src/lib/vendors/vendor.service.ts
 
 import { prisma } from "~/lib/db";
 import { BaseVendor } from "./base.vendor";
@@ -11,6 +11,7 @@ import {
   VendorDataRequest,
   VendorElectricityRequest,
   VendorCableTVRequest,
+  VendorEducationRequest,
 } from './types';
 import { VtuType, VendorStatus } from '@prisma/client';
 
@@ -26,6 +27,7 @@ interface VendorHealth {
   averageResponseTime: number;
   failureReasons: string[];
   priority: number;
+  environment?: string; // ✅ Track current environment
 }
 
 interface VendorMetrics {
@@ -36,6 +38,8 @@ interface VendorMetrics {
   vendorFailures: Record<string, number>;
   switchCount: number;
   totalResponseTime: number;
+  environmentSwitches: number;
+  currentEnvironment: string;
 }
 
 // ============================================================
@@ -52,6 +56,7 @@ export class VendorService {
   private initialized: boolean = false;
   private vendorIdMap: Map<VtuVendor, string> = new Map();
   private isInitializing: boolean = false;
+  private currentEnvironment: string = 'sandbox'; // ✅ Track current environment
   
   // Configuration
   private readonly MAX_CONSECUTIVE_FAILURES = 3;
@@ -68,6 +73,8 @@ export class VendorService {
     vendorFailures: {},
     switchCount: 0,
     totalResponseTime: 0,
+    environmentSwitches: 0,
+    currentEnvironment: 'sandbox',
   };
 
   private healthCheckInterval: NodeJS.Timeout | null = null;
@@ -146,7 +153,10 @@ export class VendorService {
 
       for (const vendorConfig of vendorConfigs) {
         try {
-          // ✅ Use factory with caching
+          // ✅ Detect environment from vendor config
+          const environment = this.detectEnvironment(vendorConfig);
+          
+          // ✅ Use factory with environment
           const vendor = VendorFactory.createVendorFromPrisma(vendorConfig);
           const vendorCode = vendorConfig.code as VtuVendor;
           
@@ -154,7 +164,7 @@ export class VendorService {
           this.fallbackChain.push(vendorCode);
           this.vendorIdMap.set(vendorCode, vendorConfig.id);
           
-          // Initialize health tracking
+          // Initialize health tracking with environment
           this.vendorHealth.set(vendorCode, {
             code: vendorCode,
             isAvailable: true,
@@ -163,9 +173,14 @@ export class VendorService {
             averageResponseTime: 0,
             failureReasons: [],
             priority: vendorConfig.priority,
+            environment: environment,
           });
           
-          console.log(`✅ [VendorService] Vendor ${vendorCode} initialized (Priority: ${vendorConfig.priority})`);
+          // ✅ Track current environment
+          this.currentEnvironment = environment;
+          this.metrics.currentEnvironment = environment;
+          
+          console.log(`✅ [VendorService] Vendor ${vendorCode} initialized (Priority: ${vendorConfig.priority}, Environment: ${environment})`);
         } catch (error) {
           console.error(`❌ [VendorService] Failed to initialize vendor ${vendorConfig.code}:`, error);
         }
@@ -183,6 +198,7 @@ export class VendorService {
 
       console.log(`✅ [VendorService] Initialization complete. ${this.vendors.size} vendors loaded.`);
       console.log(`📋 [VendorService] Fallback chain: ${this.fallbackChain.join(' → ')}`);
+      console.log(`🌐 [VendorService] Current environment: ${this.currentEnvironment}`);
       
       this.initialized = true;
       
@@ -192,6 +208,127 @@ export class VendorService {
       console.error('❌ [VendorService] Failed to initialize vendors:', error);
       this.initialized = false;
       throw error;
+    }
+  }
+
+  // ============================================================
+  // ENVIRONMENT DETECTION
+  // ============================================================
+
+  private detectEnvironment(vendorConfig: any): string {
+    // Check authConfig for environment
+    if (vendorConfig.authConfig?.environment) {
+      return vendorConfig.authConfig.environment;
+    }
+    
+    // Check metadata for environment
+    if (vendorConfig.metadata?.environment) {
+      return vendorConfig.metadata.environment;
+    }
+    
+    // Check API base URL for clues
+    if (vendorConfig.apiBaseUrl?.includes('sandbox')) {
+      return 'sandbox';
+    }
+    
+    if (vendorConfig.apiBaseUrl?.includes('live') || vendorConfig.apiBaseUrl?.includes('vtpass.com')) {
+      return 'live';
+    }
+    
+    // Default to sandbox
+    return 'sandbox';
+  }
+
+  // ============================================================
+  // SWITCH ENVIRONMENT
+  // ============================================================
+
+  async switchEnvironment(vendorCode: string, environment: 'sandbox' | 'live'): Promise<boolean> {
+    console.log(`🔄 [VendorService] Switching ${vendorCode} to ${environment}...`);
+
+    try {
+      // Get vendor from database
+      const vendorConfig = await prisma.vendor.findUnique({
+        where: { code: vendorCode },
+      });
+
+      if (!vendorConfig) {
+        console.error(`❌ [VendorService] Vendor ${vendorCode} not found`);
+        return false;
+      }
+
+      // Get environment-specific credentials
+      const apiKey = environment === 'sandbox' 
+        ? process.env.VTPASS_SANDBOX_API_KEY 
+        : process.env.VTPASS_LIVE_API_KEY;
+      
+      const secretKey = environment === 'sandbox'
+        ? process.env.VTPASS_SANDBOX_SECRET_KEY
+        : process.env.VTPASS_LIVE_SECRET_KEY;
+      
+      const publicKey = environment === 'sandbox'
+        ? process.env.VTPASS_SANDBOX_PUBLIC_KEY
+        : process.env.VTPASS_LIVE_PUBLIC_KEY;
+      
+      const apiBaseUrl = environment === 'sandbox'
+        ? 'https://sandbox.vtpass.com/api'
+        : 'https://vtpass.com/api';
+
+      // Update vendor in database
+      await prisma.vendor.update({
+        where: { code: vendorCode },
+        data: {
+          name: `VTpass ${environment.charAt(0).toUpperCase() + environment.slice(1)}`,
+          apiBaseUrl: apiBaseUrl,
+          authConfig: {
+            ...vendorConfig.authConfig as any,
+            apiKey: apiKey,
+            secretKey: secretKey || '',
+            publicKey: publicKey || '',
+            environment: environment,
+          },
+          metadata: {
+            ...vendorConfig.metadata as any,
+            environment: environment,
+            lastSwitchedAt: new Date().toISOString(),
+            switchedFrom: this.currentEnvironment,
+          },
+        },
+      });
+
+      // Update vendor services
+      await prisma.vendorService.updateMany({
+        where: { vendorId: vendorConfig.id },
+        data: {
+          metadata: {
+            endpoint: '/pay',
+            method: 'POST',
+            environment: environment,
+          },
+        },
+      });
+
+      // Update health tracking
+      const health = this.vendorHealth.get(vendorCode as VtuVendor);
+      if (health) {
+        health.environment = environment;
+      }
+
+      // Update current environment
+      this.currentEnvironment = environment;
+      this.metrics.currentEnvironment = environment;
+      this.metrics.environmentSwitches++;
+
+      console.log(`✅ [VendorService] Successfully switched ${vendorCode} to ${environment}`);
+
+      // ✅ Refresh vendors to apply new configuration
+      await this.refreshVendors();
+
+      return true;
+
+    } catch (error) {
+      console.error(`❌ [VendorService] Failed to switch ${vendorCode} to ${environment}:`, error);
+      return false;
     }
   }
 
@@ -420,6 +557,7 @@ export class VendorService {
               vendorPriority: health.priority,
               wasSwitched,
               switchedFrom: errors.map(e => e.vendor),
+              environment: this.currentEnvironment,
             },
           };
         } else {
@@ -462,6 +600,7 @@ export class VendorService {
         errors,
         totalAttempts: attemptCount,
         totalTime: Date.now() - startTime,
+        environment: this.currentEnvironment,
       },
     };
   }
@@ -506,6 +645,31 @@ export class VendorService {
     );
   }
 
+  async buyEducation(request: VendorEducationRequest, userId: string): Promise<VendorResponse> {
+    console.log(`📚 [VendorService] buyEducation called for ${request.serviceId} (${request.variationCode})`);
+    return this.executeWithSwitching(
+      VtuType.EDUCATION,
+      async (vendor) => vendor.buyEducation(request),
+      userId
+    );
+  }
+
+  // ============================================================
+  // ENVIRONMENT MANAGEMENT
+  // ============================================================
+
+  getCurrentEnvironment(): string {
+    return this.currentEnvironment;
+  }
+
+  getVendorEnvironment(vendorCode: VtuVendor): string | undefined {
+    return this.vendorHealth.get(vendorCode)?.environment;
+  }
+
+  async switchVendorEnvironment(vendorCode: VtuVendor, environment: 'sandbox' | 'live'): Promise<boolean> {
+    return this.switchEnvironment(vendorCode, environment);
+  }
+
   // ============================================================
   // HELPER METHODS
   // ============================================================
@@ -542,6 +706,7 @@ export class VendorService {
         consecutiveFailures: health.consecutiveFailures,
         averageResponseTime: health.averageResponseTime,
         priority: health.priority,
+        environment: health.environment || 'unknown',
         lastFailure: health.lastFailure,
         failureReasons: health.failureReasons.slice(-3),
       };
@@ -564,10 +729,12 @@ export class VendorService {
         ? ((this.metrics.switchCount / this.metrics.totalRequests) * 100).toFixed(2) + '%'
         : 'N/A',
       averageResponseTime: totalTime.toFixed(0) + 'ms',
+      currentEnvironment: this.currentEnvironment,
       vendorBreakdown: Object.keys(this.metrics.vendorUsage).map(code => ({
         code,
         usage: this.metrics.vendorUsage[code] || 0,
         failures: this.metrics.vendorFailures[code] || 0,
+        environment: this.vendorHealth.get(code as VtuVendor)?.environment || 'unknown',
       })),
     };
   }

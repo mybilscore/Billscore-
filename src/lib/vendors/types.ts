@@ -68,3 +68,11 @@ export interface VendorCableTVRequest {
   provider: string;
   amount?: number;
 }
+
+export interface VendorEducationRequest {
+  serviceId: string;
+  variationCode: string;
+  amount: number;
+  quantity: number;
+  phone: string;
+}

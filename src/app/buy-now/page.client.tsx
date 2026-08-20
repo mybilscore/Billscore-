@@ -1,4 +1,4 @@
-// app/buy-now/page.client.tsx
+// app/buy-now/page.client.tsx - UPDATED with Close button
 
 "use client";
 
@@ -23,13 +23,12 @@ import {
   Copy,
   Check,
   Calendar,
-  Repeat,
   ChevronDown,
   ChevronUp,
   X,
 } from "lucide-react";
 
-// ✅ Import QR verification
+// ✅ Import QR verification - using the new simple hash
 import { verifyQRHash } from "~/lib/qr-hash";
 
 // Types
@@ -295,7 +294,8 @@ export default function BuyNowPage() {
   const expiresAt = searchParams.get("e");
   
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [user, setUser] = useState<UserData | null>(null);
   const [itemData, setItemData] = useState<MeterData | DecoderData | null>(null);
   const [recommendedAmounts, setRecommendedAmounts] = useState<{ label: string; value: number }[]>([]);
@@ -343,7 +343,6 @@ export default function BuyNowPage() {
     }
   };
 
-  // ✅ Fetch scheduled bills with better error handling and logging
   const fetchScheduledBills = async () => {
     if (!isLoggedIn) {
       console.log("📋 [BUY NOW] Not logged in, skipping bills fetch");
@@ -383,15 +382,15 @@ export default function BuyNowPage() {
 
   useEffect(() => {
     const verifyAndFetchData = async () => {
-      // ✅ Verify QR hash
+      // ✅ Verify QR hash using the new simple hash
       if (!id || !type || !provider || !hash) {
-        setError("Invalid QR code. Missing required parameters.");
+        setQrError("Invalid QR code. Missing required parameters.");
         setVerificationStatus("failed");
         setLoading(false);
         return;
       }
 
-      // ✅ Verify the hash
+      // ✅ Verify the hash with the new simple hash algorithm
       const isValid = verifyQRHash({
         identifier: id,
         type: type,
@@ -401,7 +400,7 @@ export default function BuyNowPage() {
       });
 
       if (!isValid) {
-        setError("This QR code is invalid or has expired. Please generate a new one.");
+        setQrError("This QR code is invalid or has expired. Please generate a new one.");
         setVerificationStatus("failed");
         setLoading(false);
         return;
@@ -417,7 +416,8 @@ export default function BuyNowPage() {
       });
 
       setLoading(true);
-      setError(null);
+      setQrError(null);
+      setPurchaseError(null);
 
       try {
         // Auth check
@@ -478,7 +478,7 @@ export default function BuyNowPage() {
         ]);
 
       } catch (err: any) {
-        setError(err.message || "Failed to load data");
+        setQrError(err.message || "Failed to load data");
       } finally {
         setLoading(false);
         setIsCheckingAuth(false);
@@ -488,7 +488,7 @@ export default function BuyNowPage() {
     verifyAndFetchData();
   }, [id, type, provider, hash, expiresAt]);
 
-  // ✅ Also try fetching when isLoggedIn changes (in case it wasn't ready on first load)
+  // ✅ Also try fetching when isLoggedIn changes
   useEffect(() => {
     if (isLoggedIn && !hasFetchedBills && !isFetchingBills) {
       console.log("📋 [BUY NOW] isLoggedIn changed, fetching bills...");
@@ -496,12 +496,11 @@ export default function BuyNowPage() {
     }
   }, [isLoggedIn]);
 
-  // ... rest of the handlers (handleAmountSelect, handleCustomAmountChange, handlePinChange, handleSubmit, etc.)
-
   const handleAmountSelect = (value: number) => {
     setSelectedAmount(value);
     setCustomAmount("");
     setPinError("");
+    setPurchaseError(null);
   };
 
   const handleCustomAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -509,6 +508,7 @@ export default function BuyNowPage() {
     setCustomAmount(value);
     if (value) setSelectedAmount(null);
     setPinError("");
+    setPurchaseError(null);
   };
 
   const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -516,6 +516,7 @@ export default function BuyNowPage() {
     if (value.length <= 6) {
       setPin(value);
       setPinError("");
+      setPurchaseError(null);
     }
   };
 
@@ -533,16 +534,30 @@ export default function BuyNowPage() {
     setShowBillModal(true);
   };
 
+  // ✅ Handle close - redirect to the QR code link that was shared
+  const handleClose = () => {
+    // Construct the QR code URL that was used to access this page
+    // This is the link that was shared with the QR code
+    const qrLink = `https://app.bilscore.com/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+    
+    // Redirect to the QR link
+    window.location.href = qrLink;
+  };
+
   const handleSubmit = async () => {
     const amount = getTotalAmount();
     
+    // Clear previous purchase errors
+    setPurchaseError(null);
+    setPinError(null);
+    
     if (!amount || amount < 100) {
-      setError("Please enter a valid amount (minimum ₦100)");
+      setPurchaseError("Please enter a valid amount (minimum ₦100)");
       return;
     }
 
     if (!verifiedData) {
-      setError("Invalid QR data");
+      setPurchaseError("Invalid QR data");
       return;
     }
 
@@ -552,12 +567,12 @@ export default function BuyNowPage() {
     }
 
     if (!user?.hasWallet) {
-      setError("You need a wallet to make payments.");
+      setPurchaseError("You need a wallet to make payments.");
       return;
     }
 
     if (user.walletBalance < amount) {
-      setError(`Insufficient balance. Your balance is ${formatCurrency(user.walletBalance)}`);
+      setPurchaseError(`Insufficient balance. Your balance is ${formatCurrency(user.walletBalance)}`);
       return;
     }
 
@@ -567,8 +582,6 @@ export default function BuyNowPage() {
     }
 
     setIsSubmitting(true);
-    setError(null);
-    setPinError("");
 
     try {
       const payload: any = {
@@ -597,7 +610,10 @@ export default function BuyNowPage() {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.error || "Transaction failed");
+        const errorMsg = result.error || "Transaction failed";
+        setPurchaseError(errorMsg);
+        toast.error(errorMsg);
+        return;
       }
 
       setTransactionId(result.data?.transactionId || result.data?.reference || String(Date.now()));
@@ -614,7 +630,9 @@ export default function BuyNowPage() {
       toast.success(`${verifiedData.type === "electricity" ? "Electricity" : "Cable TV"} purchase successful!`);
 
     } catch (err: any) {
-      setError(err.message || "Transaction failed. Please try again.");
+      const errorMsg = err.message || "Transaction failed. Please try again.";
+      setPurchaseError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -626,23 +644,13 @@ export default function BuyNowPage() {
     setCustomAmount("");
     setPin("");
     setPinError("");
-    setError(null);
+    setPurchaseError(null);
     setTransactionData(null);
     setCopied(false);
   };
 
-  if (loading || isCheckingAuth) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 mx-auto text-[#1e293b] animate-spin" />
-          <p className="mt-4 text-gray-500 dark:text-gray-400">Verifying QR Code...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
+  // ✅ QR ERROR - Show invalid QR page
+  if (qrError) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8 text-center">
@@ -650,13 +658,24 @@ export default function BuyNowPage() {
             <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
           </div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Invalid QR Code</h2>
-          <p className="text-gray-500 dark:text-gray-400">{error}</p>
+          <p className="text-gray-500 dark:text-gray-400">{qrError}</p>
           <button
             onClick={() => router.push("/")}
             className="mt-6 px-6 py-2 bg-[#1e293b] text-white rounded-lg hover:bg-[#0f172a] transition-colors"
           >
             Go Home
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 mx-auto text-[#1e293b] animate-spin" />
+          <p className="mt-4 text-gray-500 dark:text-gray-400">Verifying QR Code...</p>
         </div>
       </div>
     );
@@ -725,6 +744,7 @@ export default function BuyNowPage() {
             </div>
           </div>
 
+          {/* ✅ Buy Again and Close buttons */}
           <div className="flex gap-3">
             <button
               onClick={handleNewPurchase}
@@ -733,10 +753,10 @@ export default function BuyNowPage() {
               Buy Again
             </button>
             <button
-              onClick={() => router.push("/dashboard")}
+              onClick={handleClose}
               className="flex-1 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl py-3 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
             >
-              Dashboard
+              Close
             </button>
           </div>
         </div>
@@ -749,7 +769,7 @@ export default function BuyNowPage() {
   const itemName = itemData?.name || (verifiedData?.type === "electricity" ? "Meter" : "Decoder");
   const providerName = verifiedData?.provider || "";
 
-  // Filter scheduled bills for display (show upcoming and active)
+  // Filter scheduled bills for display
   const displayBills = scheduledBills
     .filter(b => b.isActive && b.status !== "DELIVERED")
     .sort((a, b) => new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime());
@@ -974,6 +994,16 @@ export default function BuyNowPage() {
             </div>
           </div>
 
+          {/* ✅ Purchase Error - Show on page */}
+          {purchaseError && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-900/20 p-2">
+              <div className="flex items-start gap-1.5">
+                <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700 dark:text-red-400">{purchaseError}</p>
+              </div>
+            </div>
+          )}
+
           {/* Login Status */}
           {!isLoggedIn && (
             <div className="mt-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-2 text-center">
@@ -985,16 +1015,6 @@ export default function BuyNowPage() {
                   Sign in
                 </button> to purchase
               </p>
-            </div>
-          )}
-
-          {/* Error Message */}
-          {error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-900/20 p-2">
-              <div className="flex items-start gap-1.5">
-                <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-red-700 dark:text-red-400">{error}</p>
-              </div>
             </div>
           )}
 
