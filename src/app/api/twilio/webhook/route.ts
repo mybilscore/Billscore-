@@ -11,11 +11,21 @@ import {
   WalletCategory,
   WalletTransactionType,
   VtuVendor,
+  MeterType,
+  TokenStatus,
+  PreOrderStatus,
+  DisCo,
+  TokenType,
+  DeliveryChannel,
+  JobType,
+  JobStatus,
+  RefundStatus,
 } from "@prisma/client";
 import { 
   createPalmPayVirtualAccountForUser, 
   isPalmPaySimulationMode 
 } from "~/lib/palmpay/palmpay-wallet.service";
+import { getVendorService } from "~/lib/vendors/vendor.service";
 
 // ============================================================
 // HELPER: Generate Short Validation Token (for link)
@@ -180,14 +190,13 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - REFINED RESPONSE
+// USER REGISTRATION HANDLER - SIMPLIFIED
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
   try {
     console.log(`📝 [WhatsApp] Starting registration for: ${phone}`);
 
-    // Check if user already exists
     const existingUser = await prisma.user.findFirst({
       where: { phone: phone },
     });
@@ -200,12 +209,10 @@ Wallet Balance: NGN ${Number(existingUser.walletBalance || 0).toFixed(2)}
 Type HELP to see available commands.`;
     }
 
-    // Parse registration command: REG [fullname] [email] [username]
     const parts = body.split(" ").filter(p => p.length > 0);
     const command = parts[0].toUpperCase();
     
     if (command === "REG" || command === "REGISTER" || command === "SIGNUP") {
-      // If just REG without details, ask for more info
       if (parts.length < 2) {
         return `Welcome to Bilscore!
 
@@ -220,7 +227,6 @@ REG John Doe - johndoe
 Or visit: ${getAppUrl()}/auth`;
       }
 
-      // Extract registration details
       let fullName = "";
       let email = "";
       let username = "";
@@ -230,7 +236,6 @@ Or visit: ${getAppUrl()}/auth`;
         let emailIndex = -1;
         let usernameIndex = -1;
         
-        // Find email or username indicators
         for (let i = 1; i < parts.length; i++) {
           if (parts[i].includes('@')) {
             emailIndex = i;
@@ -238,7 +243,6 @@ Or visit: ${getAppUrl()}/auth`;
           }
         }
         
-        // Find username (last part typically)
         if (parts.length > 1) {
           usernameIndex = parts.length - 1;
           if (parts[usernameIndex] === '-') {
@@ -249,7 +253,6 @@ Or visit: ${getAppUrl()}/auth`;
           }
         }
         
-        // Extract name (everything before email or username)
         const nameEnd = emailIndex > 0 ? emailIndex : (usernameIndex > 0 ? usernameIndex : parts.length);
         for (let i = 1; i < nameEnd; i++) {
           if (parts[i] !== '-') {
@@ -258,12 +261,10 @@ Or visit: ${getAppUrl()}/auth`;
         }
         fullName = nameParts.join(' ');
         
-        // Extract email
         if (emailIndex > 0 && parts[emailIndex] && parts[emailIndex].includes('@')) {
           email = parts[emailIndex];
         }
         
-        // Extract username
         if (usernameIndex > 0 && usernameIndex < parts.length) {
           const candidate = parts[usernameIndex];
           if (candidate !== '-' && !candidate.includes('@')) {
@@ -272,7 +273,6 @@ Or visit: ${getAppUrl()}/auth`;
         }
       }
 
-      // Validate required fields
       if (!fullName || fullName.trim().length < 2) {
         return `Please provide your full name.
 Format: REG [Full Name] [Email] [Username]
@@ -281,13 +281,11 @@ Example: REG John Doe john@email.com johndoe
 Example: REG John Doe - johndoe (skip email)`;
       }
 
-      // Generate username if not provided
       if (!username) {
         const base = fullName
           .toLowerCase()
           .replace(/[^a-z0-9]/g, '')
           .substring(0, 20);
-        
         username = base || `user${Math.random().toString(36).substring(2, 8)}`;
         
         const existingUsername = await prisma.user.findUnique({
@@ -298,29 +296,20 @@ Example: REG John Doe - johndoe (skip email)`;
         }
       }
 
-      // Clean username
       username = username.toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '');
-
-      // Generate email if not provided
       if (!email) {
         email = `${username}@whatsapp.bilscore.com`;
       }
 
-      // Generate default credentials
       const defaultPassword = `BIL${Math.random().toString(36).substring(2, 10).toUpperCase()}!`;
       const defaultPin = "1234";
-      
-      // Generate validation token for changing credentials
       const changeToken = generateValidationToken();
-      const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
       const hashedPassword = await hash(defaultPassword, 10);
       const hashedPin = await hash(defaultPin, 10);
       const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
-      // ============================================================
-      // STEP 1: CREATE USER - NO METADATA FIELD
-      // ============================================================
       const user = await prisma.user.create({
         data: {
           username: username,
@@ -343,9 +332,6 @@ Example: REG John Doe - johndoe (skip email)`;
 
       console.log(`✅ [WhatsApp] User created: ${user.id}`);
 
-      // ============================================================
-      // STEP 2: STORE TOKEN IN AUDITLOG
-      // ============================================================
       await prisma.auditLog.create({
         data: {
           userId: user.id,
@@ -363,18 +349,13 @@ Example: REG John Doe - johndoe (skip email)`;
         },
       });
 
-      // ============================================================
-      // STEP 3: CREATE PALMPAY WALLET
-      // ============================================================
       let wallet: any = null;
       let virtualAccountNo: string | null = null;
       let isSimulation = false;
-      let palmpayError: string | null = null;
       let palmpayAccountName: string | null = null;
 
       try {
         console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
-        
         const result = await createPalmPayVirtualAccountForUser(
           user.id,
           {
@@ -384,24 +365,14 @@ Example: REG John Doe - johndoe (skip email)`;
             role: "END_USER",
           }
         );
-
         wallet = result.wallet;
         virtualAccountNo = result.virtualAccount.virtualAccountNo;
         isSimulation = isPalmPaySimulationMode();
         palmpayAccountName = wallet?.accountName || fullName.trim();
-
-        console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
-        console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
-        console.log(`🏦 Account Name: ${palmpayAccountName}`);
-        
       } catch (error: any) {
-        console.error('❌ PalmPay virtual account creation failed:', error);
-        palmpayError = error.message;
-        
-        // If PalmPay fails, create a fallback wallet
+        console.error('❌ PalmPay creation failed:', error);
         const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
         palmpayAccountName = fullName.trim();
-        
         wallet = await prisma.wallet.create({
           data: {
             userId: user.id,
@@ -413,125 +384,76 @@ Example: REG John Doe - johndoe (skip email)`;
             currency: "NGN",
             isActive: true,
             kycLevel: 1,
-            metadata: {
-              createdVia: "whatsapp_fallback",
-              palmpayError: palmpayError,
-              timestamp: new Date().toISOString(),
-            },
           },
         });
-
-        // Update user
         await prisma.user.update({
           where: { id: user.id },
           data: { hasWallet: true },
         });
-
-        console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
       }
 
-      // ============================================================
-      // STEP 4: CREDIT WELCOME BONUS
-      // ============================================================
       const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
-
       if (wallet) {
-        const existingBonus = await prisma.walletTransaction.findFirst({
-          where: {
-            walletId: wallet.id,
-            reference: { startsWith: 'WELCOME_BONUS_' },
-          },
-        });
-
-        if (!existingBonus) {
-          const currentBalance = Number(wallet.walletBalance || 0);
-
-          await prisma.$transaction([
-            prisma.wallet.update({
-              where: { id: wallet.id },
-              data: {
-                walletBalance: { increment: WELCOME_BONUS },
-                ledgerBalance: { increment: WELCOME_BONUS },
-              },
-            }),
-            prisma.walletTransaction.create({
-              data: {
-                walletId: wallet.id,
-                userId: user.id,
-                type: "CREDIT",
-                amount: WELCOME_BONUS,
-                balanceBefore: currentBalance,
-                balanceAfter: currentBalance + WELCOME_BONUS,
-                reference: `WELCOME_BONUS_${user.id}`,
-                description: `Welcome bonus of NGN ${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
-                status: "SUCCESS",
-                category: "SYSTEM",
-                metadata: {
-                  isWelcomeBonus: true,
-                  amount: WELCOME_BONUS,
-                  timestamp: new Date().toISOString(),
-                },
-              },
-            }),
-          ]);
-
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { 
-              walletBalance: currentBalance + WELCOME_BONUS,
+        const currentBalance = Number(wallet.walletBalance || 0);
+        await prisma.$transaction([
+          prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              walletBalance: { increment: WELCOME_BONUS },
+              ledgerBalance: { increment: WELCOME_BONUS },
             },
-          });
-
-          console.log(`🎉 Welcome bonus of NGN ${WELCOME_BONUS.toLocaleString()} credited`);
-        }
+          }),
+          prisma.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              userId: user.id,
+              type: "CREDIT",
+              amount: WELCOME_BONUS,
+              balanceBefore: currentBalance,
+              balanceAfter: currentBalance + WELCOME_BONUS,
+              reference: `WELCOME_BONUS_${user.id}`,
+              description: `Welcome bonus of NGN ${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+              status: "SUCCESS",
+              category: "SYSTEM",
+            },
+          }),
+        ]);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { walletBalance: currentBalance + WELCOME_BONUS },
+        });
       }
 
-      // ============================================================
-      // STEP 5: CREATE/UPDATE CHANNEL - USE UPSERT
-      // ============================================================
-      try {
-        await prisma.channel.upsert({
-          where: {
-            channelIdentifier: phone,
+      await prisma.channel.upsert({
+        where: { channelIdentifier: phone },
+        update: {
+          userId: user.id,
+          lastSeen: new Date(),
+          isVerified: true,
+          metadata: {
+            registeredVia: "whatsapp",
+            registrationDate: new Date().toISOString(),
           },
-          update: {
-            userId: user.id,
-            lastSeen: new Date(),
-            isVerified: true,
-            metadata: {
-              registeredVia: "whatsapp",
-              registrationDate: new Date().toISOString(),
-            },
+        },
+        create: {
+          userId: user.id,
+          channelType: ChannelType.WHATSAPP,
+          channelIdentifier: phone,
+          channelUsername: phone,
+          isVerified: true,
+          linkedAt: new Date(),
+          lastSeen: new Date(),
+          metadata: {
+            registeredVia: "whatsapp",
+            registrationDate: new Date().toISOString(),
           },
-          create: {
-            userId: user.id,
-            channelType: ChannelType.WHATSAPP,
-            channelIdentifier: phone,
-            channelUsername: phone,
-            isVerified: true,
-            linkedAt: new Date(),
-            lastSeen: new Date(),
-            metadata: {
-              registeredVia: "whatsapp",
-              registrationDate: new Date().toISOString(),
-            },
-          },
-        });
-        console.log(`✅ Channel created/updated for: ${phone}`);
-      } catch (channelError) {
-        console.error("Channel upsert error:", channelError);
-        // Don't fail registration if channel fails
-      }
+        },
+      });
 
-      // ============================================================
-      // STEP 6: GENERATE CHANGE LINK
-      // ============================================================
       const appUrl = getAppUrl();
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
+      const finalBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
-      // ============================================================
-      // STEP 7: RETURN REFINED SUCCESS MESSAGE
-      // ============================================================
       return `Welcome ${user.fullName}! Registration successful.
 
 Wallet Info:
@@ -551,9 +473,9 @@ This link is valid for 7 days.
 Type HELP to see all available commands.
 
 Thank you for choosing Bilscore!`;
+    }
 
-    } else {
-      return `Welcome to Bilscore!
+    return `Welcome to Bilscore!
 
 To register, please provide your details:
 REG [Full Name] [Email] [Username]
@@ -565,7 +487,6 @@ REG John Doe - johndoe
 
 Or visit our website:
 ${getAppUrl()}/auth`;
-    }
 
   } catch (error) {
     console.error("❌ [WhatsApp] Registration error:", error);
@@ -576,6 +497,99 @@ ${getAppUrl()}/auth
 
 Or reply with HELP for assistance.`;
   }
+}
+
+// ============================================================
+// NETWORK MAPPING & DETECTION
+// ============================================================
+
+const networkMap: Record<string, NetworkProvider> = {
+  'MTN': NetworkProvider.MTN,
+  'mtn': NetworkProvider.MTN,
+  'GLO': NetworkProvider.GLO,
+  'glo': NetworkProvider.GLO,
+  'AIRTEL': NetworkProvider.AIRTEL,
+  'airtel': NetworkProvider.AIRTEL,
+  '9MOBILE': NetworkProvider.NINEMOBILE,
+  '9mobile': NetworkProvider.NINEMOBILE,
+  'NINEMOBILE': NetworkProvider.NINEMOBILE,
+  'ETISALAT': NetworkProvider.NINEMOBILE,
+};
+
+function mapNetwork(networkInput: string): NetworkProvider {
+  const normalized = networkInput?.trim() || '';
+  const mapped = networkMap[normalized];
+  if (!mapped) {
+    console.warn(`Unknown network: "${networkInput}", defaulting to MTN`);
+    return NetworkProvider.MTN;
+  }
+  return mapped;
+}
+
+function detectNetworkFromPhone(phoneNumber: string): string | null {
+  const cleanNumber = phoneNumber.replace(/\D/g, "");
+  
+  if (cleanNumber.startsWith("080") || cleanNumber.startsWith("081") || 
+      cleanNumber.startsWith("070") || cleanNumber.startsWith("090") || 
+      cleanNumber.startsWith("091")) {
+    return "MTN";
+  }
+  
+  if (cleanNumber.startsWith("0802") || cleanNumber.startsWith("0808") || 
+      cleanNumber.startsWith("0812") || cleanNumber.startsWith("0901") || 
+      cleanNumber.startsWith("0902") || cleanNumber.startsWith("0907") || 
+      cleanNumber.startsWith("0701") || cleanNumber.startsWith("0708")) {
+    return "AIRTEL";
+  }
+  
+  if (cleanNumber.startsWith("0805") || cleanNumber.startsWith("0807") || 
+      cleanNumber.startsWith("0811") || cleanNumber.startsWith("0815") || 
+      cleanNumber.startsWith("0905") || cleanNumber.startsWith("0909")) {
+    return "GLO";
+  }
+  
+  if (cleanNumber.startsWith("0809") || cleanNumber.startsWith("0817") || 
+      cleanNumber.startsWith("0818") || cleanNumber.startsWith("0908") || 
+      cleanNumber.startsWith("0903") || cleanNumber.startsWith("0904")) {
+    return "9MOBILE";
+  }
+  
+  return null;
+}
+
+function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
+  if (!vendorCode) return null;
+  const normalized = vendorCode.toUpperCase();
+  const vendorMap: Record<string, VtuVendor> = {
+    'VTPASS': VtuVendor.VTPASS,
+    'GIDIGITAL': VtuVendor.GIDIGITAL,
+    'MONIEPOINT': VtuVendor.MONIEPOINT,
+    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
+    'QUICKTELLER': VtuVendor.QUICKTELLER,
+    'BILAL_SADA': VtuVendor.BILAL_SADA,
+    'LEGITDATAWAY': VtuVendor.VTPASS,
+    'BILALSADA': VtuVendor.BILAL_SADA,
+  };
+  return vendorMap[normalized] || null;
+}
+
+function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
+  if (!discoCode) return null;
+  const discoMap: Record<string, DisCo> = {
+    'IKEJA': DisCo.IKEJA,
+    'EKO': DisCo.EKO,
+    'ABUJA': DisCo.ABUJA,
+    'KANO': DisCo.KANO,
+    'PHCN': DisCo.PHCN,
+    'IBADAN': DisCo.IBADAN,
+    'BENIN': DisCo.BENIN,
+    'ENUGU': DisCo.ENUGU,
+    'JOS': DisCo.JOS,
+    'PORT_HARCOURT': DisCo.PORT_HARCOURT,
+    'PORTHARCOURT': DisCo.PORT_HARCOURT,
+  };
+  const normalized = discoCode.toUpperCase().trim();
+  return discoMap[normalized] || null;
 }
 
 // ============================================================
@@ -624,27 +638,86 @@ Wallet Status: ${wallet?.isActive ? "Active" : "Inactive"}
 Reply with HELP for available commands.`;
   }
 
+  // ========== AIRTIME ==========
+  if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
+    const [, phoneNumber, amount] = parts;
+    if (!phoneNumber || !amount) {
+      return `To buy airtime, reply with:
+AIRTIME [phone number] [amount]
+
+Example: AIRTIME 08012345678 500
+
+Available networks: MTN, GLO, AIRTEL, 9MOBILE
+Minimum: NGN 50 | Maximum: NGN 50,000`;
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
+      return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
+Example: AIRTIME 08012345678 500`;
+    }
+
+    if (!user.pinHash) {
+      return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+    }
+
+    return await processAirtimePurchaseWhatsApp(user, phoneNumber, amountNum);
+  }
+
+  // ========== DATA ==========
+  if (command.startsWith("DATA")) {
+    const [, phoneNumber, planQuery] = parts;
+    if (!phoneNumber || !planQuery) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `To buy data, reply with:
+DATA [phone number] [plan]
+
+${availablePlans}
+
+Example: DATA 08012345678 1GB`;
+    }
+
+    if (!user.pinHash) {
+      return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+    }
+
+    return await processDataPurchaseWhatsApp(user, phoneNumber, planQuery);
+  }
+
   // ========== METER MANAGEMENT ==========
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 4) {
+      const discosList = await getAvailableDiscosForWhatsApp();
       return `To add a meter, reply with:
-ADDMETER [meter_number] [disco] [name]
+ADDMETER [meter_number] [disco_code] [name]
+
+Available DisCos:
+${discosList}
 
 Example: ADDMETER 1234567890 ABUJA HOME
-
-Available DISCOs:
-IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, 
-BENIN, ENUGU, JOS, PORT_HARCOURT
 
 Name can be: HOME, OFFICE, SHOP, etc.`;
     }
 
     const [, meterNumber, disco, ...nameParts] = parts;
     const name = nameParts.join(" ");
-    
-    return await addMeter(user.id, meterNumber, disco, name);
+    return await addMeterWithVerification(user.id, meterNumber, disco, name);
   }
 
   if (command === "METERS" || command === "LIST METERS") {
@@ -657,7 +730,6 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
       return `Please specify the meter number to delete.
 Example: DELETEMETER 1234567890`;
     }
-    
     const meterNumber = parts[1];
     return await deleteMeter(user.id, meterNumber);
   }
@@ -669,7 +741,6 @@ Example: DELETEMETER 1234567890`;
 Example: SETDEFAULTMETER 1
 Or: SETDEFAULTMETER 1234567890`;
     }
-
     const meterId = parts[1];
     return await setDefaultMeter(user.id, meterId);
   }
@@ -690,8 +761,7 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
 
     const [, decoderNumber, provider, ...nameParts] = parts;
     const name = nameParts.join(" ");
-    
-    return await addDecoder(user.id, decoderNumber, provider, name);
+    return await addDecoderWithVerification(user.id, decoderNumber, provider, name);
   }
 
   if (command === "DECODERS" || command === "LIST DECODERS") {
@@ -704,7 +774,6 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
       return `Please specify the decoder number to delete.
 Example: DELETEDECODER 1234567890`;
     }
-    
     const decoderNumber = parts[1];
     return await deleteDecoder(user.id, decoderNumber);
   }
@@ -716,13 +785,11 @@ Example: DELETEDECODER 1234567890`;
 Example: SETDEFAULTDECODER 1
 Or: SETDEFAULTDECODER 1234567890`;
     }
-
     const decoderId = parts[1];
     return await setDefaultDecoder(user.id, decoderId);
   }
 
-  // ========== ELECTRICITY PURCHASE WITH PIN VALIDATION ==========
-  
+  // ========== ELECTRICITY ==========
   if (command === "ELECTRICITY" || command === "ELEC" || command === "POWER") {
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
@@ -730,16 +797,16 @@ Or: SETDEFAULTDECODER 1234567890`;
     });
 
     if (meters.length === 0) {
+      const discosList = await getAvailableDiscosForWhatsApp();
       return `You don't have any saved meters.
 
 To add your first meter:
-ADDMETER [meter_number] [disco] [name]
+ADDMETER [meter_number] [disco_code] [name]
+
+Available DisCos:
+${discosList}
 
 Example: ADDMETER 1234567890 ABUJA HOME
-
-Available DISCOs:
-IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, 
-BENIN, ENUGU, JOS, PORT_HARCOURT
 
 After adding, you can buy electricity by just typing ELECTRICITY!`;
     }
@@ -754,8 +821,9 @@ After adding, you can buy electricity by just typing ELECTRICITY!`;
 
     message += `Reply with: ELECTRICITY [number] [amount]\n`;
     message += `Example: ELECTRICITY 1 5000\n\n`;
-    message += `To add more meters: ADDMETER [meter] [disco] [name]`;
-    
+    message += `To add more meters: ADDMETER [meter] [disco] [name]\n`;
+    message += `To get available DisCos: DISCOS`;
+
     return message;
   }
 
@@ -787,7 +855,25 @@ Example: ELECTRICITY 1 5000`;
       }
       
       const selectedMeter = meters[index];
-      return await processElectricityPurchaseWithPinValidation(user, selectedMeter.meterNumber, amount, selectedMeter.disco);
+      
+      if (!user.pinHash) {
+        return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+      }
+      
+      return await processElectricityPurchaseWhatsApp(
+        user, 
+        selectedMeter.meterNumber, 
+        amount, 
+        selectedMeter.disco,
+        selectedMeter.meterType || "Prepaid"
+      );
     }
     
     if (parts.length === 2) {
@@ -796,8 +882,18 @@ Example: ELECTRICITY ${parts[1]} 5000`;
     }
   }
 
-  // ========== CABLE PURCHASE WITH PIN VALIDATION ==========
-  
+  // ========== DISCOS ==========
+  if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
+    const discosList = await getAvailableDiscosForWhatsApp();
+    return `Available DisCos:
+
+${discosList}
+
+To add a meter: ADDMETER [meter_number] [disco_code] [name]
+Example: ADDMETER 1234567890 ABUJA HOME`;
+  }
+
+  // ========== CABLE ==========
   if (command === "CABLE" || command === "TV") {
     const decoders = await prisma.savedDecoder.findMany({
       where: { userId: user.id },
@@ -817,8 +913,6 @@ Available providers: DSTV, GOTV, STARTIMES
 After adding, you can buy cable by just typing CABLE!`;
     }
 
-    const packages = getAvailablePackages();
-
     let message = "Your Saved Decoders:\n\n";
     decoders.forEach((decoder: any, index: number) => {
       const defaultTag = decoder.isDefault ? " (Default)" : "";
@@ -827,15 +921,12 @@ After adding, you can buy cable by just typing CABLE!`;
       message += `   ${decoder.decoderNumber}\n\n`;
     });
 
-    message += `Then choose a package:\n`;
-    packages.forEach((pkg: any, index: number) => {
-      message += `   ${index + 1}. ${pkg.name} - NGN ${pkg.price.toFixed(2)}\n`;
-    });
-
-    message += `\nReply with: CABLE [decoder_index] [package_index]\n`;
-    message += `Example: CABLE 1 2\n\n`;
+    message += `To buy cable: CABLE [decoder_index] [package]\n`;
+    message += `Example: CABLE 1 PREMIUM\n\n`;
+    message += `To see available packages: PACKAGES [provider]\n`;
+    message += `Example: PACKAGES DSTV\n\n`;
     message += `To add more decoders: ADDDECODER [decoder] [provider] [name]`;
-    
+
     return message;
   }
 
@@ -843,12 +934,12 @@ After adding, you can buy cable by just typing CABLE!`;
     const parts = body.split(" ").filter(p => p.length > 0);
     
     if (parts.length >= 3) {
-      const [, decoderIndexStr, packageIndexStr] = parts;
-      const decoderIndex = parseInt(decoderIndexStr) - 1;
-      const packageIndex = parseInt(packageIndexStr) - 1;
+      const [, indexStr, packageQuery] = parts;
+      const index = parseInt(indexStr) - 1;
       
-      if (isNaN(decoderIndex) || decoderIndex < 0) {
-        return `Invalid decoder selection. Please choose a number from the list.`;
+      if (isNaN(index) || index < 0) {
+        return `Invalid selection. Please choose a number from the list.
+Example: CABLE 1 PREMIUM`;
       }
       
       const decoders = await prisma.savedDecoder.findMany({
@@ -856,70 +947,203 @@ After adding, you can buy cable by just typing CABLE!`;
         orderBy: [{ isDefault: "desc" }, { name: "asc" }],
       });
       
-      if (decoderIndex >= decoders.length) {
-        return `Invalid decoder selection. Please choose a number from the list.`;
+      if (index >= decoders.length) {
+        return `Invalid selection. Please choose a number from the list.`;
       }
       
-      const packages = getAvailablePackages();
-      if (packageIndex < 0 || packageIndex >= packages.length) {
-        let pkgList = "Available packages:\n";
-        packages.forEach((pkg: any, index: number) => {
-          pkgList += `   ${index + 1}. ${pkg.name} - NGN ${pkg.price.toFixed(2)}\n`;
-        });
-        return `Invalid package selection.\n\n${pkgList}`;
+      const selectedDecoder = decoders[index];
+      
+      if (!user.pinHash) {
+        return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
       }
       
-      const selectedDecoder = decoders[decoderIndex];
-      const selectedPackage = packages[packageIndex];
-      
-      return await processCablePurchaseWithPinValidation(user, selectedDecoder.decoderNumber, selectedPackage.code);
+      return await processCablePurchaseWhatsApp(
+        user, 
+        selectedDecoder.decoderNumber, 
+        packageQuery,
+        selectedDecoder.provider
+      );
     }
     
     if (parts.length === 2) {
       return `Please specify the package as well.
-Example: CABLE ${parts[1]} 2`;
+Example: CABLE ${parts[1]} PREMIUM
+
+To see available packages: PACKAGES [provider]
+Example: PACKAGES DSTV`;
     }
   }
 
-  // ========== AIRTIME ==========
-  if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
-    const [, phoneNumber, amount] = parts;
-    if (!phoneNumber || !amount) {
-      return `To buy airtime, reply with:
-AIRTIME [phone number] [amount]
-
-Example: AIRTIME 08012345678 500
-
-Available networks: MTN, GLO, AIRTEL, 9MOBILE
-Minimum: NGN 50 | Maximum: NGN 50,000`;
-    }
-
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
-      return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
-Example: AIRTIME 08012345678 500`;
-    }
-
-    return await processAirtimePurchaseWithPinValidation(user, phoneNumber, amountNum);
+  // ========== PACKAGES ==========
+  if (command.startsWith("PACKAGES") || command === "PACKAGE") {
+    const parts = body.split(" ").filter(p => p.length > 0);
+    const provider = parts.length > 1 ? parts[1] : "DSTV";
+    const packagesList = await getAvailablePackagesForWhatsApp(provider);
+    return packagesList;
   }
 
-  // ========== DATA ==========
-  if (command.startsWith("DATA")) {
-    const [, phoneNumber, plan] = parts;
-    if (!phoneNumber || !plan) {
-      return `To buy data, reply with:
-DATA [phone number] [plan]
+  // ========== SUBSCRIPTIONS ==========
+  if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
+    const parts = body.split(" ").filter(p => p.length > 0);
+    
+    if (!user.pinHash) {
+      return `You need to set a transaction PIN first.
 
-Available plans:
-MTN: 1GB, 2GB, 5GB, 10GB
-GLO: 1GB, 3GB, 5GB
-AIRTEL: 1GB, 3GB, 8GB
-9MOBILE: 1GB, 2GB, 5GB
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
 
-Example: DATA 08012345678 1GB`;
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+    }
+    
+    if (parts.length < 4) {
+      return `To schedule electricity token delivery:
+SCHEDULE [meter_index] [amount] [days]
+
+Example: SCHEDULE 1 5000 7
+
+This schedules a token for delivery in 7 days.
+
+Available meters:
+${await getSavedMetersList(user.id)}`;
     }
 
-    return await processDataPurchaseWithPinValidation(user, phoneNumber, plan);
+    const [, indexStr, amountStr, daysStr] = parts;
+    const index = parseInt(indexStr) - 1;
+    const amount = parseFloat(amountStr);
+    const days = parseInt(daysStr);
+
+    if (isNaN(index) || index < 0) {
+      return `Invalid meter selection. Please choose a number from the list.
+Example: SCHEDULE 1 5000 7`;
+    }
+
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid amount. Minimum is NGN 100.
+Example: SCHEDULE 1 5000 7`;
+    }
+
+    if (isNaN(days) || days < 3) {
+      return `Invalid days. Minimum is 3 days.
+Example: SCHEDULE 1 5000 7`;
+    }
+
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+
+    if (index >= meters.length) {
+      return `Invalid meter selection. Please choose a number from the list.`;
+    }
+
+    const selectedMeter = meters[index];
+    return await processSubscriptionWhatsApp(
+      user,
+      selectedMeter.meterNumber,
+      selectedMeter.disco,
+      amount,
+      days,
+      selectedMeter.meterType || "Prepaid"
+    );
+  }
+
+  if (command === "SUBSCRIPTIONS" || command === "SCHEDULES") {
+    return await getActiveSubscriptions(user.id);
+  }
+
+  if (command.startsWith("CANCEL") || command.startsWith("UNSUBSCRIBE")) {
+    const parts = body.split(" ").filter(p => p.length > 0);
+    if (parts.length < 2) {
+      return `To cancel a subscription:
+CANCEL [subscription_id]
+
+Example: CANCEL SUB-123456
+
+To see your active subscriptions: SUBSCRIPTIONS`;
+    }
+    const subscriptionId = parts[1];
+    return await cancelSubscription(user.id, subscriptionId);
+  }
+
+  // ========== EDUCATION ==========
+  if (command.startsWith("EDU") || command === "EDUCATION" || 
+      command.startsWith("WAEC") || command.startsWith("JAMB") || 
+      command.startsWith("NECO") || command === "WAEC-RESULT") {
+    
+    if (!user.pinHash) {
+      return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+    }
+
+    const cmd = parts[0].toUpperCase();
+    
+    if (cmd === "EDU" || cmd === "EDUCATION") {
+      const productsList = await getAvailableEducationProducts();
+      return `Education Services:
+
+${productsList}
+
+To purchase:
+EDU [product] [quantity]
+
+Examples:
+EDU WAEC 2
+EDU JAMB 1
+EDU NECO 3
+
+Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
+    }
+
+    if (parts.length >= 3 && (cmd === "EDU" || cmd === "EDUCATION")) {
+      const product = parts[1].toUpperCase();
+      const quantity = parseInt(parts[2]);
+      if (isNaN(quantity) || quantity < 1) {
+        return `Invalid quantity. Please enter a number greater than 0.
+Example: EDU WAEC 2`;
+      }
+      return await processEducationPurchaseWhatsApp(user, product, quantity);
+    }
+
+    if (parts.length >= 2 && ["WAEC", "JAMB", "NECO", "WAEC-RESULT"].includes(cmd)) {
+      const quantity = parseInt(parts[1]);
+      if (isNaN(quantity) || quantity < 1) {
+        return `Invalid quantity. Please enter a number greater than 0.
+Example: WAEC 2`;
+      }
+      return await processEducationPurchaseWhatsApp(user, cmd, quantity);
+    }
+
+    const productsList = await getAvailableEducationProducts();
+    return `Education Services:
+
+${productsList}
+
+To purchase:
+EDU [product] [quantity]
+
+Examples:
+EDU WAEC 2
+EDU JAMB 1
+EDU NECO 3
+WAEC 2
+JAMB 1
+
+Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
   }
 
   // ========== TRANSACTIONS ==========
@@ -967,129 +1191,152 @@ ADDMETER [meter] [disco] [name] - Save a meter
 ADDDECODER [decoder] [provider] [name] - Save a decoder
 METERS - List your saved meters
 DECODERS - List your saved decoders
+SCHEDULE [index] [amount] [days] - Schedule electricity
+SUBSCRIPTIONS - View active schedules
+EDU [product] [quantity] - Buy education pins
 TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN`;
 }
 
 // ============================================================
-// DEVICE MANAGEMENT HELPERS
+// HELP FUNCTION
 // ============================================================
 
-async function addMeter(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
-  try {
-    const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORT_HARCOURT"];
-    const discoUpper = disco.toUpperCase();
-    if (!validDiscos.includes(discoUpper)) {
-      return `Invalid DisCo. Available: ${validDiscos.join(", ")}`;
-    }
+function getHelpMessage(user: any): string {
+  return `Bilscore WhatsApp Commands
 
-    const existing = await prisma.savedMeter.findFirst({
-      where: {
-        userId: userId,
-        meterNumber: meterNumber,
-      },
-    });
+Financial:
+BALANCE - Check wallet balance
+TRANSACTIONS - View transaction history
+PIN [code] - Set transaction PIN
 
-    if (existing) {
-      await prisma.savedMeter.update({
-        where: { id: existing.id },
-        data: {
-          disco: discoUpper,
-          name: name || existing.name,
-          updatedAt: new Date(),
-        },
-      });
-      return `Meter updated successfully!
+Airtime & Data:
+AIRTIME [phone] [amount] - Buy airtime
+DATA [phone] [plan] - Buy data
 
-Meter: ${meterNumber}
-DisCo: ${discoUpper}
-Name: ${name || existing.name}
+Electricity:
+ELECTRICITY - Show saved meters
+ELECTRICITY [index] [amount] - Buy electricity
+ADDMETER [meter] [disco] [name] - Add meter
+METERS - List saved meters
+DISCOS - Show available DisCos
+SCHEDULE [index] [amount] [days] - Schedule electricity
+SUBSCRIPTIONS - View active schedules
+CANCEL [id] - Cancel subscription
 
-Type METERS to see all your saved meters.`;
-    }
+Cable TV:
+CABLE - Show saved decoders
+CABLE [index] [package] - Subscribe
+ADDDECODER [decoder] [provider] [name] - Add decoder
+DECODERS - List saved decoders
+PACKAGES [provider] - Show packages
 
-    await prisma.savedMeter.create({
-      data: {
-        userId: userId,
-        meterNumber: meterNumber,
-        disco: discoUpper,
-        name: name || `${discoUpper} Meter`,
-        meterType: "Prepaid",
-        isDefault: false,
-      },
-    });
+Education:
+EDU [product] [quantity] - Buy education pins
+WAEC [quantity] - Buy WAEC pins
+JAMB [quantity] - Buy JAMB pins
+NECO [quantity] - Buy NECO pins
 
-    return `Meter added successfully!
+Referral:
+REFERRAL - Get referral link
 
-Meter: ${meterNumber}
-DisCo: ${discoUpper}
-Name: ${name || `${discoUpper} Meter`}
+Help:
+HELP - Show this message
 
-Type ELECTRICITY to see all your meters and buy power!`;
+All purchases require PIN validation via secure link.
 
-  } catch (error) {
-    console.error("Add meter error:", error);
-    return `Failed to add meter. Please try again.`;
-  }
+Need help? Visit: ${getAppUrl()}/support`;
 }
 
-async function addDecoder(userId: string, decoderNumber: string, provider: string, name: string): Promise<string> {
-  try {
-    const validProviders = ["DSTV", "GOTV", "STARTIMES"];
-    const providerUpper = provider.toUpperCase();
-    if (!validProviders.includes(providerUpper)) {
-      return `Invalid provider. Available: ${validProviders.join(", ")}`;
-    }
+// ============================================================
+// TRANSACTION HISTORY
+// ============================================================
 
-    const existing = await prisma.savedDecoder.findFirst({
-      where: {
-        userId: userId,
-        decoderNumber: decoderNumber,
-      },
-    });
+async function getTransactionHistory(userId: string): Promise<string> {
+  const transactions = await prisma.vtuTransaction.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
 
-    if (existing) {
-      await prisma.savedDecoder.update({
-        where: { id: existing.id },
-        data: {
-          provider: providerUpper,
-          name: name || existing.name,
-          updatedAt: new Date(),
-        },
-      });
-      return `Decoder updated successfully!
+  if (transactions.length === 0) {
+    return `No transactions found.
 
-Decoder: ${decoderNumber}
-Provider: ${providerUpper}
-Name: ${name || existing.name}
-
-Type DECODERS to see all your saved decoders.`;
-    }
-
-    await prisma.savedDecoder.create({
-      data: {
-        userId: userId,
-        decoderNumber: decoderNumber,
-        provider: providerUpper,
-        name: name || `${providerUpper} Decoder`,
-        isDefault: false,
-      },
-    });
-
-    return `Decoder added successfully!
-
-Decoder: ${decoderNumber}
-Provider: ${providerUpper}
-Name: ${name || `${providerUpper} Decoder`}
-
-Type CABLE to see all your decoders and buy subscriptions!`;
-
-  } catch (error) {
-    console.error("Add decoder error:", error);
-    return `Failed to add decoder. Please try again.`;
+Start using Bilscore today!
+Type HELP to see available commands.`;
   }
+
+  let message = "Recent Transactions:\n\n";
+  transactions.forEach((tx, i) => {
+    const status = tx.status === "SUCCESS" ? "OK" : tx.status === "PENDING" ? "PENDING" : "FAILED";
+    const type = tx.transactionType.replace("_", " ");
+    message += `${i + 1}. ${status} ${type}\n`;
+    message += `   Amount: NGN ${Number(tx.amount).toFixed(2)}\n`;
+    message += `   ${new Date(tx.createdAt).toLocaleDateString()}\n\n`;
+  });
+
+  const total = await prisma.vtuTransaction.count({
+    where: { userId },
+  });
+
+  message += `Total: ${total} transactions`;
+  return message;
 }
+
+// ============================================================
+// PIN HANDLER
+// ============================================================
+
+async function handlePinCommand(user: any, parts: string[]): Promise<string> {
+  if (parts.length < 2) {
+    return `To set up your transaction PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN will be encrypted and used for transaction verification.`;
+  }
+
+  const pin = parts[1];
+  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
+    return `Invalid PIN format. Please use 4-6 digits.
+Example: PIN 1234`;
+  }
+
+  if (user.pinHash) {
+    return `You already have a transaction PIN set.
+To change your PIN, please use the Bilscore mobile app or website.
+
+${getAppUrl()}/profile`;
+  }
+
+  const hashedPin = await hash(pin, 10);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      pinHash: hashedPin,
+      pinAttempts: 0,
+      pinLockedUntil: null,
+    },
+  });
+
+  return `Transaction PIN set successfully!
+
+Your PIN has been encrypted and saved.
+You'll need this PIN for all transactions.
+
+PIN: **** (hidden for security)
+
+Keep your PIN safe and never share it with anyone.
+
+You can change your PIN anytime in the Bilscore app.`;
+}
+
+// ============================================================
+// METER & DECODER MANAGEMENT HELPERS
+// ============================================================
 
 async function listMeters(userId: string): Promise<string> {
   const meters = await prisma.savedMeter.findMany({
@@ -1098,16 +1345,16 @@ async function listMeters(userId: string): Promise<string> {
   });
 
   if (meters.length === 0) {
+    const discosList = await getAvailableDiscosForWhatsApp();
     return `You have no saved meters.
 
 To add a meter:
-ADDMETER [meter_number] [disco] [name]
+ADDMETER [meter_number] [disco_code] [name]
 
-Example: ADDMETER 1234567890 ABUJA HOME
+Available DisCos:
+${discosList}
 
-Available DISCOs:
-IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, 
-BENIN, ENUGU, JOS, PORT_HARCOURT`;
+Example: ADDMETER 1234567890 ABUJA HOME`;
   }
 
   let message = "Your Saved Meters:\n\n";
@@ -1150,9 +1397,10 @@ Available providers: DSTV, GOTV, STARTIMES`;
     message += `   ${decoder.decoderNumber}\n\n`;
   });
 
-  message += `To buy cable: CABLE [decoder_index] [package_index]
+  message += `To buy cable: CABLE [decoder_index] [package]
 To delete: DELETEDECODER [decoder_number]
-To set default: SETDEFAULTDECODER [decoder_number]`;
+To set default: SETDEFAULTDECODER [decoder_number]
+To see packages: PACKAGES [provider]`;
 
   return message;
 }
@@ -1289,280 +1537,795 @@ async function setDefaultDecoder(userId: string, decoderId: string): Promise<str
   }
 }
 
-function getAvailablePackages(): Array<{ name: string; code: string; price: number }> {
-  return [
-    { name: "DSTV Premium", code: "PREMIUM", price: 15000 },
-    { name: "DSTV Compact", code: "COMPACT", price: 10000 },
-    { name: "DSTV Family", code: "FAMILY", price: 5000 },
-    { name: "GOTV Max", code: "MAX", price: 8000 },
-    { name: "GOTV Plus", code: "PLUS", price: 5000 },
-    { name: "GOTV Lite", code: "LITE", price: 3000 },
-    { name: "Startimes Basic", code: "BASIC", price: 2500 },
-  ];
-}
-
 // ============================================================
-// PURCHASE HANDLERS WITH PIN VALIDATION LINK
+// GET SAVED METERS LIST
 // ============================================================
 
-async function processElectricityPurchaseWithPinValidation(user: any, meterNumber: string, amount: number, disco: string): Promise<string> {
-  try {
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: user.id },
-    });
+async function getSavedMetersList(userId: string): Promise<string> {
+  const meters = await prisma.savedMeter.findMany({
+    where: { userId },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+  });
 
-    if (!wallet || Number(wallet.walletBalance) < amount) {
-      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
+  if (meters.length === 0) {
+    return `No saved meters found. Add one with:
+ADDMETER [meter_number] [disco] [name]
 
-Please fund your wallet and try again.`;
-    }
-
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-    }
-
-    const validationToken = generateValidationToken();
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.ELECTRICITY_INSTANT,
-        product: disco,
-        amount: amount,
-        serviceFee: 0,
-        totalDebited: amount,
-        meterNumber: meterNumber,
-        status: "PENDING",
-        vendor: VtuVendor.VTPASS,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "whatsapp",
-          meterNumber,
-          disco,
-          pendingPin: true,
-          validationToken: validationToken,
-          validationExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-          initiatedAt: new Date().toISOString(),
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: Number(wallet.walletBalance),
-        balanceAfter: Number(wallet.walletBalance),
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending electricity purchase - await PIN validation`,
-        status: "PENDING",
-        category: "ELECTRICITY",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
-    console.log(`📝 [WhatsApp] Validation token: ${validationToken}`);
-
-    return `Electricity Purchase Initiated!
-
-Meter: ${meterNumber}
-DisCo: ${disco}
-Amount: NGN ${amount.toFixed(2)}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your electricity token will be sent here.`;
-  } catch (error) {
-    console.error("Electricity purchase error:", error);
-    return `Failed to initiate electricity purchase. Please try again.`;
+Example: ADDMETER 1234567890 ABUJA HOME`;
   }
+
+  let message = "";
+  meters.forEach((meter: any, index: number) => {
+    const defaultTag = meter.isDefault ? " (Default)" : "";
+    message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+    message += `   ${meter.disco}\n`;
+    message += `   ${meter.meterNumber}\n\n`;
+  });
+
+  return message;
 }
 
-async function processCablePurchaseWithPinValidation(user: any, decoderNumber: string, packageCode: string): Promise<string> {
+// ============================================================
+// GET AVAILABLE DISCOS FOR WHATSAPP
+// ============================================================
+
+async function getAvailableDiscosForWhatsApp(): Promise<string> {
   try {
-    const packages: Record<string, { name: string; price: number }> = {
-      'PREMIUM': { name: 'Premium', price: 15000 },
-      'COMPACT': { name: 'Compact', price: 10000 },
-      'FAMILY': { name: 'Family', price: 5000 },
-      'MAX': { name: 'Max', price: 8000 },
-      'PLUS': { name: 'Plus', price: 5000 },
-      'LITE': { name: 'Lite', price: 3000 },
-      'BASIC': { name: 'Basic', price: 2500 },
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-categories"
+      : "https://sandbox.vtpass.com/api/service-categories";
+    
+    const response = await fetch(baseUrl, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.response_description === "000" && data.content) {
+        const electricityCategory = data.content.find(
+          (cat: any) => cat.identifier === "electricity-bill"
+        );
+        
+        if (electricityCategory) {
+          const servicesUrl = isProduction
+            ? "https://vtpass.com/api/services?identifier=electricity-bill"
+            : "https://sandbox.vtpass.com/api/services?identifier=electricity-bill";
+          
+          const servicesResponse = await fetch(servicesUrl, {
+            headers: {
+              "Content-Type": "application/json",
+            },
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (servicesResponse.ok) {
+            const servicesData = await servicesResponse.json();
+            if (servicesData.response_description === "000" && servicesData.content) {
+              let message = "";
+              servicesData.content.forEach((service: any) => {
+                let code = service.serviceID || "";
+                code = code.replace("-electric", "").toUpperCase();
+                let name = service.name || "";
+                name = name.replace(" Payment", "").replace(" Distribution Company", "").replace("Electricity", "").trim();
+                if (code && code.length > 1) {
+                  message += `   ${code} - ${name}\n`;
+                }
+              });
+              if (message) return message;
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching DisCos:", error);
+  }
+
+  return `   IKEJA - Ikeja Electric
+   EKO - Eko Electric
+   ABUJA - Abuja Electric
+   KANO - Kano Electric
+   IBADAN - Ibadan Electric
+   BENIN - Benin Electric
+   ENUGU - Enugu Electric
+   JOS - Jos Electric
+   PORTHARCOURT - Port Harcourt Electric
+   KADUNA - Kaduna Electric`;
+}
+
+// ============================================================
+// GET AVAILABLE PLANS FOR WHATSAPP
+// ============================================================
+
+async function getAvailablePlansForWhatsApp(): Promise<string> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${apiUrl}/api/vendors/plans?serviceType=DATA`, {
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      if (result.success && result.data?.plans) {
+        const { plans } = result.data;
+        let message = "Available plans:\n";
+        const groupedPlans: Record<string, string[]> = {};
+        for (const provider of plans) {
+          const networkName = provider.name;
+          if (!groupedPlans[networkName]) {
+            groupedPlans[networkName] = [];
+          }
+          for (const category of provider.categories || []) {
+            for (const plan of category.plans || []) {
+              if (plan.price && plan.price > 0) {
+                groupedPlans[networkName].push(plan.data);
+              }
+            }
+          }
+        }
+        for (const [network, planSizes] of Object.entries(groupedPlans)) {
+          const uniquePlans = [...new Set(planSizes)];
+          message += `${network}: ${uniquePlans.join(', ')}\n`;
+        }
+        return message;
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching plans:", error);
+  }
+
+  return `Available plans:
+MTN: 1GB, 2GB, 5GB, 10GB
+GLO: 1GB, 3GB, 5GB
+AIRTEL: 1GB, 3GB, 8GB
+9MOBILE: 1GB, 2GB, 5GB`;
+}
+
+// ============================================================
+// GET AVAILABLE PACKAGES FOR WHATSAPP
+// ============================================================
+
+async function getAvailablePackagesForWhatsApp(provider: string = "DSTV"): Promise<string> {
+  try {
+    const serviceMap: Record<string, string> = {
+      'DSTV': 'dstv', 'dstv': 'dstv',
+      'GOTV': 'gotv', 'gotv': 'gotv',
+      'STARTIMES': 'startimes', 'startimes': 'startimes',
     };
 
-    const pkg = packages[packageCode.toUpperCase()];
-    if (!pkg) {
-      return `Invalid package. Available packages:
-DSTV: PREMIUM, COMPACT, FAMILY
-GOTV: MAX, PLUS, LITE
-Startimes: BASIC`;
-    }
+    const serviceId = serviceMap[provider] || 'dstv';
+    const providerDisplayName = provider.toUpperCase();
 
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: user.id },
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-variations"
+      : "https://sandbox.vtpass.com/api/service-variations";
+    
+    const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
     });
 
-    if (!wallet || Number(wallet.walletBalance) < pkg.price) {
-      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need NGN ${pkg.price.toFixed(2)}.
+    if (response.ok) {
+      const data = await response.json();
+      if (data.response_description === "000" && data.content?.variations) {
+        const packages = data.content.variations
+          .filter((v: any) => parseFloat(v.variation_amount) > 0)
+          .map((v: any) => ({
+            name: v.name || "",
+            price: parseFloat(v.variation_amount) || 0,
+            code: v.variation_code || "",
+          }))
+          .sort((a: any, b: any) => a.price - b.price);
 
-Please fund your wallet and try again.`;
+        if (packages.length > 0) {
+          let message = `${providerDisplayName} Packages:\n\n`;
+          packages.forEach((pkg: any) => {
+            message += `   ${pkg.code} - ${pkg.name}\n`;
+            message += `   Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+          });
+          message += `To subscribe: CABLE [decoder_index] [package_code]\n`;
+          message += `Example: CABLE 1 ${packages[0]?.code || 'PREMIUM'}`;
+          return message;
+        }
+      }
     }
-
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-    }
-
-    const validationToken = generateValidationToken();
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.CABLE_TV,
-        product: `${pkg.name} Package`,
-        amount: pkg.price,
-        serviceFee: 0,
-        totalDebited: pkg.price,
-        phoneNumber: user.phone,
-        networkPlan: packageCode,
-        status: "PENDING",
-        vendor: VtuVendor.VTPASS,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "whatsapp",
-          decoderNumber,
-          packageCode,
-          pendingPin: true,
-          validationToken: validationToken,
-          validationExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-          initiatedAt: new Date().toISOString(),
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: pkg.price,
-        balanceBefore: Number(wallet.walletBalance),
-        balanceAfter: Number(wallet.walletBalance),
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending cable subscription - await PIN validation`,
-        status: "PENDING",
-        category: "CABLE_TV",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
-
-    return `Cable Subscription Initiated!
-
-Decoder: ${decoderNumber}
-Package: ${pkg.name}
-Amount: NGN ${pkg.price.toFixed(2)}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your subscription will be activated.`;
   } catch (error) {
-    console.error("Cable purchase error:", error);
-    return `Failed to initiate cable subscription. Please try again.`;
+    console.error("Error fetching packages:", error);
+  }
+
+  const fallbackPackages: Record<string, any[]> = {
+    'DSTV': [
+      { code: 'PREMIUM', name: 'Premium', price: 15000 },
+      { code: 'COMPACT', name: 'Compact', price: 10000 },
+      { code: 'FAMILY', name: 'Family', price: 5000 },
+    ],
+    'GOTV': [
+      { code: 'MAX', name: 'Max', price: 8000 },
+      { code: 'PLUS', name: 'Plus', price: 5000 },
+      { code: 'LITE', name: 'Lite', price: 3000 },
+    ],
+    'STARTIMES': [
+      { code: 'BASIC', name: 'Basic', price: 2500 },
+      { code: 'STANDARD', name: 'Standard', price: 4500 },
+      { code: 'PREMIUM', name: 'Premium', price: 7000 },
+    ],
+  };
+
+  const providerPackages = fallbackPackages[provider.toUpperCase()] || fallbackPackages['DSTV'];
+  let message = `${provider.toUpperCase()} Packages (Fallback):\n\n`;
+  providerPackages.forEach((pkg: any) => {
+    message += `   ${pkg.code} - ${pkg.name}\n`;
+    message += `   Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+  });
+  message += `To subscribe: CABLE [decoder_index] [package_code]\n`;
+  message += `Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}`;
+  return message;
+}
+
+// ============================================================
+// GET AVAILABLE EDUCATION PRODUCTS
+// ============================================================
+
+async function getAvailableEducationProducts(): Promise<string> {
+  try {
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-categories"
+      : "https://sandbox.vtpass.com/api/service-categories";
+    
+    const response = await fetch(baseUrl, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.response_description === "000" && data.content) {
+        const educationCategory = data.content.find(
+          (cat: any) => cat.identifier === "education"
+        );
+        
+        if (educationCategory) {
+          const servicesUrl = isProduction
+            ? "https://vtpass.com/api/services?identifier=education"
+            : "https://sandbox.vtpass.com/api/services?identifier=education";
+          
+          const servicesResponse = await fetch(servicesUrl, {
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (servicesResponse.ok) {
+            const servicesData = await servicesResponse.json();
+            if (servicesData.response_description === "000" && servicesData.content) {
+              let message = "Available Education Services:\n\n";
+              let hasProducts = false;
+              for (const service of servicesData.content) {
+                const name = service.name || service.serviceID || "";
+                const serviceId = service.serviceID || "";
+                if (!name || !serviceId) continue;
+                let displayName = name;
+                if (name.includes("WAEC")) displayName = "WAEC";
+                else if (name.includes("JAMB")) displayName = "JAMB";
+                else if (name.includes("NECO")) displayName = "NECO";
+                else if (name.includes("Result")) displayName = "WAEC-RESULT";
+                else continue;
+                message += `   ${displayName} - ${name}\n`;
+                hasProducts = true;
+              }
+              if (hasProducts) return message;
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching education products:", error);
+  }
+
+  return `   WAEC - WAEC Registration
+   WAEC-RESULT - WAEC Result Checker
+   JAMB - JAMB PIN
+   NECO - NECO Registration`;
+}
+
+// ============================================================
+// METER VERIFICATION
+// ============================================================
+
+async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
+  try {
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/merchant-verify"
+      : "https://sandbox.vtpass.com/api/merchant-verify";
+    
+    const apiKey = isProduction 
+      ? process.env.VTPASS_LIVE_API_KEY 
+      : process.env.VTPASS_SANDBOX_API_KEY;
+    
+    const secretKey = isProduction
+      ? process.env.VTPASS_LIVE_SECRET_KEY
+      : process.env.VTPASS_SANDBOX_SECRET_KEY;
+
+    const response = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey || "",
+        "secret-key": secretKey || "",
+      },
+      body: JSON.stringify({
+        serviceID: serviceID,
+        billersCode: meterNumber,
+        type: meterType,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+
+    const data = await response.json();
+    if (data.code === "000" && data.content) {
+      return {
+        success: true,
+        data: {
+          customerName: data.content.Customer_Name || data.content.customerName || "Unknown",
+          customerAddress: data.content.Address || data.content.address || "",
+          meterNumber: data.content.Meter_Number || data.content.meterNumber || meterNumber,
+          meterType: data.content.Meter_Type || data.content.meterType || meterType,
+          status: data.content.Status || data.content.status || "ACTIVE",
+        },
+      };
+    }
+    return { success: false, error: data.response_description || "Meter verification failed" };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Network error" };
   }
 }
 
-async function processAirtimePurchaseWithPinValidation(user: any, phoneNumber: string, amount: number): Promise<string> {
+// ============================================================
+// DECODER VERIFICATION
+// ============================================================
+
+async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
   try {
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: user.id },
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/merchant-verify"
+      : "https://sandbox.vtpass.com/api/merchant-verify";
+    
+    const apiKey = isProduction 
+      ? process.env.VTPASS_LIVE_API_KEY 
+      : process.env.VTPASS_SANDBOX_API_KEY;
+    
+    const secretKey = isProduction
+      ? process.env.VTPASS_LIVE_SECRET_KEY
+      : process.env.VTPASS_SANDBOX_SECRET_KEY;
+
+    const response = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": apiKey || "",
+        "secret-key": secretKey || "",
+      },
+      body: JSON.stringify({
+        serviceID: serviceID,
+        billersCode: smartCardNumber,
+      }),
+      signal: AbortSignal.timeout(10000),
     });
 
-    if (!wallet || Number(wallet.walletBalance) < amount) {
-      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+
+    const data = await response.json();
+    if (data.code === "000" && data.content) {
+      return {
+        success: true,
+        data: {
+          customerName: data.content.Customer_Name || data.content.customerName || "Unknown",
+          customerAddress: data.content.Address || data.content.address || "",
+          smartCardNumber: data.content.Smart_Card_Number || data.content.smartCardNumber || smartCardNumber,
+          provider: data.content.Provider || data.content.provider || "",
+          status: data.content.Status || data.content.status || "ACTIVE",
+        },
+      };
+    }
+    return { success: false, error: data.response_description || "Decoder verification failed" };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Network error" };
+  }
+}
+
+// ============================================================
+// ADD METER WITH VERIFICATION
+// ============================================================
+
+async function addMeterWithVerification(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
+  try {
+    const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
+    const discoUpper = disco.toUpperCase();
+    if (!validDiscos.includes(discoUpper)) {
+      return `Invalid DisCo. Available: ${validDiscos.join(", ")}`;
+    }
+
+    const serviceIDMap: Record<string, string> = {
+      "IKEJA": "ikeja-electric",
+      "EKO": "eko-electric",
+      "ABUJA": "abuja-electric",
+      "KANO": "kano-electric",
+      "IBADAN": "ibadan-electric",
+      "BENIN": "benin-electric",
+      "ENUGU": "enugu-electric",
+      "JOS": "jos-electric",
+      "PORTHARCOURT": "portharcourt-electric",
+      "KADUNA": "kaduna-electric",
+      "PHCN": "phcn-electric",
+    };
+    const serviceID = serviceIDMap[discoUpper] || discoUpper.toLowerCase() + "-electric";
+
+    const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, "prepaid");
+    let verificationMessage = "";
+    if (verificationResult.success) {
+      verificationMessage = `
+✅ Meter Verified!
+Customer: ${verificationResult.data?.customerName || "Unknown"}
+Meter: ${verificationResult.data?.meterNumber || meterNumber}
+Status: ${verificationResult.data?.status || "ACTIVE"}`;
+    } else {
+      verificationMessage = `
+⚠️ Could not verify meter: ${verificationResult.error || "Unknown error"}`;
+    }
+
+    const existing = await prisma.savedMeter.findFirst({
+      where: { userId: userId, meterNumber: meterNumber },
+    });
+
+    if (existing) {
+      await prisma.savedMeter.update({
+        where: { id: existing.id },
+        data: { disco: discoUpper, name: name || existing.name, updatedAt: new Date() },
+      });
+      return `Meter updated successfully!${verificationMessage}
+
+Meter: ${meterNumber}
+DisCo: ${discoUpper}
+Name: ${name || existing.name}
+
+Type ELECTRICITY to see all your meters and buy power!`;
+    }
+
+    await prisma.savedMeter.create({
+      data: {
+        userId: userId,
+        meterNumber: meterNumber,
+        disco: discoUpper,
+        name: name || `${discoUpper} Meter`,
+        meterType: "Prepaid",
+        isDefault: false,
+      },
+    });
+
+    return `Meter added successfully!${verificationMessage}
+
+Meter: ${meterNumber}
+DisCo: ${discoUpper}
+Name: ${name || `${discoUpper} Meter`}
+
+Type ELECTRICITY to see all your meters and buy power!`;
+  } catch (error) {
+    console.error("Add meter error:", error);
+    return `Failed to add meter. Please try again.`;
+  }
+}
+
+// ============================================================
+// ADD DECODER WITH VERIFICATION
+// ============================================================
+
+async function addDecoderWithVerification(userId: string, decoderNumber: string, provider: string, name: string): Promise<string> {
+  try {
+    const validProviders = ["DSTV", "GOTV", "STARTIMES"];
+    const providerUpper = provider.toUpperCase();
+    if (!validProviders.includes(providerUpper)) {
+      return `Invalid provider. Available: ${validProviders.join(", ")}`;
+    }
+
+    const serviceMap: Record<string, string> = {
+      'DSTV': 'dstv',
+      'GOTV': 'gotv',
+      'STARTIMES': 'startimes',
+    };
+    const serviceId = serviceMap[providerUpper] || 'dstv';
+
+    const verificationResult = await verifyDecoderWithVTpass(serviceId, decoderNumber);
+    let verificationMessage = "";
+    if (verificationResult.success) {
+      verificationMessage = `
+✅ Decoder Verified!
+Customer: ${verificationResult.data?.customerName || "Unknown"}
+Decoder: ${verificationResult.data?.smartCardNumber || decoderNumber}
+Status: ${verificationResult.data?.status || "ACTIVE"}`;
+    } else {
+      verificationMessage = `
+⚠️ Could not verify decoder: ${verificationResult.error || "Unknown error"}`;
+    }
+
+    const existing = await prisma.savedDecoder.findFirst({
+      where: { userId: userId, decoderNumber: decoderNumber },
+    });
+
+    if (existing) {
+      await prisma.savedDecoder.update({
+        where: { id: existing.id },
+        data: { provider: providerUpper, name: name || existing.name, updatedAt: new Date() },
+      });
+      return `Decoder updated successfully!${verificationMessage}
+
+Decoder: ${decoderNumber}
+Provider: ${providerUpper}
+Name: ${name || existing.name}
+
+Type CABLE to see all your decoders and subscribe!`;
+    }
+
+    await prisma.savedDecoder.create({
+      data: {
+        userId: userId,
+        decoderNumber: decoderNumber,
+        provider: providerUpper,
+        name: name || `${providerUpper} Decoder`,
+        isDefault: false,
+      },
+    });
+
+    return `Decoder added successfully!${verificationMessage}
+
+Decoder: ${decoderNumber}
+Provider: ${providerUpper}
+Name: ${name || `${providerUpper} Decoder`}
+
+Type CABLE to see all your decoders and subscribe!`;
+  } catch (error) {
+    console.error("Add decoder error:", error);
+    return `Failed to add decoder. Please try again.`;
+  }
+}
+
+// ============================================================
+// ACTIVE SUBSCRIPTIONS
+// ============================================================
+
+async function getActiveSubscriptions(userId: string): Promise<string> {
+  try {
+    const preOrders = await prisma.preOrder.findMany({
+      where: {
+        userId: userId,
+        status: { in: ["PENDING", "PROCESSING", "PURCHASED"] },
+      },
+      orderBy: { deliveryDate: "asc" },
+    });
+
+    if (preOrders.length === 0) {
+      return `You have no active subscriptions.
+
+To schedule electricity token delivery:
+SCHEDULE [meter_index] [amount] [days]
+
+Example: SCHEDULE 1 5000 7
+
+To see your saved meters: METERS`;
+    }
+
+    let message = "Active Subscriptions:\n\n";
+    preOrders.forEach((order: any, index: number) => {
+      const statusIcon = order.status === "PURCHASED" ? "✅" : 
+                         order.status === "PROCESSING" ? "⏳" : "📅";
+      const deliveryDate = new Date(order.deliveryDate).toLocaleDateString();
+      message += `${index + 1}. ${statusIcon} ${order.meterNumber}\n`;
+      message += `   ${order.disco}\n`;
+      message += `   Amount: NGN ${Number(order.amount).toFixed(2)}\n`;
+      message += `   Delivery: ${deliveryDate}\n`;
+      message += `   Status: ${order.status}\n\n`;
+    });
+
+    message += `To cancel: CANCEL [subscription_id]\n`;
+    message += `To see subscription ID: SUBSCRIPTIONS`;
+
+    return message;
+  } catch (error) {
+    console.error("Error fetching subscriptions:", error);
+    return `Failed to fetch subscriptions. Please try again.`;
+  }
+}
+
+// ============================================================
+// CANCEL SUBSCRIPTION
+// ============================================================
+
+async function cancelSubscription(userId: string, subscriptionId: string): Promise<string> {
+  try {
+    const preOrder = await prisma.preOrder.findFirst({
+      where: {
+        id: subscriptionId,
+        userId: userId,
+        status: { in: ["PENDING", "PROCESSING", "PURCHASED"] },
+      },
+      include: { transaction: true, tokenVault: true },
+    });
+
+    if (!preOrder) {
+      return `No active subscription found with ID: ${subscriptionId}
+
+To see your active subscriptions: SUBSCRIPTIONS`;
+    }
+
+    const deliveryDate = new Date(preOrder.deliveryDate);
+    const now = new Date();
+    const hoursUntilDelivery = (deliveryDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+    if (hoursUntilDelivery < 24) {
+      return `Cannot cancel subscription within 24 hours of delivery.
+
+Delivery: ${deliveryDate.toLocaleDateString()}
+Hours remaining: ${Math.floor(hoursUntilDelivery)} hours
+
+Please contact support for assistance.`;
+    }
+
+    await prisma.$transaction([
+      prisma.preOrder.update({
+        where: { id: preOrder.id },
+        data: {
+          status: "CANCELLED",
+          isCancelled: true,
+          cancelledAt: new Date(),
+          cancellationReason: "User requested cancellation via WhatsApp",
+        },
+      }),
+      prisma.job.updateMany({
+        where: {
+          payload: { path: "$.preOrderId", equals: preOrder.id },
+          status: "PENDING",
+        },
+        data: { status: "CANCELLED" },
+      }),
+      prisma.walletTransaction.updateMany({
+        where: {
+          reference: `RESERVE_${preOrder.id}`,
+          status: "PENDING",
+        },
+        data: {
+          status: "FAILED",
+          description: `Cancelled: ${preOrder.meterNumber} subscription`,
+        },
+      }),
+    ]);
+
+    return `✅ Subscription cancelled successfully!
+
+Meter: ${preOrder.meterNumber}
+DisCo: ${preOrder.disco}
+Amount: NGN ${Number(preOrder.amount).toFixed(2)}
+Delivery: ${deliveryDate.toLocaleDateString()}
+
+Your funds have been released back to your wallet.
+
+To create a new subscription: SCHEDULE [meter_index] [amount] [days]`;
+  } catch (error) {
+    console.error("Error cancelling subscription:", error);
+    return `Failed to cancel subscription. Please try again.
+
+If the problem persists, type HELP for support.`;
+  }
+}
+
+// ============================================================
+// WHATSAPP PURCHASE HANDLERS
+// ============================================================
+
+async function processAirtimePurchaseWhatsApp(user: any, phoneNumber: string, amount: number): Promise<string> {
+  try {
+    let cleanedNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanedNumber.startsWith('234')) {
+      cleanedNumber = '0' + cleanedNumber.substring(3);
+    }
+    if (cleanedNumber.length < 10) {
+      cleanedNumber = cleanedNumber.padStart(10, '0');
+    }
+    if (cleanedNumber.length > 11) {
+      cleanedNumber = cleanedNumber.substring(0, 11);
+    }
+    const normalizedPhone = cleanedNumber;
+
+    const detectedNetwork = detectNetworkFromPhone(normalizedPhone);
+    if (!detectedNetwork) {
+      return `Could not detect network for ${normalizedPhone}.
+Please ensure the phone number is correct.
+
+Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
+    }
+
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
+
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
 Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
+    const networkEnum = mapNetwork(detectedNetwork);
 
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: normalizedPhone } },
+    });
 
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: normalizedPhone,
+          fullName: null,
+          email: null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
     }
-
-    const network = detectNetwork(phoneNumber);
-    const validationToken = generateValidationToken();
 
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
         transactionType: VtuType.AIRTIME,
-        product: network,
+        product: detectedNetwork,
         amount: amount,
-        serviceFee: 0,
-        totalDebited: amount,
-        phoneNumber: phoneNumber,
-        network: mapNetwork(network),
-        status: "PENDING",
-        vendor: VtuVendor.VTPASS,
+        totalDebited: 0,
+        phoneNumber: normalizedPhone,
+        network: networkEnum,
+        status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
         metadata: {
-          source: "whatsapp",
-          phoneNumber,
-          network,
-          pendingPin: true,
+          source: "WhatsApp",
+          service: "AIRTIME",
+          timestamp: new Date().toISOString(),
+          network: detectedNetwork,
+          networkEnum: networkEnum,
+          customerId: customer.id,
+          pinVerified: false,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
           validationToken: validationToken,
-          validationExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-          initiatedAt: new Date().toISOString(),
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
         },
       },
     });
@@ -1573,15 +2336,17 @@ Your PIN is required for all transactions.`;
         userId: user.id,
         type: "SYSTEM",
         amount: amount,
-        balanceBefore: Number(wallet.walletBalance),
-        balanceAfter: Number(wallet.walletBalance),
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
         reference: `PENDING_${transaction.id}`,
         description: `Pending airtime purchase - await PIN validation`,
         status: "PENDING",
         category: "AIRTIME",
         metadata: {
           validationToken: validationToken,
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+          expiresAt: validationExpiry.toISOString(),
+          phoneNumber: normalizedPhone,
+          network: detectedNetwork,
         },
       },
     });
@@ -1591,9 +2356,9 @@ Your PIN is required for all transactions.`;
 
     return `Airtime Purchase Initiated!
 
-Phone: ${phoneNumber}
+Phone: ${normalizedPhone}
 Amount: NGN ${amount.toFixed(2)}
-Network: ${network}
+Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
 
 To complete this purchase, please confirm your PIN:
@@ -1605,76 +2370,150 @@ Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your airtime will be sent.`;
   } catch (error) {
-    console.error("Airtime purchase error:", error);
+    console.error("WhatsApp airtime purchase error:", error);
     return `Failed to initiate airtime purchase. Please try again.`;
   }
 }
 
-async function processDataPurchaseWithPinValidation(user: any, phoneNumber: string, plan: string): Promise<string> {
+async function processDataPurchaseWhatsApp(user: any, phoneNumber: string, planQuery: string): Promise<string> {
   try {
-    const planPrices: Record<string, number> = {
-      "1GB": 1000,
-      "2GB": 2000,
-      "3GB": 3000,
-      "5GB": 5000,
-      "8GB": 8000,
-      "10GB": 10000,
-    };
+    let cleanedNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanedNumber.startsWith('234')) {
+      cleanedNumber = '0' + cleanedNumber.substring(3);
+    }
+    if (cleanedNumber.length < 10) {
+      cleanedNumber = cleanedNumber.padStart(10, '0');
+    }
+    if (cleanedNumber.length > 11) {
+      cleanedNumber = cleanedNumber.substring(0, 11);
+    }
+    const normalizedPhone = cleanedNumber;
 
-    const price = planPrices[plan.toUpperCase()];
-    if (!price) {
-      return `Invalid plan. Available plans: 1GB, 2GB, 3GB, 5GB, 8GB, 10GB
+    const detectedNetwork = detectNetworkFromPhone(normalizedPhone);
+    if (!detectedNetwork) {
+      return `Could not detect network for ${normalizedPhone}.
+Please ensure the phone number is correct.`;
+    }
+
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
+
+    // Find plan from vendor API
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(detectedNetwork)}`, {
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+
+    let planData = null;
+    if (response.ok) {
+      const result = await response.json();
+      if (result.success && result.data?.plans) {
+        const normalizedQuery = planQuery.toLowerCase().trim();
+        let mbValue = 0;
+        const gbMatch = normalizedQuery.match(/(\d+\.?\d*)\s*gb/i);
+        const mbMatch = normalizedQuery.match(/(\d+)\s*mb/i);
+        if (gbMatch) mbValue = parseFloat(gbMatch[1]) * 1024;
+        else if (mbMatch) mbValue = parseFloat(mbMatch[1]);
+
+        for (const provider of result.data.plans) {
+          if (provider.name.toLowerCase() !== detectedNetwork.toLowerCase()) continue;
+          for (const category of provider.categories || []) {
+            for (const plan of category.plans || []) {
+              if (plan.data?.toLowerCase() === normalizedQuery || 
+                  plan.data?.toLowerCase() === `${mbValue}mb` ||
+                  plan.data?.toLowerCase() === `${mbValue/1024}gb`) {
+                planData = plan;
+                break;
+              }
+            }
+            if (planData) break;
+          }
+          if (planData) break;
+        }
+      }
+    }
+
+    if (!planData) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `No data plan found for ${detectedNetwork} with "${planQuery}".
+
+${availablePlans}
+
 Example: DATA 08012345678 1GB`;
     }
 
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: user.id },
-    });
-
-    if (!wallet || Number(wallet.walletBalance) < price) {
-      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need NGN ${price.toFixed(2)}.
+    const amount = Number(planData.price);
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
+    const networkEnum = mapNetwork(detectedNetwork);
 
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: normalizedPhone } },
+    });
 
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: normalizedPhone,
+          fullName: null,
+          email: null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
     }
-
-    const network = detectNetwork(phoneNumber);
-    const validationToken = generateValidationToken();
 
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
         transactionType: VtuType.DATA,
-        product: `${plan} Data Bundle`,
-        amount: price,
-        serviceFee: 0,
-        totalDebited: price,
-        phoneNumber: phoneNumber,
-        network: mapNetwork(network),
-        networkPlan: plan,
-        status: "PENDING",
-        vendor: VtuVendor.VTPASS,
+        product: `${detectedNetwork} - ${planData.data}`,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: normalizedPhone,
+        network: networkEnum,
+        networkPlan: planData.planCode || planQuery,
+        status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
         metadata: {
-          source: "whatsapp",
-          phoneNumber,
-          plan,
-          network,
-          pendingPin: true,
+          source: "WhatsApp",
+          service: "DATA",
+          timestamp: new Date().toISOString(),
+          network: detectedNetwork,
+          networkEnum: networkEnum,
+          planQuery: planQuery,
+          planName: planData.name,
+          dataAmount: planData.amountMB,
+          customerId: customer.id,
+          pinVerified: false,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
           validationToken: validationToken,
-          validationExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-          initiatedAt: new Date().toISOString(),
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
         },
       },
     });
@@ -1684,16 +2523,19 @@ Your PIN is required for all transactions.`;
         walletId: wallet.id,
         userId: user.id,
         type: "SYSTEM",
-        amount: price,
-        balanceBefore: Number(wallet.walletBalance),
-        balanceAfter: Number(wallet.walletBalance),
+        amount: amount,
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
         reference: `PENDING_${transaction.id}`,
         description: `Pending data purchase - await PIN validation`,
         status: "PENDING",
         category: "DATA",
         metadata: {
           validationToken: validationToken,
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+          expiresAt: validationExpiry.toISOString(),
+          phoneNumber: normalizedPhone,
+          network: detectedNetwork,
+          planQuery: planQuery,
         },
       },
     });
@@ -1701,12 +2543,15 @@ Your PIN is required for all transactions.`;
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
+    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
     return `Data Purchase Initiated!
 
-Phone: ${phoneNumber}
-Plan: ${plan}
-Amount: NGN ${price.toFixed(2)}
-Network: ${network}
+Phone: ${normalizedPhone}
+Plan: ${dataDisplay} (${planData.name || detectedNetwork})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Validity: ${planData.validity || "30 days"}
 Reference: ${transaction.id.substring(0, 10)}
 
 To complete this purchase, please confirm your PIN:
@@ -1718,176 +2563,630 @@ Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your data bundle will be activated.`;
   } catch (error) {
-    console.error("Data purchase error:", error);
+    console.error("WhatsApp data purchase error:", error);
     return `Failed to initiate data purchase. Please try again.`;
   }
 }
 
-// ============================================================
-// PIN HANDLER
-// ============================================================
+async function processElectricityPurchaseWhatsApp(
+  user: any, 
+  meterNumber: string, 
+  amount: number, 
+  discoCode: string,
+  meterType: string = "Prepaid"
+): Promise<string> {
+  try {
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
 
-async function handlePinCommand(user: any, parts: string[]): Promise<string> {
-  if (parts.length < 2) {
-    return `To set up your transaction PIN, reply with:
-PIN [4-6 digit PIN]
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
 
-Example: PIN 1234
+Please fund your wallet and try again.`;
+    }
 
-Your PIN will be encrypted and used for transaction verification.`;
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: user.phone } },
+    });
+
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: user.phone,
+          fullName: user.fullName || null,
+          email: user.email || null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.ELECTRICITY_INSTANT,
+        product: discoCode,
+        amount: amount,
+        totalDebited: 0,
+        meterNumber: meterNumber,
+        meterType: meterType.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "ELECTRICITY",
+          timestamp: new Date().toISOString(),
+          discoCode: discoCode,
+          meterType: meterType,
+          customerId: customer.id,
+          pinVerified: false,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
+          validationToken: validationToken,
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
+        },
+      },
+    });
+
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        userId: user.id,
+        type: "SYSTEM",
+        amount: amount,
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
+        reference: `PENDING_${transaction.id}`,
+        description: `Pending electricity purchase - await PIN validation`,
+        status: "PENDING",
+        category: "ELECTRICITY",
+        metadata: {
+          validationToken: validationToken,
+          expiresAt: validationExpiry.toISOString(),
+          meterNumber: meterNumber,
+          discoCode: discoCode,
+        },
+      },
+    });
+
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+    return `Electricity Purchase Initiated!
+
+Meter: ${meterNumber}
+DisCo: ${discoCode}
+Amount: NGN ${amount.toFixed(2)}
+Meter Type: ${meterType}
+Reference: ${transaction.id.substring(0, 10)}
+
+To complete this purchase, please confirm your PIN:
+
+${validationLink}
+
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
+
+After confirming, your electricity token will be sent here.`;
+  } catch (error) {
+    console.error("WhatsApp electricity purchase error:", error);
+    return `Failed to initiate electricity purchase. Please try again.`;
   }
-
-  const pin = parts[1];
-  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
-    return `Invalid PIN format. Please use 4-6 digits.
-Example: PIN 1234`;
-  }
-
-  if (user.pinHash) {
-    return `You already have a transaction PIN set.
-To change your PIN, please use the Bilscore mobile app or website.
-
-${getAppUrl()}/profile`;
-  }
-
-  const hashedPin = await hash(pin, 10);
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      pinHash: hashedPin,
-      pinAttempts: 0,
-      pinLockedUntil: null,
-    },
-  });
-
-  return `Transaction PIN set successfully!
-
-Your PIN has been encrypted and saved.
-You'll need this PIN for all transactions.
-
-PIN: **** (hidden for security)
-
-Keep your PIN safe and never share it with anyone.
-
-You can change your PIN anytime in the Bilscore app.`;
 }
 
-// ============================================================
-// HELP FUNCTION
-// ============================================================
+async function processCablePurchaseWhatsApp(
+  user: any, 
+  decoderNumber: string, 
+  packageQuery: string,
+  provider: string
+): Promise<string> {
+  try {
+    // Find package from vendor
+    const serviceMap: Record<string, string> = {
+      'DSTV': 'dstv', 'dstv': 'dstv',
+      'GOTV': 'gotv', 'gotv': 'gotv',
+      'STARTIMES': 'startimes', 'startimes': 'startimes',
+    };
 
-function getHelpMessage(user: any): string {
-  return `Bilscore WhatsApp Commands
+    const serviceId = serviceMap[provider] || 'dstv';
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-variations"
+      : "https://sandbox.vtpass.com/api/service-variations";
+    
+    const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
 
-Financial:
-BALANCE - Check wallet balance
-TRANSACTIONS - View transaction history
-PIN [code] - Set transaction PIN
+    let packageData = null;
+    if (response.ok) {
+      const data = await response.json();
+      if (data.response_description === "000" && data.content?.variations) {
+        const normalizedQuery = packageQuery.toLowerCase().trim();
+        packageData = data.content.variations.find((v: any) => 
+          v.variation_code?.toLowerCase() === normalizedQuery ||
+          v.name?.toLowerCase().includes(normalizedQuery)
+        );
+        if (!packageData && data.content.variations.length > 0) {
+          packageData = data.content.variations[0];
+        }
+      }
+    }
 
-Electricity (Saved Meters):
-ELECTRICITY - Show your saved meters
-ELECTRICITY [index] [amount] - Buy from saved meter
-Example: ELECTRICITY 1 5000
-ADDMETER [meter] [disco] [name] - Add a meter
-METERS - List all saved meters
-DELETEMETER [meter] - Remove a meter
-SETDEFAULTMETER [meter] - Set default meter
+    if (!packageData) {
+      const packagesList = await getAvailablePackagesForWhatsApp(provider);
+      return `No package found for "${packageQuery}" with ${provider}.
 
-Cable TV (Saved Decoders):
-CABLE - Show your saved decoders
-CABLE [decoder_index] [package_index] - Buy cable
-Example: CABLE 1 2
-ADDDECODER [decoder] [provider] [name] - Add a decoder
-DECODERS - List all saved decoders
-DELETEDECODER [decoder] - Remove a decoder
-SETDEFAULTDECODER [decoder] - Set default decoder
+${packagesList}`;
+    }
 
-Airtime:
-AIRTIME [phone] [amount] - Buy airtime
-Example: AIRTIME 08012345678 500
+    const amount = parseFloat(packageData.variation_amount) || 0;
 
-Data:
-DATA [phone] [plan] - Buy data
-Example: DATA 08012345678 1GB
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
 
-Referral:
-REFERRAL - Get your referral link
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
 
-Help:
-HELP or ? - Show this message
+Please fund your wallet and try again.`;
+    }
 
-All purchases require PIN validation via secure link.
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: user.phone } },
+    });
 
-Need more help? Visit: ${getAppUrl()}/support`;
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: user.phone,
+          fullName: user.fullName || null,
+          email: user.email || null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.CABLE_TV,
+        product: `${provider} - ${packageData.name}`,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: user.phone,
+        networkPlan: packageData.variation_code,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "CABLE_TV",
+          timestamp: new Date().toISOString(),
+          provider: provider,
+          packageCode: packageData.variation_code,
+          packageName: packageData.name,
+          smartCardNumber: decoderNumber,
+          customerId: customer.id,
+          pinVerified: false,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
+          validationToken: validationToken,
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
+        },
+      },
+    });
+
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        userId: user.id,
+        type: "SYSTEM",
+        amount: amount,
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
+        reference: `PENDING_${transaction.id}`,
+        description: `Pending cable subscription - await PIN validation`,
+        status: "PENDING",
+        category: "CABLE_TV",
+        metadata: {
+          validationToken: validationToken,
+          expiresAt: validationExpiry.toISOString(),
+          decoderNumber: decoderNumber,
+          provider: provider,
+          packageCode: packageData.variation_code,
+          packageName: packageData.name,
+        },
+      },
+    });
+
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+    return `Cable Subscription Initiated!
+
+Decoder: ${decoderNumber}
+Provider: ${provider}
+Package: ${packageData.name}
+Amount: NGN ${amount.toFixed(2)}
+Reference: ${transaction.id.substring(0, 10)}
+
+To complete this purchase, please confirm your PIN:
+
+${validationLink}
+
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
+
+After confirming, your subscription will be activated.`;
+  } catch (error) {
+    console.error("WhatsApp cable purchase error:", error);
+    return `Failed to initiate cable subscription. Please try again.`;
+  }
 }
 
-// ============================================================
-// TRANSACTION HISTORY
-// ============================================================
+async function processEducationPurchaseWhatsApp(
+  user: any,
+  productType: string,
+  quantity: number
+): Promise<string> {
+  try {
+    const serviceMap: Record<string, { serviceId: string; variationCode: string; name: string; price: number }> = {
+      'WAEC': { serviceId: 'waec-registration', variationCode: 'waec-registration', name: 'WAEC Registration PIN', price: 14450 },
+      'WAEC-RESULT': { serviceId: 'waec', variationCode: 'waecdirect', name: 'WAEC Result Checker PIN', price: 900 },
+      'JAMB': { serviceId: 'jamb', variationCode: 'utme-no-mock', name: 'JAMB UTME PIN', price: 6200 },
+      'NECO': { serviceId: 'neco', variationCode: 'neco-registration', name: 'NECO Registration PIN', price: 11000 },
+    };
 
-async function getTransactionHistory(userId: string): Promise<string> {
-  const transactions = await prisma.vtuTransaction.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  });
+    const productInfo = serviceMap[productType];
+    if (!productInfo) {
+      const productsList = await getAvailableEducationProducts();
+      return `Invalid product: ${productType}
 
-  if (transactions.length === 0) {
-    return `No transactions found.
+Available products:
+${productsList}
 
-Start using Bilscore today!
-Type HELP to see available commands.`;
+Examples:
+EDU WAEC 2
+EDU JAMB 1
+WAEC 2`;
+    }
+
+    const amount = productInfo.price * quantity;
+
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
+
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
+
+Please fund your wallet and try again.`;
+    }
+
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: user.phone } },
+    });
+
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: user.phone,
+          fullName: user.fullName || null,
+          email: user.email || null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.EDUCATION,
+        product: productInfo.serviceId,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: user.phone,
+        network: null,
+        networkPlan: productInfo.variationCode,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        isBulkPurchase: quantity > 1,
+        bulkQuantity: quantity > 1 ? quantity : undefined,
+        metadata: {
+          source: "WhatsApp",
+          service: "EDUCATION",
+          timestamp: new Date().toISOString(),
+          serviceId: productInfo.serviceId,
+          variationCode: productInfo.variationCode,
+          quantity: quantity,
+          productName: productInfo.name,
+          productType: productType,
+          customerId: customer.id,
+          pinVerified: false,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
+          validationToken: validationToken,
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
+        },
+      },
+    });
+
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        userId: user.id,
+        type: "SYSTEM",
+        amount: amount,
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
+        reference: `PENDING_${transaction.id}`,
+        description: `Pending education purchase - await PIN validation`,
+        status: "PENDING",
+        category: "EDUCATION",
+        metadata: {
+          validationToken: validationToken,
+          expiresAt: validationExpiry.toISOString(),
+          productType: productType,
+          productName: productInfo.name,
+          quantity: quantity,
+          serviceId: productInfo.serviceId,
+        },
+      },
+    });
+
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+    const quantityText = quantity > 1 ? `${quantity} x ` : '';
+
+    return `Education Purchase Initiated!
+
+Product: ${productInfo.name}
+Quantity: ${quantity}
+Amount: NGN ${amount.toFixed(2)}
+Service: ${productType}
+Reference: ${transaction.id.substring(0, 10)}
+
+To complete this purchase, please confirm your PIN:
+
+${validationLink}
+
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
+
+After confirming, your ${quantity > 1 ? 'PINs will' : 'PIN will'} be sent to you.`;
+  } catch (error) {
+    console.error("WhatsApp education purchase error:", error);
+    return `Failed to initiate education purchase. Please try again.`;
   }
-
-  let message = "Recent Transactions:\n\n";
-  transactions.forEach((tx, i) => {
-    const status = tx.status === "SUCCESS" ? "OK" : tx.status === "PENDING" ? "PENDING" : "FAILED";
-    const type = tx.transactionType.replace("_", " ");
-    message += `${i + 1}. ${status} ${type}\n`;
-    message += `   Amount: NGN ${Number(tx.amount).toFixed(2)}\n`;
-    message += `   ${new Date(tx.createdAt).toLocaleDateString()}\n\n`;
-  });
-
-  const total = await prisma.vtuTransaction.count({
-    where: { userId },
-  });
-
-  message += `Total: ${total} transactions`;
-  return message;
 }
 
-// ============================================================
-// HELPER FUNCTIONS
-// ============================================================
+async function processSubscriptionWhatsApp(
+  user: any,
+  meterNumber: string,
+  discoCode: string,
+  amount: number,
+  days: number,
+  meterType: string = "Prepaid"
+): Promise<string> {
+  try {
+    const deliveryDate = new Date();
+    deliveryDate.setDate(deliveryDate.getDate() + days);
 
-function detectNetwork(phoneNumber: string): string {
-  const cleanNumber = phoneNumber.replace(/\D/g, "");
-  
-  if (cleanNumber.startsWith("080") || cleanNumber.startsWith("081") || cleanNumber.startsWith("070")) {
-    return "MTN";
-  } else if (cleanNumber.startsWith("090") || cleanNumber.startsWith("091")) {
-    return "AIRTEL";
-  } else if (cleanNumber.startsWith("0805") || cleanNumber.startsWith("0807") || cleanNumber.startsWith("0811")) {
-    return "GLO";
-  } else if (cleanNumber.startsWith("0809") || cleanNumber.startsWith("0818") || cleanNumber.startsWith("0909")) {
-    return "9MOBILE";
-  }
-  return "MTN";
-}
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
 
-function mapNetwork(networkInput: string): NetworkProvider {
-  const networkMap: Record<string, NetworkProvider> = {
-    'MTN': NetworkProvider.MTN,
-    'GLO': NetworkProvider.GLO,
-    'AIRTEL': NetworkProvider.AIRTEL,
-    '9MOBILE': NetworkProvider.NINEMOBILE,
-  };
-  const normalized = networkInput?.trim() || '';
-  const mapped = networkMap[normalized];
-  if (!mapped) {
-    console.warn(`⚠️ Unknown network: "${networkInput}", defaulting to MTN`);
-    return NetworkProvider.MTN;
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
+
+Please fund your wallet and try again.`;
+    }
+
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: user.phone } },
+    });
+
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: user.phone,
+          fullName: user.fullName || null,
+          email: user.email || null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const discoEnum = mapDiscoCode(discoCode);
+    if (!discoEnum) {
+      return `Invalid DisCo: ${discoCode}`;
+    }
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    const preOrder = await prisma.preOrder.create({
+      data: {
+        userId: user.id,
+        disCo: discoEnum,
+        meterNumber: meterNumber,
+        meterType: meterType.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+        meterName: `${discoCode} Meter`,
+        amount: amount,
+        serviceFee: 0,
+        totalDebited: 0,
+        deliveryDate: deliveryDate,
+        status: "PENDING",
+        isCancelled: false,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "SUBSCRIPTION",
+          timestamp: new Date().toISOString(),
+          serviceType: "electricity",
+          isSubscription: true,
+          isReserved: true,
+          reservedAmount: amount,
+          scheduledDate: deliveryDate.toISOString(),
+          tokenPurchased: false,
+          walletId: wallet.id,
+          paymentPending: true,
+          days: days,
+          customerId: customer.id,
+          pinVerified: false,
+          validationToken: validationToken,
+          validationExpiry: validationExpiry.toISOString(),
+          pendingPin: true,
+        },
+      },
+    });
+
+    await prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        userId: user.id,
+        type: "SYSTEM",
+        amount: amount,
+        balanceBefore: walletBalance,
+        balanceAfter: walletBalance,
+        reference: `RESERVE_${preOrder.id}`,
+        description: `Reserved for electricity delivery on ${deliveryDate.toLocaleDateString()}`,
+        status: "PENDING",
+        category: "ELECTRICITY",
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          preOrderId: preOrder.id,
+          deliveryDate: deliveryDate.toISOString(),
+          serviceType: "electricity",
+          isReserved: true,
+          amountReserved: amount,
+          scheduledDate: deliveryDate.toISOString(),
+          tokenPurchased: false,
+          walletId: wallet.id,
+          paymentPending: true,
+          source: "WhatsApp",
+          validationToken: validationToken,
+        },
+      },
+    });
+
+    await prisma.job.create({
+      data: {
+        type: JobType.SUBSCRIPTION_PROCESSING,
+        status: JobStatus.PENDING,
+        payload: {
+          preOrderId: preOrder.id,
+          userId: user.id,
+          serviceType: "electricity",
+          amount: amount,
+          deliveryDate: deliveryDate.toISOString(),
+          walletId: wallet.id,
+          reserveTransactionId: `RESERVE_${preOrder.id}`,
+          tokenVaultId: null,
+          vtuTransactionId: null,
+          token: null,
+          tokenPurchased: false,
+          wasDebited: false,
+          meterNumber: meterNumber,
+          discoCode: discoCode,
+          source: "WhatsApp",
+          validationToken: validationToken,
+        },
+        priority: 5,
+        maxAttempts: 3,
+        scheduledFor: deliveryDate,
+      },
+    });
+
+    const appUrl = getAppUrl();
+    const validationLink = `${appUrl}/auth/validate-subscription?token=${validationToken}`;
+
+    const deliveryDateStr = deliveryDate.toLocaleDateString();
+
+    return `Electricity Subscription Initiated!
+
+Meter: ${meterNumber}
+DisCo: ${discoCode}
+Amount: NGN ${amount.toFixed(2)}
+Delivery Date: ${deliveryDateStr}
+Subscription ID: ${preOrder.id.substring(0, 10)}
+
+To complete this subscription, please confirm your PIN:
+
+${validationLink}
+
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
+
+After confirming, your token will be scheduled for delivery on ${deliveryDateStr}.
+
+To see your active subscriptions: SUBSCRIPTIONS
+To cancel: CANCEL [subscription_id]`;
+  } catch (error) {
+    console.error("WhatsApp subscription error:", error);
+    return `Failed to create subscription. Please try again.`;
   }
-  return mapped;
 }
