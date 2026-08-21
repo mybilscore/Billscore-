@@ -179,7 +179,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - WITH PALMPAY WALLET
+// USER REGISTRATION HANDLER - WITH PALMPAY WALLET & AUDITLOG
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -317,7 +317,7 @@ Example: REG John Doe - johndoe (skip email)`;
       const hashedPin = await hash(defaultPin, 10);
       const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
-      // Create user
+      // Create user WITHOUT metadata field
       const user = await prisma.user.create({
         data: {
           username: username,
@@ -335,19 +335,31 @@ Example: REG John Doe - johndoe (skip email)`;
           pinAttempts: 0,
           kycStatus: "PENDING",
           walletBalance: 0,
-          metadata: {
-            whatsappRegistration: true,
-            changeToken: changeToken,
-            changeTokenExpiry: changeTokenExpiry.toISOString(),
-            registeredAt: new Date().toISOString(),
-          },
         },
       });
 
       console.log(`✅ [WhatsApp] User created: ${user.id}`);
 
+      // Store the change token in AuditLog
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "WHATSAPP_REGISTRATION",
+          entityType: "User",
+          entityId: user.id,
+          metadata: {
+            changeToken: changeToken,
+            changeTokenExpiry: changeTokenExpiry.toISOString(),
+            defaultPassword: defaultPassword,
+            defaultPin: defaultPin,
+            registeredAt: new Date().toISOString(),
+            phone: phone,
+          },
+        },
+      });
+
       // ============================================================
-      // CREATE PALMPAY WALLET (Synchronous - required)
+      // CREATE PALMPAY WALLET
       // ============================================================
       let wallet: any = null;
       let virtualAccountNo: string | null = null;
@@ -482,7 +494,7 @@ Example: REG John Doe - johndoe (skip email)`;
         },
       });
 
-      // Generate change link
+      // Generate change link using the token from audit log
       const appUrl = getAppUrl();
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
@@ -941,7 +953,7 @@ PIN - Set up transaction PIN`;
 }
 
 // ============================================================
-// DEVICE MANAGEMENT HELPERS (Keep existing functions)
+// DEVICE MANAGEMENT HELPERS
 // ============================================================
 
 async function addMeter(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
@@ -1836,7 +1848,6 @@ function detectNetwork(phoneNumber: string): string {
     return "MTN";
   } else if (cleanNumber.startsWith("090") || cleanNumber.startsWith("091")) {
     return "AIRTEL";
-  // biome-ignore lint/style/noUselessElse: <explanation>
   } else if (cleanNumber.startsWith("0805") || cleanNumber.startsWith("0807") || cleanNumber.startsWith("0811")) {
     return "GLO";
   } else if (cleanNumber.startsWith("0809") || cleanNumber.startsWith("0818") || cleanNumber.startsWith("0909")) {
