@@ -12,6 +12,10 @@ import {
   WalletTransactionType,
   VtuVendor,
 } from "@prisma/client";
+import { 
+  createPalmPayVirtualAccountForUser, 
+  isPalmPaySimulationMode 
+} from "~/lib/palmpay/palmpay-wallet.service";
 
 // ============================================================
 // HELPER: Generate Short Validation Token (for link)
@@ -92,23 +96,24 @@ export async function POST(request: NextRequest) {
     if (!user) {
       const upperBody = body.toUpperCase().trim();
       
-      if (upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
-        responseMessage = await handleUserRegistration(whatsappFrom);
+      if (upperBody.startsWith("REG") || upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
+        responseMessage = await handleUserRegistration(whatsappFrom, body);
       } else {
-        responseMessage = `👋 Welcome to Bilscore!
+        responseMessage = `Welcome to Bilscore!
 
-You are not yet registered. To get started, please reply with "REGISTER" to create your account.
+You are not yet registered. To get started, reply with:
+
+REG [Full Name] [Email] [Username]
+
+Example: REG John Doe john@email.com johndoe
+
+If you don't have an email, you can skip it:
+REG John Doe - johndoe
 
 Or visit our website to register:
 ${getAppUrl()}/auth
 
-💡 Tip: Registration gives you access to:
-• Buy airtime, data, and electricity
-• Earn ₦20,000 welcome bonus
-• Refer friends and earn rewards
-• 24/7 WhatsApp support
-
-Reply "REGISTER" now to create your account! 🚀`;
+Reply with REG and your details to create your account!`;
       }
 
       return new NextResponse(buildTwilioResponse(responseMessage), {
@@ -174,161 +179,370 @@ Reply "REGISTER" now to create your account! 🚀`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER
+// USER REGISTRATION HANDLER - WITH PALMPAY WALLET
 // ============================================================
 
-async function handleUserRegistration(phone: string): Promise<string> {
+async function handleUserRegistration(phone: string, body: string): Promise<string> {
   try {
     console.log(`📝 [WhatsApp] Starting registration for: ${phone}`);
 
+    // Check if user already exists
     const existingUser = await prisma.user.findFirst({
       where: { phone: phone },
     });
 
     if (existingUser) {
-      return `✅ You're already registered with Bilscore!
+      return `You are already registered with Bilscore.
+Registered name: ${existingUser.fullName}
+Wallet Balance: NGN ${Number(existingUser.walletBalance || 0).toFixed(2)}
 
-Your registered name: ${existingUser.fullName}
-Wallet Balance: ₦${Number(existingUser.walletBalance || 0).toFixed(2)}
-
-Type "HELP" to see available commands.`;
+Type HELP to see available commands.`;
     }
 
-    const username = `wa_${Math.random().toString(36).substring(2, 8)}`;
-    const email = `${username}@whatsapp.bilscore.com`;
-    const fullName = `WhatsApp User ${phone.slice(-4)}`;
-    const tempPassword = `WA${Math.random().toString(36).substring(2, 10)}!@#`;
-    const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-    const WELCOME_BONUS = 20000;
+    // Parse registration command: REG [fullname] [email] [username]
+    const parts = body.split(" ").filter(p => p.length > 0);
+    const command = parts[0].toUpperCase();
+    
+    if (command === "REG" || command === "REGISTER" || command === "SIGNUP") {
+      // If just REG without details, ask for more info
+      if (parts.length < 2) {
+        return `Welcome to Bilscore!
 
-    const hashedPassword = await hash(tempPassword, 10);
-    const hashedPin = await hash("1234", 10);
+To register, please provide your details:
+REG [Full Name] [Email] [Username]
 
-    const user = await prisma.user.create({
-      data: {
-        username: username,
-        email: email,
-        phone: phone,
-        fullName: fullName,
-        passwordHash: hashedPassword,
-        pinHash: hashedPin,
-        role: "END_USER",
-        referralCode: referralCode,
-        hasWallet: false,
-        isVerified: true,
-        isWalletFrozen: false,
-        preferredLanguage: "EN",
-        pinAttempts: 0,
-        kycStatus: "PENDING",
-        walletBalance: 0,
-      },
-    });
+Example: REG John Doe john@email.com johndoe
 
-    console.log(`✅ [WhatsApp] User created: ${user.id}`);
+If you don't have an email, you can skip it:
+REG John Doe - johndoe
 
-    const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+Or visit: ${getAppUrl()}/auth`;
+      }
 
-    const wallet = await prisma.wallet.create({
-      data: {
-        userId: user.id,
-        accountNumber: accountNumber,
-        bankName: "BILSCORE",
-        accountName: user.fullName,
-        walletBalance: WELCOME_BONUS,
-        ledgerBalance: WELCOME_BONUS,
-        currency: "NGN",
-        isActive: true,
-        kycLevel: 1,
-        metadata: {
-          createdVia: "whatsapp",
-          welcomeBonus: WELCOME_BONUS,
-          registrationDate: new Date().toISOString(),
+      // Extract registration details
+      let fullName = "";
+      let email = "";
+      let username = "";
+      
+      if (parts.length >= 2) {
+        const nameParts: string[] = [];
+        let emailIndex = -1;
+        let usernameIndex = -1;
+        
+        // Find email or username indicators
+        for (let i = 1; i < parts.length; i++) {
+          if (parts[i].includes('@')) {
+            emailIndex = i;
+            break;
+          }
+        }
+        
+        // Find username (last part typically)
+        if (parts.length > 1) {
+          usernameIndex = parts.length - 1;
+          if (parts[usernameIndex] === '-') {
+            usernameIndex = parts.length - 2;
+          }
+          if (emailIndex === parts.length - 1) {
+            usernameIndex = parts.length - 2;
+          }
+        }
+        
+        // Extract name (everything before email or username)
+        const nameEnd = emailIndex > 0 ? emailIndex : (usernameIndex > 0 ? usernameIndex : parts.length);
+        for (let i = 1; i < nameEnd; i++) {
+          if (parts[i] !== '-') {
+            nameParts.push(parts[i]);
+          }
+        }
+        fullName = nameParts.join(' ');
+        
+        // Extract email
+        if (emailIndex > 0 && parts[emailIndex] && parts[emailIndex].includes('@')) {
+          email = parts[emailIndex];
+        }
+        
+        // Extract username
+        if (usernameIndex > 0 && usernameIndex < parts.length) {
+          const candidate = parts[usernameIndex];
+          if (candidate !== '-' && !candidate.includes('@')) {
+            username = candidate;
+          }
+        }
+      }
+
+      // Validate required fields
+      if (!fullName || fullName.trim().length < 2) {
+        return `Please provide your full name.
+Format: REG [Full Name] [Email] [Username]
+
+Example: REG John Doe john@email.com johndoe
+Example: REG John Doe - johndoe (skip email)`;
+      }
+
+      // Generate username if not provided
+      if (!username) {
+        const base = fullName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .substring(0, 20);
+        
+        username = base || `user${Math.random().toString(36).substring(2, 8)}`;
+        
+        const existingUsername = await prisma.user.findUnique({
+          where: { username: username },
+        });
+        if (existingUsername) {
+          username = `${base}${Math.random().toString(36).substring(2, 6)}`;
+        }
+      }
+
+      // Clean username
+      username = username.toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '');
+
+      // Generate email if not provided
+      if (!email) {
+        email = `${username}@whatsapp.bilscore.com`;
+      }
+
+      // Generate default credentials
+      const defaultPassword = `BIL${Math.random().toString(36).substring(2, 10).toUpperCase()}!`;
+      const defaultPin = "1234";
+      
+      // Generate validation token for changing credentials
+      const changeToken = generateValidationToken();
+      const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+      const hashedPassword = await hash(defaultPassword, 10);
+      const hashedPin = await hash(defaultPin, 10);
+      const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+
+      // Create user
+      const user = await prisma.user.create({
+        data: {
+          username: username,
+          email: email,
+          phone: phone,
+          fullName: fullName.trim(),
+          passwordHash: hashedPassword,
+          pinHash: hashedPin,
+          role: "END_USER",
+          referralCode: referralCode,
+          hasWallet: false,
+          isVerified: true,
+          isWalletFrozen: false,
+          preferredLanguage: "EN",
+          pinAttempts: 0,
+          kycStatus: "PENDING",
+          walletBalance: 0,
+          metadata: {
+            whatsappRegistration: true,
+            changeToken: changeToken,
+            changeTokenExpiry: changeTokenExpiry.toISOString(),
+            registeredAt: new Date().toISOString(),
+          },
         },
-      },
-    });
+      });
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { 
-        hasWallet: true,
-        walletBalance: WELCOME_BONUS,
-      },
-    });
+      console.log(`✅ [WhatsApp] User created: ${user.id}`);
 
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "CREDIT",
-        amount: WELCOME_BONUS,
-        balanceBefore: 0,
-        balanceAfter: WELCOME_BONUS,
-        reference: `WELCOME_${user.id}`,
-        description: `🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
-        status: "SUCCESS",
-        category: "SYSTEM",
-        metadata: {
-          isWelcomeBonus: true,
-          amount: WELCOME_BONUS,
-          source: "whatsapp-registration",
+      // ============================================================
+      // CREATE PALMPAY WALLET (Synchronous - required)
+      // ============================================================
+      let wallet: any = null;
+      let virtualAccountNo: string | null = null;
+      let isSimulation = false;
+      let palmpayError: string | null = null;
+
+      try {
+        console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
+        
+        const result = await createPalmPayVirtualAccountForUser(
+          user.id,
+          {
+            fullName: fullName.trim(),
+            email: email,
+            phone: phone,
+            role: "END_USER",
+          }
+        );
+
+        wallet = result.wallet;
+        virtualAccountNo = result.virtualAccount.virtualAccountNo;
+        isSimulation = isPalmPaySimulationMode();
+
+        console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
+        console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
+        
+      } catch (error: any) {
+        console.error('❌ PalmPay virtual account creation failed:', error);
+        palmpayError = error.message;
+        
+        // If PalmPay fails, create a fallback wallet
+        const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+        
+        wallet = await prisma.wallet.create({
+          data: {
+            userId: user.id,
+            accountNumber: accountNumber,
+            bankName: "BILSCORE",
+            accountName: user.fullName,
+            walletBalance: 0,
+            ledgerBalance: 0,
+            currency: "NGN",
+            isActive: true,
+            kycLevel: 1,
+            metadata: {
+              createdVia: "whatsapp_fallback",
+              palmpayError: palmpayError,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+
+        // Update user
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { hasWallet: true },
+        });
+
+        console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
+      }
+
+      // ============================================================
+      // CREDIT WELCOME BONUS
+      // ============================================================
+      const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
+
+      if (wallet) {
+        const existingBonus = await prisma.walletTransaction.findFirst({
+          where: {
+            walletId: wallet.id,
+            reference: { startsWith: 'WELCOME_BONUS_' },
+          },
+        });
+
+        if (!existingBonus) {
+          const currentBalance = Number(wallet.walletBalance || 0);
+
+          await prisma.$transaction([
+            prisma.wallet.update({
+              where: { id: wallet.id },
+              data: {
+                walletBalance: { increment: WELCOME_BONUS },
+                ledgerBalance: { increment: WELCOME_BONUS },
+              },
+            }),
+            prisma.walletTransaction.create({
+              data: {
+                walletId: wallet.id,
+                userId: user.id,
+                type: "CREDIT",
+                amount: WELCOME_BONUS,
+                balanceBefore: currentBalance,
+                balanceAfter: currentBalance + WELCOME_BONUS,
+                reference: `WELCOME_BONUS_${user.id}`,
+                description: `Welcome bonus of NGN ${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+                status: "SUCCESS",
+                category: "SYSTEM",
+                metadata: {
+                  isWelcomeBonus: true,
+                  amount: WELCOME_BONUS,
+                  timestamp: new Date().toISOString(),
+                },
+              },
+            }),
+          ]);
+
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { 
+              walletBalance: currentBalance + WELCOME_BONUS,
+            },
+          });
+
+          console.log(`🎉 Welcome bonus of NGN ${WELCOME_BONUS.toLocaleString()} credited`);
+        }
+      }
+
+      // Create channel
+      await prisma.channel.create({
+        data: {
+          userId: user.id,
+          channelType: ChannelType.WHATSAPP,
+          channelIdentifier: phone,
+          channelUsername: phone,
+          isVerified: true,
+          linkedAt: new Date(),
+          lastSeen: new Date(),
+          metadata: {
+            registeredVia: "whatsapp",
+            registrationDate: new Date().toISOString(),
+          },
         },
-      },
-    });
+      });
 
-    await prisma.channel.create({
-      data: {
-        userId: user.id,
-        channelType: ChannelType.WHATSAPP,
-        channelIdentifier: phone,
-        channelUsername: phone,
-        isVerified: true,
-        linkedAt: new Date(),
-        lastSeen: new Date(),
-        metadata: {
-          registeredVia: "whatsapp",
-          registrationDate: new Date().toISOString(),
-          welcomeBonus: WELCOME_BONUS,
-        },
-      },
-    });
+      // Generate change link
+      const appUrl = getAppUrl();
+      const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
-    console.log(`📱 [WhatsApp] Channel created for: ${phone}`);
+      // Get final wallet balance
+      const finalBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
-    return `🎉 Welcome to Bilscore, ${user.fullName}!
+      return `Registration Successful, ${user.fullName}!
 
-Your account has been created successfully via WhatsApp.
+Account Details:
+Username: ${username}
+Phone: ${phone}
+Wallet: ${wallet?.accountNumber || 'N/A'}
+Wallet Balance: NGN ${finalBalance.toFixed(2)}
+Referral Code: ${referralCode}
 
-📱 Phone: ${phone}
-💰 Wallet Balance: ₦${WELCOME_BONUS.toFixed(2)}
-🏦 Account Number: ${wallet.accountNumber}
-🔑 Referral Code: ${referralCode}
-🔐 Default PIN: 1234 (Change this in your profile)
+Default Password: ${defaultPassword}
+Default PIN: ${defaultPin}
 
-🎁 Welcome Bonus: You received ₦${WELCOME_BONUS.toFixed(2)}!
+To change your password and PIN:
+${changeLink}
 
-To get started, reply with:
-• "HELP" - See all available commands
-• "BALANCE" - Check your wallet balance
-• "AIRTIME [phone] [amount]" - Buy airtime
-• "DATA [phone] [plan]" - Buy data
-• "ELECTRICITY" - See saved meters
-• "CABLE" - See saved decoders
-• "ADDMETER [meter] [disco] [name]" - Save a meter
-• "ADDDECODER [decoder] [provider] [name]" - Save a decoder
+This link is valid for 7 days.
 
-🔐 For security, change your PIN:
-• Visit: ${getAppUrl()}/profile
+Available Commands:
+HELP - Show all commands
+BALANCE - Check wallet
+AIRTIME [phone] [amount] - Buy airtime
+DATA [phone] [plan] - Buy data
+ELECTRICITY - View saved meters
+CABLE - View saved decoders
+ADDMETER [meter] [disco] [name] - Add meter
+ADDDECODER [decoder] [provider] [name] - Add decoder
+TRANSACTIONS - View history
+REFERRAL - Get referral link
 
-Thank you for choosing Bilscore! 🚀`;
+Thank you for choosing Bilscore!`;
+
+    } else {
+      return `Welcome to Bilscore!
+
+To register, please provide your details:
+REG [Full Name] [Email] [Username]
+
+Example: REG John Doe john@email.com johndoe
+
+If you don't have an email, you can skip it:
+REG John Doe - johndoe
+
+Or visit our website:
+${getAppUrl()}/auth`;
+    }
 
   } catch (error) {
     console.error("❌ [WhatsApp] Registration error:", error);
-    return `❌ Sorry, we couldn't create your account at this time.
+    return `Registration failed. Please try again later.
 
-Please try again by replying with "REGISTER" or visit our website:
+If the problem persists, visit:
 ${getAppUrl()}/auth
 
-If the problem persists, please contact support.`;
+Or reply with HELP for assistance.`;
   }
 }
 
@@ -346,13 +560,13 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   }
 
   // ========== REGISTER ==========
-  if (command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
-    return `✅ You are already registered with Bilscore!
+  if (command.startsWith("REG") || command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
+    return `You are already registered with Bilscore!
 
-Your registered name: ${user.fullName}
-Wallet Balance: ₦${Number(user.wallet?.walletBalance || 0).toFixed(2)}
+Registered name: ${user.fullName}
+Wallet Balance: NGN ${Number(user.wallet?.walletBalance || 0).toFixed(2)}
 
-Type "HELP" to see available commands.`;
+Type HELP to see available commands.`;
   }
 
   // ========== BALANCE ==========
@@ -368,14 +582,14 @@ Type "HELP" to see available commands.`;
       where: { referrerId: user.id },
     });
 
-    return `💰 Your Bilscore Balance: ₦${Number(balance).toFixed(2)}
+    return `Your Bilscore Balance: NGN ${Number(balance).toFixed(2)}
 
-📊 Quick Stats:
-• Total Transactions: ${totalTxns}
-• Referrals: ${referrals}
-• Wallet Status: ${wallet?.isActive ? "✅ Active" : "❌ Inactive"}
+Quick Stats:
+Total Transactions: ${totalTxns}
+Referrals: ${referrals}
+Wallet Status: ${wallet?.isActive ? "Active" : "Inactive"}
 
-Reply with "HELP" for available commands.`;
+Reply with HELP for available commands.`;
   }
 
   // ========== METER MANAGEMENT ==========
@@ -383,7 +597,7 @@ Reply with "HELP" for available commands.`;
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 4) {
-      return `⚡ To add a meter, reply with:
+      return `To add a meter, reply with:
 ADDMETER [meter_number] [disco] [name]
 
 Example: ADDMETER 1234567890 ABUJA HOME
@@ -408,7 +622,7 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
   if (command.startsWith("DELETEMETER") || command.startsWith("DELETE METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 2) {
-      return `❌ Please specify the meter number to delete.
+      return `Please specify the meter number to delete.
 Example: DELETEMETER 1234567890`;
     }
     
@@ -419,7 +633,7 @@ Example: DELETEMETER 1234567890`;
   if (command.startsWith("SETDEFAULTMETER") || command.startsWith("SET DEFAULT METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 2) {
-      return `❌ Please specify the meter number or index.
+      return `Please specify the meter number or index.
 Example: SETDEFAULTMETER 1
 Or: SETDEFAULTMETER 1234567890`;
     }
@@ -433,7 +647,7 @@ Or: SETDEFAULTMETER 1234567890`;
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 4) {
-      return `📺 To add a decoder, reply with:
+      return `To add a decoder, reply with:
 ADDDECODER [decoder_number] [provider] [name]
 
 Example: ADDDECODER 1234567890 DSTV LIVING_ROOM
@@ -455,7 +669,7 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
   if (command.startsWith("DELETEDECODER") || command.startsWith("DELETE DECODER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 2) {
-      return `❌ Please specify the decoder number to delete.
+      return `Please specify the decoder number to delete.
 Example: DELETEDECODER 1234567890`;
     }
     
@@ -466,7 +680,7 @@ Example: DELETEDECODER 1234567890`;
   if (command.startsWith("SETDEFAULTDECODER") || command.startsWith("SET DEFAULT DECODER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     if (parts.length < 2) {
-      return `❌ Please specify the decoder number or index.
+      return `Please specify the decoder number or index.
 Example: SETDEFAULTDECODER 1
 Or: SETDEFAULTDECODER 1234567890`;
     }
@@ -484,7 +698,7 @@ Or: SETDEFAULTDECODER 1234567890`;
     });
 
     if (meters.length === 0) {
-      return `⚡ You don't have any saved meters.
+      return `You don't have any saved meters.
 
 To add your first meter:
 ADDMETER [meter_number] [disco] [name]
@@ -495,20 +709,20 @@ Available DISCOs:
 IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, 
 BENIN, ENUGU, JOS, PORT_HARCOURT
 
-After adding, you can buy electricity by just typing "ELECTRICITY"!`;
+After adding, you can buy electricity by just typing ELECTRICITY!`;
     }
 
-    let message = "⚡ Your Saved Meters:\n\n";
+    let message = "Your Saved Meters:\n\n";
     meters.forEach((meter: any, index: number) => {
-      const defaultTag = meter.isDefault ? " ⭐ (Default)" : "";
+      const defaultTag = meter.isDefault ? " (Default)" : "";
       message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-      message += `   📍 ${meter.disco}\n`;
-      message += `   🔢 ${meter.meterNumber}\n\n`;
+      message += `   ${meter.disco}\n`;
+      message += `   ${meter.meterNumber}\n\n`;
     });
 
     message += `Reply with: ELECTRICITY [number] [amount]\n`;
     message += `Example: ELECTRICITY 1 5000\n\n`;
-    message += `💡 To add more meters: ADDMETER [meter] [disco] [name]`;
+    message += `To add more meters: ADDMETER [meter] [disco] [name]`;
     
     return message;
   }
@@ -522,12 +736,12 @@ After adding, you can buy electricity by just typing "ELECTRICITY"!`;
       const amount = parseFloat(amountStr);
       
       if (isNaN(index) || index < 0) {
-        return `❌ Invalid selection. Please choose a number from the list.
+        return `Invalid selection. Please choose a number from the list.
 Example: ELECTRICITY 1 5000`;
       }
       
       if (isNaN(amount) || amount < 100) {
-        return `❌ Invalid amount. Minimum is ₦100.
+        return `Invalid amount. Minimum is NGN 100.
 Example: ELECTRICITY 1 5000`;
       }
       
@@ -537,7 +751,7 @@ Example: ELECTRICITY 1 5000`;
       });
       
       if (index >= meters.length) {
-        return `❌ Invalid selection. Please choose a number from the list.`;
+        return `Invalid selection. Please choose a number from the list.`;
       }
       
       const selectedMeter = meters[index];
@@ -545,7 +759,7 @@ Example: ELECTRICITY 1 5000`;
     }
     
     if (parts.length === 2) {
-      return `❌ Please specify the amount as well.
+      return `Please specify the amount as well.
 Example: ELECTRICITY ${parts[1]} 5000`;
     }
   }
@@ -559,7 +773,7 @@ Example: ELECTRICITY ${parts[1]} 5000`;
     });
 
     if (decoders.length === 0) {
-      return `📺 You don't have any saved decoders.
+      return `You don't have any saved decoders.
 
 To add your first decoder:
 ADDDECODER [decoder_number] [provider] [name]
@@ -568,27 +782,27 @@ Example: ADDDECODER 1234567890 DSTV LIVING_ROOM
 
 Available providers: DSTV, GOTV, STARTIMES
 
-After adding, you can buy cable by just typing "CABLE"!`;
+After adding, you can buy cable by just typing CABLE!`;
     }
 
     const packages = getAvailablePackages();
 
-    let message = "📺 Your Saved Decoders:\n\n";
+    let message = "Your Saved Decoders:\n\n";
     decoders.forEach((decoder: any, index: number) => {
-      const defaultTag = decoder.isDefault ? " ⭐ (Default)" : "";
+      const defaultTag = decoder.isDefault ? " (Default)" : "";
       message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
-      message += `   📡 ${decoder.provider}\n`;
-      message += `   🔢 ${decoder.decoderNumber}\n\n`;
+      message += `   ${decoder.provider}\n`;
+      message += `   ${decoder.decoderNumber}\n\n`;
     });
 
     message += `Then choose a package:\n`;
     packages.forEach((pkg: any, index: number) => {
-      message += `   ${index + 1}. ${pkg.name} - ₦${pkg.price.toFixed(2)}\n`;
+      message += `   ${index + 1}. ${pkg.name} - NGN ${pkg.price.toFixed(2)}\n`;
     });
 
     message += `\nReply with: CABLE [decoder_index] [package_index]\n`;
     message += `Example: CABLE 1 2\n\n`;
-    message += `💡 To add more decoders: ADDDECODER [decoder] [provider] [name]`;
+    message += `To add more decoders: ADDDECODER [decoder] [provider] [name]`;
     
     return message;
   }
@@ -602,7 +816,7 @@ After adding, you can buy cable by just typing "CABLE"!`;
       const packageIndex = parseInt(packageIndexStr) - 1;
       
       if (isNaN(decoderIndex) || decoderIndex < 0) {
-        return `❌ Invalid decoder selection. Please choose a number from the list.`;
+        return `Invalid decoder selection. Please choose a number from the list.`;
       }
       
       const decoders = await prisma.savedDecoder.findMany({
@@ -611,16 +825,16 @@ After adding, you can buy cable by just typing "CABLE"!`;
       });
       
       if (decoderIndex >= decoders.length) {
-        return `❌ Invalid decoder selection. Please choose a number from the list.`;
+        return `Invalid decoder selection. Please choose a number from the list.`;
       }
       
       const packages = getAvailablePackages();
       if (packageIndex < 0 || packageIndex >= packages.length) {
-        let pkgList = "📺 Available packages:\n";
+        let pkgList = "Available packages:\n";
         packages.forEach((pkg: any, index: number) => {
-          pkgList += `   ${index + 1}. ${pkg.name} - ₦${pkg.price.toFixed(2)}\n`;
+          pkgList += `   ${index + 1}. ${pkg.name} - NGN ${pkg.price.toFixed(2)}\n`;
         });
-        return `❌ Invalid package selection.\n\n${pkgList}`;
+        return `Invalid package selection.\n\n${pkgList}`;
       }
       
       const selectedDecoder = decoders[decoderIndex];
@@ -630,7 +844,7 @@ After adding, you can buy cable by just typing "CABLE"!`;
     }
     
     if (parts.length === 2) {
-      return `❌ Please specify the package as well.
+      return `Please specify the package as well.
 Example: CABLE ${parts[1]} 2`;
     }
   }
@@ -639,18 +853,18 @@ Example: CABLE ${parts[1]} 2`;
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     const [, phoneNumber, amount] = parts;
     if (!phoneNumber || !amount) {
-      return `📱 To buy airtime, reply with:
+      return `To buy airtime, reply with:
 AIRTIME [phone number] [amount]
 
 Example: AIRTIME 08012345678 500
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE
-Minimum: ₦50 | Maximum: ₦50,000`;
+Minimum: NGN 50 | Maximum: NGN 50,000`;
     }
 
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
-      return `❌ Invalid amount. Please enter between ₦50 and ₦50,000.
+      return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
 Example: AIRTIME 08012345678 500`;
     }
 
@@ -661,14 +875,14 @@ Example: AIRTIME 08012345678 500`;
   if (command.startsWith("DATA")) {
     const [, phoneNumber, plan] = parts;
     if (!phoneNumber || !plan) {
-      return `📶 To buy data, reply with:
+      return `To buy data, reply with:
 DATA [phone number] [plan]
 
 Available plans:
-• MTN: 1GB, 2GB, 5GB, 10GB
-• GLO: 1GB, 3GB, 5GB
-• AIRTEL: 1GB, 3GB, 8GB
-• 9MOBILE: 1GB, 2GB, 5GB
+MTN: 1GB, 2GB, 5GB, 10GB
+GLO: 1GB, 3GB, 5GB
+AIRTEL: 1GB, 3GB, 8GB
+9MOBILE: 1GB, 2GB, 5GB
 
 Example: DATA 08012345678 1GB`;
     }
@@ -689,11 +903,11 @@ Example: DATA 08012345678 1GB`;
       where: { referrerId: user.id },
     });
     
-    return `🎯 Your Referral Program
+    return `Your Referral Program
 
-🔗 Your Referral Code: ${referralCode}
-👥 Total Referrals: ${count}
-💰 Referral Bonus: ₦50 per signup
+Referral Code: ${referralCode}
+Total Referrals: ${count}
+Referral Bonus: NGN 50 per signup
 
 Share your link:
 ${link}
@@ -707,27 +921,27 @@ Copy this link and share with friends to earn rewards!`;
   }
 
   // ========== UNKNOWN COMMAND ==========
-  return `❌ I didn't understand that command.
+  return `I didn't understand that command.
 
-Type "HELP" to see all available commands.
+Type HELP to see all available commands.
 
 Or try:
-• "BALANCE" - Check your wallet
-• "AIRTIME [phone] [amount]" - Buy airtime
-• "DATA [phone] [plan]" - Buy data
-• "ELECTRICITY" - See saved meters
-• "CABLE" - See saved decoders
-• "ADDMETER [meter] [disco] [name]" - Save a meter
-• "ADDDECODER [decoder] [provider] [name]" - Save a decoder
-• "METERS" - List your saved meters
-• "DECODERS" - List your saved decoders
-• "TRANSACTIONS" - View your history
-• "REFERRAL" - Get your referral link
-• "PIN" - Set up transaction PIN`;
+BALANCE - Check your wallet
+AIRTIME [phone] [amount] - Buy airtime
+DATA [phone] [plan] - Buy data
+ELECTRICITY - See saved meters
+CABLE - See saved decoders
+ADDMETER [meter] [disco] [name] - Save a meter
+ADDDECODER [decoder] [provider] [name] - Save a decoder
+METERS - List your saved meters
+DECODERS - List your saved decoders
+TRANSACTIONS - View your history
+REFERRAL - Get your referral link
+PIN - Set up transaction PIN`;
 }
 
 // ============================================================
-// DEVICE MANAGEMENT HELPERS
+// DEVICE MANAGEMENT HELPERS (Keep existing functions)
 // ============================================================
 
 async function addMeter(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
@@ -735,7 +949,7 @@ async function addMeter(userId: string, meterNumber: string, disco: string, name
     const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORT_HARCOURT"];
     const discoUpper = disco.toUpperCase();
     if (!validDiscos.includes(discoUpper)) {
-      return `❌ Invalid DisCo. Available: ${validDiscos.join(", ")}`;
+      return `Invalid DisCo. Available: ${validDiscos.join(", ")}`;
     }
 
     const existing = await prisma.savedMeter.findFirst({
@@ -754,13 +968,13 @@ async function addMeter(userId: string, meterNumber: string, disco: string, name
           updatedAt: new Date(),
         },
       });
-      return `✅ Meter updated successfully!
+      return `Meter updated successfully!
 
-🔢 Meter: ${meterNumber}
-📍 DisCo: ${discoUpper}
-📛 Name: ${name || existing.name}
+Meter: ${meterNumber}
+DisCo: ${discoUpper}
+Name: ${name || existing.name}
 
-Type "METERS" to see all your saved meters.`;
+Type METERS to see all your saved meters.`;
     }
 
     await prisma.savedMeter.create({
@@ -774,17 +988,17 @@ Type "METERS" to see all your saved meters.`;
       },
     });
 
-    return `✅ Meter added successfully!
+    return `Meter added successfully!
 
-🔢 Meter: ${meterNumber}
-📍 DisCo: ${discoUpper}
-📛 Name: ${name || `${discoUpper} Meter`}
+Meter: ${meterNumber}
+DisCo: ${discoUpper}
+Name: ${name || `${discoUpper} Meter`}
 
-Type "ELECTRICITY" to see all your meters and buy power!`;
+Type ELECTRICITY to see all your meters and buy power!`;
 
   } catch (error) {
     console.error("Add meter error:", error);
-    return `❌ Failed to add meter. Please try again.`;
+    return `Failed to add meter. Please try again.`;
   }
 }
 
@@ -793,7 +1007,7 @@ async function addDecoder(userId: string, decoderNumber: string, provider: strin
     const validProviders = ["DSTV", "GOTV", "STARTIMES"];
     const providerUpper = provider.toUpperCase();
     if (!validProviders.includes(providerUpper)) {
-      return `❌ Invalid provider. Available: ${validProviders.join(", ")}`;
+      return `Invalid provider. Available: ${validProviders.join(", ")}`;
     }
 
     const existing = await prisma.savedDecoder.findFirst({
@@ -812,13 +1026,13 @@ async function addDecoder(userId: string, decoderNumber: string, provider: strin
           updatedAt: new Date(),
         },
       });
-      return `✅ Decoder updated successfully!
+      return `Decoder updated successfully!
 
-🔢 Decoder: ${decoderNumber}
-📡 Provider: ${providerUpper}
-📛 Name: ${name || existing.name}
+Decoder: ${decoderNumber}
+Provider: ${providerUpper}
+Name: ${name || existing.name}
 
-Type "DECODERS" to see all your saved decoders.`;
+Type DECODERS to see all your saved decoders.`;
     }
 
     await prisma.savedDecoder.create({
@@ -831,17 +1045,17 @@ Type "DECODERS" to see all your saved decoders.`;
       },
     });
 
-    return `✅ Decoder added successfully!
+    return `Decoder added successfully!
 
-🔢 Decoder: ${decoderNumber}
-📡 Provider: ${providerUpper}
-📛 Name: ${name || `${providerUpper} Decoder`}
+Decoder: ${decoderNumber}
+Provider: ${providerUpper}
+Name: ${name || `${providerUpper} Decoder`}
 
-Type "CABLE" to see all your decoders and buy subscriptions!`;
+Type CABLE to see all your decoders and buy subscriptions!`;
 
   } catch (error) {
     console.error("Add decoder error:", error);
-    return `❌ Failed to add decoder. Please try again.`;
+    return `Failed to add decoder. Please try again.`;
   }
 }
 
@@ -852,7 +1066,7 @@ async function listMeters(userId: string): Promise<string> {
   });
 
   if (meters.length === 0) {
-    return `⚡ You have no saved meters.
+    return `You have no saved meters.
 
 To add a meter:
 ADDMETER [meter_number] [disco] [name]
@@ -864,12 +1078,12 @@ IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN,
 BENIN, ENUGU, JOS, PORT_HARCOURT`;
   }
 
-  let message = "⚡ Your Saved Meters:\n\n";
+  let message = "Your Saved Meters:\n\n";
   meters.forEach((meter: any, index: number) => {
-    const defaultTag = meter.isDefault ? " ⭐ (Default)" : "";
+    const defaultTag = meter.isDefault ? " (Default)" : "";
     message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-    message += `   📍 ${meter.disco}\n`;
-    message += `   🔢 ${meter.meterNumber}\n\n`;
+    message += `   ${meter.disco}\n`;
+    message += `   ${meter.meterNumber}\n\n`;
   });
 
   message += `To buy electricity: ELECTRICITY [number] [amount]
@@ -886,7 +1100,7 @@ async function listDecoders(userId: string): Promise<string> {
   });
 
   if (decoders.length === 0) {
-    return `📺 You have no saved decoders.
+    return `You have no saved decoders.
 
 To add a decoder:
 ADDDECODER [decoder_number] [provider] [name]
@@ -896,12 +1110,12 @@ Example: ADDDECODER 1234567890 DSTV LIVING_ROOM
 Available providers: DSTV, GOTV, STARTIMES`;
   }
 
-  let message = "📺 Your Saved Decoders:\n\n";
+  let message = "Your Saved Decoders:\n\n";
   decoders.forEach((decoder: any, index: number) => {
-    const defaultTag = decoder.isDefault ? " ⭐ (Default)" : "";
+    const defaultTag = decoder.isDefault ? " (Default)" : "";
     message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
-    message += `   📡 ${decoder.provider}\n`;
-    message += `   🔢 ${decoder.decoderNumber}\n\n`;
+    message += `   ${decoder.provider}\n`;
+    message += `   ${decoder.decoderNumber}\n\n`;
   });
 
   message += `To buy cable: CABLE [decoder_index] [package_index]
@@ -921,13 +1135,13 @@ async function deleteMeter(userId: string, meterNumber: string): Promise<string>
     });
 
     if (result.count === 0) {
-      return `❌ Meter ${meterNumber} not found.`;
+      return `Meter ${meterNumber} not found.`;
     }
 
-    return `✅ Meter ${meterNumber} deleted successfully!`;
+    return `Meter ${meterNumber} deleted successfully!`;
   } catch (error) {
     console.error("Delete meter error:", error);
-    return `❌ Failed to delete meter. Please try again.`;
+    return `Failed to delete meter. Please try again.`;
   }
 }
 
@@ -941,13 +1155,13 @@ async function deleteDecoder(userId: string, decoderNumber: string): Promise<str
     });
 
     if (result.count === 0) {
-      return `❌ Decoder ${decoderNumber} not found.`;
+      return `Decoder ${decoderNumber} not found.`;
     }
 
-    return `✅ Decoder ${decoderNumber} deleted successfully!`;
+    return `Decoder ${decoderNumber} deleted successfully!`;
   } catch (error) {
     console.error("Delete decoder error:", error);
-    return `❌ Failed to delete decoder. Please try again.`;
+    return `Failed to delete decoder. Please try again.`;
   }
 }
 
@@ -963,7 +1177,7 @@ async function setDefaultMeter(userId: string, meterId: string): Promise<string>
       });
       const index = parseInt(meterId) - 1;
       if (index < 0 || index >= meters.length) {
-        return `❌ Invalid meter selection.`;
+        return `Invalid meter selection.`;
       }
       meterNumber = meters[index].meterNumber;
     } else {
@@ -990,10 +1204,10 @@ async function setDefaultMeter(userId: string, meterId: string): Promise<string>
       },
     });
 
-    return `✅ Meter ${meterNumber} set as default!`;
+    return `Meter ${meterNumber} set as default!`;
   } catch (error) {
     console.error("Set default meter error:", error);
-    return `❌ Failed to set default meter. Please try again.`;
+    return `Failed to set default meter. Please try again.`;
   }
 }
 
@@ -1009,7 +1223,7 @@ async function setDefaultDecoder(userId: string, decoderId: string): Promise<str
       });
       const index = parseInt(decoderId) - 1;
       if (index < 0 || index >= decoders.length) {
-        return `❌ Invalid decoder selection.`;
+        return `Invalid decoder selection.`;
       }
       decoderNumber = decoders[index].decoderNumber;
     } else {
@@ -1036,10 +1250,10 @@ async function setDefaultDecoder(userId: string, decoderId: string): Promise<str
       },
     });
 
-    return `✅ Decoder ${decoderNumber} set as default!`;
+    return `Decoder ${decoderNumber} set as default!`;
   } catch (error) {
     console.error("Set default decoder error:", error);
-    return `❌ Failed to set default decoder. Please try again.`;
+    return `Failed to set default decoder. Please try again.`;
   }
 }
 
@@ -1056,7 +1270,7 @@ function getAvailablePackages(): Array<{ name: string; code: string; price: numb
 }
 
 // ============================================================
-// PURCHASE HANDLERS WITH PIN VALIDATION LINK + VENDOR TOKEN
+// PURCHASE HANDLERS WITH PIN VALIDATION LINK
 // ============================================================
 
 async function processElectricityPurchaseWithPinValidation(user: any, meterNumber: string, amount: number, disco: string): Promise<string> {
@@ -1066,27 +1280,25 @@ async function processElectricityPurchaseWithPinValidation(user: any, meterNumbe
     });
 
     if (!wallet || Number(wallet.walletBalance) < amount) {
-      return `❌ Insufficient balance. You have ₦${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need ₦${amount.toFixed(2)}.
+      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
     if (!user.pinHash) {
-      return `🔐 You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-⚠️ Your PIN is required for all transactions.`;
+Your PIN is required for all transactions.`;
     }
 
-    // ✅ Generate validation token (for the link)
     const validationToken = generateValidationToken();
 
-    // ✅ Create pending transaction (stores the validation token)
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -1111,7 +1323,6 @@ Example: PIN 1234
       },
     });
 
-    // ✅ Create pending wallet transaction (reserve amount)
     await prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -1131,31 +1342,30 @@ Example: PIN 1234
       },
     });
 
-    // ✅ Generate validation link
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
     console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
     console.log(`📝 [WhatsApp] Validation token: ${validationToken}`);
 
-    return `⚡ Electricity Purchase Initiated!
+    return `Electricity Purchase Initiated!
 
-📍 Meter: ${meterNumber}
-📍 DisCo: ${disco}
-💰 Amount: ₦${amount.toFixed(2)}
-🆔 Reference: ${transaction.id.substring(0, 10)}
+Meter: ${meterNumber}
+DisCo: ${disco}
+Amount: NGN ${amount.toFixed(2)}
+Reference: ${transaction.id.substring(0, 10)}
 
-🔐 To complete this purchase, please confirm your PIN:
+To complete this purchase, please confirm your PIN:
 
 ${validationLink}
 
-⚠️ This link expires in 5 minutes.
-🔒 Your PIN is secure and will not be shared via WhatsApp.
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your electricity token will be sent here.`;
   } catch (error) {
     console.error("Electricity purchase error:", error);
-    return `❌ Failed to initiate electricity purchase. Please try again.`;
+    return `Failed to initiate electricity purchase. Please try again.`;
   }
 }
 
@@ -1173,10 +1383,10 @@ async function processCablePurchaseWithPinValidation(user: any, decoderNumber: s
 
     const pkg = packages[packageCode.toUpperCase()];
     if (!pkg) {
-      return `❌ Invalid package. Available packages:
-• DSTV: PREMIUM, COMPACT, FAMILY
-• GOTV: MAX, PLUS, LITE
-• Startimes: BASIC`;
+      return `Invalid package. Available packages:
+DSTV: PREMIUM, COMPACT, FAMILY
+GOTV: MAX, PLUS, LITE
+Startimes: BASIC`;
     }
 
     const wallet = await prisma.wallet.findUnique({
@@ -1184,27 +1394,25 @@ async function processCablePurchaseWithPinValidation(user: any, decoderNumber: s
     });
 
     if (!wallet || Number(wallet.walletBalance) < pkg.price) {
-      return `❌ Insufficient balance. You have ₦${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need ₦${pkg.price.toFixed(2)}.
+      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
+Need NGN ${pkg.price.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
     if (!user.pinHash) {
-      return `🔐 You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-⚠️ Your PIN is required for all transactions.`;
+Your PIN is required for all transactions.`;
     }
 
-    // ✅ Generate validation token
     const validationToken = generateValidationToken();
 
-    // ✅ Create pending transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -1230,7 +1438,6 @@ Example: PIN 1234
       },
     });
 
-    // ✅ Create pending wallet transaction
     await prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -1255,24 +1462,24 @@ Example: PIN 1234
 
     console.log(`🔗 [WhatsApp] Validation link: ${validationLink}`);
 
-    return `📺 Cable Subscription Initiated!
+    return `Cable Subscription Initiated!
 
-📺 Decoder: ${decoderNumber}
-📦 Package: ${pkg.name}
-💰 Amount: ₦${pkg.price.toFixed(2)}
-🆔 Reference: ${transaction.id.substring(0, 10)}
+Decoder: ${decoderNumber}
+Package: ${pkg.name}
+Amount: NGN ${pkg.price.toFixed(2)}
+Reference: ${transaction.id.substring(0, 10)}
 
-🔐 To complete this purchase, please confirm your PIN:
+To complete this purchase, please confirm your PIN:
 
 ${validationLink}
 
-⚠️ This link expires in 5 minutes.
-🔒 Your PIN is secure and will not be shared via WhatsApp.
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your subscription will be activated.`;
   } catch (error) {
     console.error("Cable purchase error:", error);
-    return `❌ Failed to initiate cable subscription. Please try again.`;
+    return `Failed to initiate cable subscription. Please try again.`;
   }
 }
 
@@ -1283,29 +1490,26 @@ async function processAirtimePurchaseWithPinValidation(user: any, phoneNumber: s
     });
 
     if (!wallet || Number(wallet.walletBalance) < amount) {
-      return `❌ Insufficient balance. You have ₦${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need ₦${amount.toFixed(2)}.
+      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
     if (!user.pinHash) {
-      return `🔐 You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-⚠️ Your PIN is required for all transactions.`;
+Your PIN is required for all transactions.`;
     }
 
     const network = detectNetwork(phoneNumber);
-
-    // ✅ Generate validation token
     const validationToken = generateValidationToken();
 
-    // ✅ Create pending transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -1331,7 +1535,6 @@ Example: PIN 1234
       },
     });
 
-    // ✅ Create pending wallet transaction
     await prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -1354,24 +1557,24 @@ Example: PIN 1234
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `📱 Airtime Purchase Initiated!
+    return `Airtime Purchase Initiated!
 
-📱 Phone: ${phoneNumber}
-💰 Amount: ₦${amount.toFixed(2)}
-📡 Network: ${network}
-🆔 Reference: ${transaction.id.substring(0, 10)}
+Phone: ${phoneNumber}
+Amount: NGN ${amount.toFixed(2)}
+Network: ${network}
+Reference: ${transaction.id.substring(0, 10)}
 
-🔐 To complete this purchase, please confirm your PIN:
+To complete this purchase, please confirm your PIN:
 
 ${validationLink}
 
-⚠️ This link expires in 5 minutes.
-🔒 Your PIN is secure and will not be shared via WhatsApp.
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your airtime will be sent.`;
   } catch (error) {
     console.error("Airtime purchase error:", error);
-    return `❌ Failed to initiate airtime purchase. Please try again.`;
+    return `Failed to initiate airtime purchase. Please try again.`;
   }
 }
 
@@ -1388,7 +1591,7 @@ async function processDataPurchaseWithPinValidation(user: any, phoneNumber: stri
 
     const price = planPrices[plan.toUpperCase()];
     if (!price) {
-      return `❌ Invalid plan. Available plans: 1GB, 2GB, 3GB, 5GB, 8GB, 10GB
+      return `Invalid plan. Available plans: 1GB, 2GB, 3GB, 5GB, 8GB, 10GB
 Example: DATA 08012345678 1GB`;
     }
 
@@ -1397,29 +1600,26 @@ Example: DATA 08012345678 1GB`;
     });
 
     if (!wallet || Number(wallet.walletBalance) < price) {
-      return `❌ Insufficient balance. You have ₦${Number(wallet?.walletBalance || 0).toFixed(2)}.
-Need ₦${price.toFixed(2)}.
+      return `Insufficient balance. You have NGN ${Number(wallet?.walletBalance || 0).toFixed(2)}.
+Need NGN ${price.toFixed(2)}.
 
 Please fund your wallet and try again.`;
     }
 
     if (!user.pinHash) {
-      return `🔐 You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-⚠️ Your PIN is required for all transactions.`;
+Your PIN is required for all transactions.`;
     }
 
     const network = detectNetwork(phoneNumber);
-
-    // ✅ Generate validation token
     const validationToken = generateValidationToken();
 
-    // ✅ Create pending transaction
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -1447,7 +1647,6 @@ Example: PIN 1234
       },
     });
 
-    // ✅ Create pending wallet transaction
     await prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -1470,25 +1669,25 @@ Example: PIN 1234
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `📶 Data Purchase Initiated!
+    return `Data Purchase Initiated!
 
-📱 Phone: ${phoneNumber}
-📶 Plan: ${plan}
-💰 Amount: ₦${price.toFixed(2)}
-📡 Network: ${network}
-🆔 Reference: ${transaction.id.substring(0, 10)}
+Phone: ${phoneNumber}
+Plan: ${plan}
+Amount: NGN ${price.toFixed(2)}
+Network: ${network}
+Reference: ${transaction.id.substring(0, 10)}
 
-🔐 To complete this purchase, please confirm your PIN:
+To complete this purchase, please confirm your PIN:
 
 ${validationLink}
 
-⚠️ This link expires in 5 minutes.
-🔒 Your PIN is secure and will not be shared via WhatsApp.
+This link expires in 5 minutes.
+Your PIN is secure and will not be shared via WhatsApp.
 
 After confirming, your data bundle will be activated.`;
   } catch (error) {
     console.error("Data purchase error:", error);
-    return `❌ Failed to initiate data purchase. Please try again.`;
+    return `Failed to initiate data purchase. Please try again.`;
   }
 }
 
@@ -1498,22 +1697,22 @@ After confirming, your data bundle will be activated.`;
 
 async function handlePinCommand(user: any, parts: string[]): Promise<string> {
   if (parts.length < 2) {
-    return `🔐 To set up your transaction PIN, reply with:
+    return `To set up your transaction PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-⚠️ Your PIN will be encrypted and used for transaction verification.`;
+Your PIN will be encrypted and used for transaction verification.`;
   }
 
   const pin = parts[1];
   if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
-    return `❌ Invalid PIN format. Please use 4-6 digits.
+    return `Invalid PIN format. Please use 4-6 digits.
 Example: PIN 1234`;
   }
 
   if (user.pinHash) {
-    return `🔐 You already have a transaction PIN set.
+    return `You already have a transaction PIN set.
 To change your PIN, please use the Bilscore mobile app or website.
 
 ${getAppUrl()}/profile`;
@@ -1530,12 +1729,12 @@ ${getAppUrl()}/profile`;
     },
   });
 
-  return `✅ Transaction PIN set successfully!
+  return `Transaction PIN set successfully!
 
 Your PIN has been encrypted and saved.
 You'll need this PIN for all transactions.
 
-🔐 PIN: **** (hidden for security)
+PIN: **** (hidden for security)
 
 Keep your PIN safe and never share it with anyone.
 
@@ -1543,53 +1742,57 @@ You can change your PIN anytime in the Bilscore app.`;
 }
 
 // ============================================================
-// HELPER FUNCTIONS
+// HELP FUNCTION
 // ============================================================
 
 function getHelpMessage(user: any): string {
-  return `📖 Bilscore WhatsApp Commands
+  return `Bilscore WhatsApp Commands
 
-💰 Financial:
-• BALANCE - Check wallet balance
-• TRANSACTIONS - View transaction history
-• PIN [code] - Set transaction PIN
+Financial:
+BALANCE - Check wallet balance
+TRANSACTIONS - View transaction history
+PIN [code] - Set transaction PIN
 
-⚡ Electricity (SAVED METERS):
-• ELECTRICITY - Show your saved meters
-• ELECTRICITY [index] [amount] - Buy from saved meter
-  Example: ELECTRICITY 1 5000
-• ADDMETER [meter] [disco] [name] - Add a meter
-• METERS - List all saved meters
-• DELETEMETER [meter] - Remove a meter
-• SETDEFAULTMETER [meter] - Set default meter
+Electricity (Saved Meters):
+ELECTRICITY - Show your saved meters
+ELECTRICITY [index] [amount] - Buy from saved meter
+Example: ELECTRICITY 1 5000
+ADDMETER [meter] [disco] [name] - Add a meter
+METERS - List all saved meters
+DELETEMETER [meter] - Remove a meter
+SETDEFAULTMETER [meter] - Set default meter
 
-📺 Cable TV (SAVED DECODERS):
-• CABLE - Show your saved decoders
-• CABLE [decoder_index] [package_index] - Buy cable
-  Example: CABLE 1 2
-• ADDDECODER [decoder] [provider] [name] - Add a decoder
-• DECODERS - List all saved decoders
-• DELETEDECODER [decoder] - Remove a decoder
-• SETDEFAULTDECODER [decoder] - Set default decoder
+Cable TV (Saved Decoders):
+CABLE - Show your saved decoders
+CABLE [decoder_index] [package_index] - Buy cable
+Example: CABLE 1 2
+ADDDECODER [decoder] [provider] [name] - Add a decoder
+DECODERS - List all saved decoders
+DELETEDECODER [decoder] - Remove a decoder
+SETDEFAULTDECODER [decoder] - Set default decoder
 
-📱 Airtime:
-• AIRTIME [phone] [amount] - Buy airtime
-  Example: AIRTIME 08012345678 500
+Airtime:
+AIRTIME [phone] [amount] - Buy airtime
+Example: AIRTIME 08012345678 500
 
-📶 Data:
-• DATA [phone] [plan] - Buy data
-  Example: DATA 08012345678 1GB
+Data:
+DATA [phone] [plan] - Buy data
+Example: DATA 08012345678 1GB
 
-🎯 Referral:
-• REFERRAL - Get your referral link
+Referral:
+REFERRAL - Get your referral link
 
-❓ Help:
-• HELP or ? - Show this message
+Help:
+HELP or ? - Show this message
 
-🔐 All purchases require PIN validation via secure link.
+All purchases require PIN validation via secure link.
 
 Need more help? Visit: ${getAppUrl()}/support`;
 }
+
+// ============================================================
+// TRANSACTION HISTORY
+// ============================================================
 
 async function getTransactionHistory(userId: string): Promise<string> {
   const transactions = await prisma.vtuTransaction.findMany({
@@ -1599,18 +1802,18 @@ async function getTransactionHistory(userId: string): Promise<string> {
   });
 
   if (transactions.length === 0) {
-    return `📭 No transactions found.
+    return `No transactions found.
 
 Start using Bilscore today!
-Type "HELP" to see available commands.`;
+Type HELP to see available commands.`;
   }
 
-  let message = "📊 Recent Transactions:\n\n";
+  let message = "Recent Transactions:\n\n";
   transactions.forEach((tx, i) => {
-    const status = tx.status === "SUCCESS" ? "✅" : tx.status === "PENDING" ? "⏳" : "❌";
+    const status = tx.status === "SUCCESS" ? "OK" : tx.status === "PENDING" ? "PENDING" : "FAILED";
     const type = tx.transactionType.replace("_", " ");
     message += `${i + 1}. ${status} ${type}\n`;
-    message += `   Amount: ₦${Number(tx.amount).toFixed(2)}\n`;
+    message += `   Amount: NGN ${Number(tx.amount).toFixed(2)}\n`;
     message += `   ${new Date(tx.createdAt).toLocaleDateString()}\n\n`;
   });
 
@@ -1618,9 +1821,13 @@ Type "HELP" to see available commands.`;
     where: { userId },
   });
 
-  message += `📊 Total: ${total} transactions`;
+  message += `Total: ${total} transactions`;
   return message;
 }
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
 
 function detectNetwork(phoneNumber: string): string {
   const cleanNumber = phoneNumber.replace(/\D/g, "");
@@ -1629,6 +1836,7 @@ function detectNetwork(phoneNumber: string): string {
     return "MTN";
   } else if (cleanNumber.startsWith("090") || cleanNumber.startsWith("091")) {
     return "AIRTEL";
+  // biome-ignore lint/style/noUselessElse: <explanation>
   } else if (cleanNumber.startsWith("0805") || cleanNumber.startsWith("0807") || cleanNumber.startsWith("0811")) {
     return "GLO";
   } else if (cleanNumber.startsWith("0809") || cleanNumber.startsWith("0818") || cleanNumber.startsWith("0909")) {
