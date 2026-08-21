@@ -180,7 +180,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - WITH PALMPAY WALLET INFO
+// USER REGISTRATION HANDLER - SIMPLIFIED RESPONSE
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -529,29 +529,8 @@ Example: REG John Doe - johndoe (skip email)`;
       const appUrl = getAppUrl();
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
-      // Get final wallet balance
-      const finalBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
-
-      // Determine bank name
-      const bankName = wallet?.bankName || 'BILSCORE';
-      const isPalmPay = bankName === 'PALMPAY';
-
-      // Build wallet info string
-      let walletInfo = `Wallet Information:
-Account Name: ${palmpayAccountName || wallet?.accountName || user.fullName}
-Account Number: ${wallet?.accountNumber || 'N/A'}
-Wallet Balance: NGN ${finalBalance.toFixed(2)}
-Bank: ${bankName}`;
-
-      // Add PalmPay specific info
-      if (isPalmPay && virtualAccountNo) {
-        walletInfo += `
-Virtual Account: ${virtualAccountNo}
-(Simulation Mode: ${isSimulation ? 'Yes' : 'No'})`;
-      }
-
       // ============================================================
-      // STEP 7: RETURN SUCCESS MESSAGE
+      // STEP 7: RETURN SIMPLIFIED SUCCESS MESSAGE
       // ============================================================
       return `Registration Successful, ${user.fullName}!
 
@@ -559,9 +538,9 @@ Account Details:
 Username: ${username}
 Phone: ${phone}
 
-${walletInfo}
-
-Referral Code: ${referralCode}
+Wallet:
+Name: ${palmpayAccountName || wallet?.accountName || user.fullName}
+Number: ${wallet?.accountNumber || 'N/A'}
 
 Default Password: ${defaultPassword}
 Default PIN: ${defaultPin}
@@ -571,17 +550,7 @@ ${changeLink}
 
 This link is valid for 7 days.
 
-Available Commands:
-HELP - Show all commands
-BALANCE - Check wallet
-AIRTIME [phone] [amount] - Buy airtime
-DATA [phone] [plan] - Buy data
-ELECTRICITY - View saved meters
-CABLE - View saved decoders
-ADDMETER [meter] [disco] [name] - Add meter
-ADDDECODER [decoder] [provider] [name] - Add decoder
-TRANSACTIONS - View history
-REFERRAL - Get referral link
+Type HELP to see all available commands.
 
 Thank you for choosing Bilscore!`;
 
