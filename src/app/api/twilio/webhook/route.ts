@@ -123,6 +123,7 @@ Reply with REG and your details to create your account!`;
       });
     }
 
+    // Update or create channel with upsert
     try {
       await prisma.channel.upsert({
         where: {
@@ -156,7 +157,7 @@ Reply with REG and your details to create your account!`;
         },
       });
     } catch (error) {
-      console.error("Channel update error:", error);
+      console.error("Channel upsert error:", error);
     }
 
     responseMessage = await processWhatsAppCommand(user, body, whatsappFrom);
@@ -179,7 +180,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - FIXED (NO METADATA IN USER)
+// USER REGISTRATION HANDLER - WITH UPSERT FOR CHANNEL
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -337,7 +338,6 @@ Example: REG John Doe - johndoe (skip email)`;
           pinAttempts: 0,
           kycStatus: "PENDING",
           walletBalance: 0,
-          // ⚠️ NO metadata HERE - THIS WAS THE PROBLEM
         },
       });
 
@@ -483,23 +483,41 @@ Example: REG John Doe - johndoe (skip email)`;
       }
 
       // ============================================================
-      // STEP 5: CREATE CHANNEL
+      // STEP 5: CREATE/UPDATE CHANNEL - USE UPSERT ✅
       // ============================================================
-      await prisma.channel.create({
-        data: {
-          userId: user.id,
-          channelType: ChannelType.WHATSAPP,
-          channelIdentifier: phone,
-          channelUsername: phone,
-          isVerified: true,
-          linkedAt: new Date(),
-          lastSeen: new Date(),
-          metadata: {
-            registeredVia: "whatsapp",
-            registrationDate: new Date().toISOString(),
+      try {
+        await prisma.channel.upsert({
+          where: {
+            channelIdentifier: phone,
           },
-        },
-      });
+          update: {
+            userId: user.id,
+            lastSeen: new Date(),
+            isVerified: true,
+            metadata: {
+              registeredVia: "whatsapp",
+              registrationDate: new Date().toISOString(),
+            },
+          },
+          create: {
+            userId: user.id,
+            channelType: ChannelType.WHATSAPP,
+            channelIdentifier: phone,
+            channelUsername: phone,
+            isVerified: true,
+            linkedAt: new Date(),
+            lastSeen: new Date(),
+            metadata: {
+              registeredVia: "whatsapp",
+              registrationDate: new Date().toISOString(),
+            },
+          },
+        });
+        console.log(`✅ Channel created/updated for: ${phone}`);
+      } catch (channelError) {
+        console.error("Channel upsert error:", channelError);
+        // Don't fail registration if channel fails
+      }
 
       // ============================================================
       // STEP 6: GENERATE CHANGE LINK
@@ -571,7 +589,7 @@ Or reply with HELP for assistance.`;
 }
 
 // ============================================================
-// MAIN COMMAND PROCESSOR (Keep all existing functions)
+// MAIN COMMAND PROCESSOR
 // ============================================================
 
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
