@@ -180,7 +180,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - WITH UPSERT FOR CHANNEL
+// USER REGISTRATION HANDLER - WITH PALMPAY WALLET INFO
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -370,6 +370,7 @@ Example: REG John Doe - johndoe (skip email)`;
       let virtualAccountNo: string | null = null;
       let isSimulation = false;
       let palmpayError: string | null = null;
+      let palmpayAccountName: string | null = null;
 
       try {
         console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
@@ -387,9 +388,11 @@ Example: REG John Doe - johndoe (skip email)`;
         wallet = result.wallet;
         virtualAccountNo = result.virtualAccount.virtualAccountNo;
         isSimulation = isPalmPaySimulationMode();
+        palmpayAccountName = wallet?.accountName || fullName.trim();
 
         console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
         console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
+        console.log(`🏦 Account Name: ${palmpayAccountName}`);
         
       } catch (error: any) {
         console.error('❌ PalmPay virtual account creation failed:', error);
@@ -397,6 +400,7 @@ Example: REG John Doe - johndoe (skip email)`;
         
         // If PalmPay fails, create a fallback wallet
         const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+        palmpayAccountName = fullName.trim();
         
         wallet = await prisma.wallet.create({
           data: {
@@ -483,7 +487,7 @@ Example: REG John Doe - johndoe (skip email)`;
       }
 
       // ============================================================
-      // STEP 5: CREATE/UPDATE CHANNEL - USE UPSERT ✅
+      // STEP 5: CREATE/UPDATE CHANNEL - USE UPSERT
       // ============================================================
       try {
         await prisma.channel.upsert({
@@ -528,6 +532,24 @@ Example: REG John Doe - johndoe (skip email)`;
       // Get final wallet balance
       const finalBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
+      // Determine bank name
+      const bankName = wallet?.bankName || 'BILSCORE';
+      const isPalmPay = bankName === 'PALMPAY';
+
+      // Build wallet info string
+      let walletInfo = `Wallet Information:
+Account Name: ${palmpayAccountName || wallet?.accountName || user.fullName}
+Account Number: ${wallet?.accountNumber || 'N/A'}
+Wallet Balance: NGN ${finalBalance.toFixed(2)}
+Bank: ${bankName}`;
+
+      // Add PalmPay specific info
+      if (isPalmPay && virtualAccountNo) {
+        walletInfo += `
+Virtual Account: ${virtualAccountNo}
+(Simulation Mode: ${isSimulation ? 'Yes' : 'No'})`;
+      }
+
       // ============================================================
       // STEP 7: RETURN SUCCESS MESSAGE
       // ============================================================
@@ -536,8 +558,9 @@ Example: REG John Doe - johndoe (skip email)`;
 Account Details:
 Username: ${username}
 Phone: ${phone}
-Wallet: ${wallet?.accountNumber || 'N/A'}
-Wallet Balance: NGN ${finalBalance.toFixed(2)}
+
+${walletInfo}
+
 Referral Code: ${referralCode}
 
 Default Password: ${defaultPassword}
