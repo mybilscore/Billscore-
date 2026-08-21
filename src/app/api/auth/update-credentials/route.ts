@@ -1,7 +1,7 @@
 // app/api/auth/update-credentials/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
-import { hash } from "bcrypt";
+import { hash, compare } from "bcrypt";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if new password is same as old
-    const isSamePassword = await bcrypt.compare(validated.newPassword, user.passwordHash);
+    const isSamePassword = await compare(validated.newPassword, user.passwordHash);
     if (isSamePassword) {
       return NextResponse.json(
         { success: false, error: "New password must be different from your current password" },

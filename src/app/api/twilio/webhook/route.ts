@@ -180,7 +180,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - SIMPLIFIED RESPONSE
+// USER REGISTRATION HANDLER - REFINED RESPONSE
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -530,17 +530,15 @@ Example: REG John Doe - johndoe (skip email)`;
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
       // ============================================================
-      // STEP 7: RETURN SIMPLIFIED SUCCESS MESSAGE
+      // STEP 7: RETURN REFINED SUCCESS MESSAGE
       // ============================================================
-      return `Registration Successful, ${user.fullName}!
+      return `Welcome ${user.fullName}! Registration successful.
 
-Account Details:
-Username: ${username}
-Phone: ${phone}
-
-Wallet:
+Wallet Info:
 Name: ${palmpayAccountName || wallet?.accountName || user.fullName}
 Number: ${wallet?.accountNumber || 'N/A'}
+
+Transfer to this account to fund your wallet instantly.
 
 Default Password: ${defaultPassword}
 Default PIN: ${defaultPin}
