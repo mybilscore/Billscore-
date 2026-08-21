@@ -179,7 +179,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - FIXED (NO METADATA)
+// USER REGISTRATION HANDLER - FIXED (NO METADATA IN USER)
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -318,7 +318,7 @@ Example: REG John Doe - johndoe (skip email)`;
       const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
       // ============================================================
-      // CREATE USER - WITHOUT METADATA FIELD
+      // STEP 1: CREATE USER - NO METADATA FIELD
       // ============================================================
       const user = await prisma.user.create({
         data: {
@@ -337,14 +337,14 @@ Example: REG John Doe - johndoe (skip email)`;
           pinAttempts: 0,
           kycStatus: "PENDING",
           walletBalance: 0,
-          // NO METADATA FIELD HERE
+          // ⚠️ NO metadata HERE - THIS WAS THE PROBLEM
         },
       });
 
       console.log(`✅ [WhatsApp] User created: ${user.id}`);
 
       // ============================================================
-      // STORE TOKEN IN AUDITLOG
+      // STEP 2: STORE TOKEN IN AUDITLOG
       // ============================================================
       await prisma.auditLog.create({
         data: {
@@ -364,7 +364,7 @@ Example: REG John Doe - johndoe (skip email)`;
       });
 
       // ============================================================
-      // CREATE PALMPAY WALLET
+      // STEP 3: CREATE PALMPAY WALLET
       // ============================================================
       let wallet: any = null;
       let virtualAccountNo: string | null = null;
@@ -427,7 +427,7 @@ Example: REG John Doe - johndoe (skip email)`;
       }
 
       // ============================================================
-      // CREDIT WELCOME BONUS
+      // STEP 4: CREDIT WELCOME BONUS
       // ============================================================
       const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
 
@@ -483,7 +483,7 @@ Example: REG John Doe - johndoe (skip email)`;
       }
 
       // ============================================================
-      // CREATE CHANNEL
+      // STEP 5: CREATE CHANNEL
       // ============================================================
       await prisma.channel.create({
         data: {
@@ -502,7 +502,7 @@ Example: REG John Doe - johndoe (skip email)`;
       });
 
       // ============================================================
-      // GENERATE CHANGE LINK
+      // STEP 6: GENERATE CHANGE LINK
       // ============================================================
       const appUrl = getAppUrl();
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
@@ -510,6 +510,9 @@ Example: REG John Doe - johndoe (skip email)`;
       // Get final wallet balance
       const finalBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
+      // ============================================================
+      // STEP 7: RETURN SUCCESS MESSAGE
+      // ============================================================
       return `Registration Successful, ${user.fullName}!
 
 Account Details:
@@ -568,7 +571,7 @@ Or reply with HELP for assistance.`;
 }
 
 // ============================================================
-// MAIN COMMAND PROCESSOR
+// MAIN COMMAND PROCESSOR (Keep all existing functions)
 // ============================================================
 
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
