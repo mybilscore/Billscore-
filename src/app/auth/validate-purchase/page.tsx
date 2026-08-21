@@ -2,11 +2,10 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import { verify } from "jsonwebtoken";
+import { useState, useEffect, Suspense } from "react";
 import { Lock, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 
-export default function ValidatePurchasePage() {
+function ValidatePurchaseContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get("token");
@@ -17,12 +16,14 @@ export default function ValidatePurchasePage() {
   const [success, setSuccess] = useState(false);
   const [transactionData, setTransactionData] = useState<any>(null);
   const [tokenValid, setTokenValid] = useState<boolean | null>(null);
+  const [verifying, setVerifying] = useState(true);
 
   // Validate token on load
   useEffect(() => {
     if (!token) {
       setTokenValid(false);
       setError("Invalid validation link");
+      setVerifying(false);
       return;
     }
 
@@ -41,18 +42,33 @@ export default function ValidatePurchasePage() {
       } catch (error) {
         setTokenValid(false);
         setError("Failed to validate link");
+      } finally {
+        setVerifying(false);
       }
     };
 
     validateToken();
   }, [token]);
 
+  // Get service icon
+  const getServiceIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      'AIRTIME': '📱',
+      'DATA': '📶',
+      'ELECTRICITY_INSTANT': '⚡',
+      'ELECTRICITY_PREORDER': '⚡',
+      'CABLE_TV': '📺',
+      'EDUCATION': '🎓',
+    };
+    return icons[type] || '🛍️';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
-    if (!pin || pin.length < 4 || pin.length > 6) {
+    if (!pin || pin.length < 4) {
       setError("Please enter a valid PIN (4-6 digits)");
       setLoading(false);
       return;
@@ -76,7 +92,7 @@ export default function ValidatePurchasePage() {
 
       setSuccess(true);
       
-      // Redirect to success page after 3 seconds
+      // Redirect to dashboard after 3 seconds
       setTimeout(() => {
         router.push("/dashboard/transactions");
       }, 3000);
@@ -86,6 +102,17 @@ export default function ValidatePurchasePage() {
       setLoading(false);
     }
   };
+
+  if (verifying) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
+          <Loader2 className="h-12 w-12 text-blue-500 animate-spin mx-auto" />
+          <p className="mt-4 text-gray-600">Validating your session...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (tokenValid === false) {
     return (
@@ -109,19 +136,6 @@ export default function ValidatePurchasePage() {
     );
   }
 
-  if (!tokenValid && token) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
-          <div className="flex items-center justify-center">
-            <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
-          </div>
-          <p className="text-center text-gray-600 mt-4">Validating your session...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
@@ -130,13 +144,13 @@ export default function ValidatePurchasePage() {
             <CheckCircle className="h-12 w-12" />
           </div>
           <h2 className="text-xl font-bold text-center text-gray-800 mb-2">
-            ✅ Purchase Confirmed!
+            Purchase Confirmed!
           </h2>
           <p className="text-center text-gray-600">
             Your transaction has been completed successfully.
           </p>
           <p className="text-center text-sm text-gray-500 mt-2">
-            Redirecting to transactions...
+            Redirecting to dashboard...
           </p>
         </div>
       </div>
@@ -156,15 +170,25 @@ export default function ValidatePurchasePage() {
         
         {transactionData && (
           <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">{getServiceIcon(transactionData.transactionType)}</span>
+              <span className="text-sm font-medium text-gray-700">{transactionData.serviceType}</span>
+            </div>
             <p className="text-sm text-gray-600">
-              <span className="font-medium">Service:</span> {transactionData.serviceType}
+              <span className="font-medium">Amount:</span> NGN {Number(transactionData.amount || 0).toFixed(2)}
             </p>
             <p className="text-sm text-gray-600">
-              <span className="font-medium">Amount:</span> ₦{transactionData.amount.toFixed(2)}
+              <span className="font-medium">Recipient:</span> {transactionData.recipient || "N/A"}
             </p>
-            <p className="text-sm text-gray-600">
-              <span className="font-medium">Recipient:</span> {transactionData.recipient}
-            </p>
+            {transactionData.details && (
+              <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-500">
+                {Object.entries(transactionData.details).map(([key, value]) => (
+                  <p key={key}>
+                    <span className="font-medium">{key}:</span> {String(value)}
+                  </p>
+                ))}
+              </div>
+            )}
             <p className="text-xs text-gray-400 mt-2">
               This link expires in 5 minutes
             </p>
@@ -220,5 +244,20 @@ export default function ValidatePurchasePage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function ValidatePurchasePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
+          <Loader2 className="h-12 w-12 text-blue-500 animate-spin mx-auto" />
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <ValidatePurchaseContent />
+    </Suspense>
   );
 }
