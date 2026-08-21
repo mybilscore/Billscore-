@@ -179,7 +179,7 @@ Reply with REG and your details to create your account!`;
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER - WITH PALMPAY WALLET & AUDITLOG
+// USER REGISTRATION HANDLER - FIXED (NO METADATA)
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -317,7 +317,9 @@ Example: REG John Doe - johndoe (skip email)`;
       const hashedPin = await hash(defaultPin, 10);
       const referralCode = `BIL${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
-      // Create user WITHOUT metadata field
+      // ============================================================
+      // CREATE USER - WITHOUT METADATA FIELD
+      // ============================================================
       const user = await prisma.user.create({
         data: {
           username: username,
@@ -335,12 +337,15 @@ Example: REG John Doe - johndoe (skip email)`;
           pinAttempts: 0,
           kycStatus: "PENDING",
           walletBalance: 0,
+          // NO METADATA FIELD HERE
         },
       });
 
       console.log(`✅ [WhatsApp] User created: ${user.id}`);
 
-      // Store the change token in AuditLog
+      // ============================================================
+      // STORE TOKEN IN AUDITLOG
+      // ============================================================
       await prisma.auditLog.create({
         data: {
           userId: user.id,
@@ -477,7 +482,9 @@ Example: REG John Doe - johndoe (skip email)`;
         }
       }
 
-      // Create channel
+      // ============================================================
+      // CREATE CHANNEL
+      // ============================================================
       await prisma.channel.create({
         data: {
           userId: user.id,
@@ -494,7 +501,9 @@ Example: REG John Doe - johndoe (skip email)`;
         },
       });
 
-      // Generate change link using the token from audit log
+      // ============================================================
+      // GENERATE CHANGE LINK
+      // ============================================================
       const appUrl = getAppUrl();
       const changeLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
