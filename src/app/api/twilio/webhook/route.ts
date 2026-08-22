@@ -1,5 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
-
+// app/api/twilio/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
@@ -27,7 +26,6 @@ import {
   isPalmPaySimulationMode 
 } from "~/lib/palmpay/palmpay-wallet.service";
 import { getVendorService } from "~/lib/vendors/vendor.service";
-import { generateQRUrl } from "~/lib/qr-hash";
 
 // ============================================================
 // HELPER: Generate Short Validation Token (for link)
@@ -40,35 +38,6 @@ function generateValidationToken(): string {
     token += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return token;
-}
-
-// ============================================================
-// GENERATE QR CODE FOR METER
-// ============================================================
-
-async function generateMeterQRCode(userId: string, meterNumber: string, disco: string): Promise<string> {
-  try {
-    const appUrl = getAppUrl();
-    const baseUrl = appUrl;
-    
-    const qrValue = generateQRUrl(baseUrl, {
-      identifier: meterNumber,
-      type: "electricity",
-      provider: disco,
-    });
-    
-    const url = new URL(qrValue);
-    const params = new URLSearchParams(url.search);
-    const hash = params.get('h');
-    const expiresAt = params.get('e');
-    
-    const qrDisplayLink = `${baseUrl}/qr/display/${meterNumber}?t=electricity&p=${encodeURIComponent(disco)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
-    
-    return qrDisplayLink;
-  } catch (error) {
-    console.error("QR code generation error:", error);
-    return "";
-  }
 }
 
 // ============================================================
@@ -113,13 +82,16 @@ function getAppUrl(): string {
 // ============================================================
 
 function getApiUrl(): string {
+  // In production, use the actual domain
   if (process.env.NODE_ENV === 'production') {
+    // Use the same URL as the app
     return process.env.NEXTAUTH_URL || 
            process.env.NEXT_PUBLIC_APP_URL || 
            process.env.APP_URL ||
            'https://app.bilscore.com';
   }
   
+  // In development, use localhost
   return process.env.NEXT_PUBLIC_API_URL || 
          process.env.NEXTAUTH_URL || 
          'http://localhost:3000';
@@ -131,13 +103,17 @@ function getApiUrl(): string {
 
 export async function POST(request: NextRequest) {
   try {
+    // Log raw request info
     console.log(`📨 [Twilio Webhook] Request received`);
     console.log(`  Method: ${request.method}`);
     console.log(`  URL: ${request.url}`);
     console.log(`  Content-Type: ${request.headers.get('content-type')}`);
     
+    // Parse form data
     const formData = await request.formData();
     
+    // Log all form fields
+    console.log(`  Form fields:`);
     let body = "";
     let from = "";
     let to = "";
@@ -151,6 +127,7 @@ export async function POST(request: NextRequest) {
       if (key === "MessageSid") messageSid = value.toString();
     }
     
+    // Also try to get from JSON body if form data is empty
     if (!body && request.body) {
       try {
         const jsonBody = await request.json();
@@ -159,9 +136,12 @@ export async function POST(request: NextRequest) {
         from = jsonBody.From || jsonBody.from || "";
         to = jsonBody.To || jsonBody.to || "";
         messageSid = jsonBody.MessageSid || jsonBody.messageSid || "";
-      } catch (e) {}
+      } catch (e) {
+        // Not JSON, ignore
+      }
     }
 
+    // Normalize phone numbers
     const whatsappFrom = from ? from.replace("whatsapp:", "") : "";
     const whatsappTo = to ? to.replace("whatsapp:", "") : "";
 
@@ -171,6 +151,7 @@ export async function POST(request: NextRequest) {
     console.log(`  Body: "${body}"`);
     console.log(`  MessageSid: ${messageSid}`);
 
+    // If body is empty, return help response
     if (!body || body.trim() === "") {
       console.log(`⚠️ [Twilio Webhook] Empty message body - returning help response`);
       const helpResponse = `Welcome to Bilscore!
@@ -188,6 +169,7 @@ Or visit: ${getAppUrl()}`;
       });
     }
 
+    // Check if user exists
     let user = await prisma.user.findFirst({
       where: { phone: whatsappFrom },
       include: { wallet: true },
@@ -225,6 +207,7 @@ Reply with REG and your details to create your account!`;
       });
     }
 
+    // Update or create channel with upsert
     try {
       await prisma.channel.upsert({
         where: {
@@ -1174,10 +1157,10 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 }
 
 // ============================================================
-// ADD METER WITH VERIFICATION AND QR CODE
+// ADD METER WITH VERIFICATION
 // ============================================================
 
-async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
+async function addMeterWithVerification(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
   try {
     const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
     const discoUpper = disco.toUpperCase();
@@ -1222,22 +1205,13 @@ Status: ${verificationResult.data?.status || "ACTIVE"}`;
         where: { id: existing.id },
         data: { disco: discoUpper, name: name || existing.name, updatedAt: new Date() },
       });
-      
-      const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
-      
       return `Meter updated successfully!${verificationMessage}
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || existing.name}
 
-📱 Quick Buy QR Code:
-${qrLink}
-
-Scan this QR code to quickly buy electricity for this meter.
-You can also find this QR code in your saved meters.
-
-Type ELECTRIC to see all your meters and buy power!`;
+Type ELECTRICITY to see all your meters and buy power!`;
     }
 
     await prisma.savedMeter.create({
@@ -1251,21 +1225,13 @@ Type ELECTRIC to see all your meters and buy power!`;
       },
     });
 
-    const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
-
     return `Meter added successfully!${verificationMessage}
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || `${discoUpper} Meter`}
 
-📱 Quick Buy QR Code:
-${qrLink}
-
-Scan this QR code to quickly buy electricity for this meter.
-You can also find this QR code in your saved meters.
-
-Type ELECTRIC to see all your meters and buy power!`;
+Type ELECTRICITY to see all your meters and buy power!`;
   } catch (error) {
     console.error("Add meter error:", error);
     return `Failed to add meter. Please try again.`;
@@ -1376,7 +1342,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     message += `   ${meter.meterNumber}\n\n`;
   });
 
-  message += `To buy electricity: ELECTRIC [number] [amount]
+  message += `To buy electricity: ELECTRICITY [number] [amount]
 To delete: DELETEMETER [meter_number]
 To set default: SETDEFAULTMETER [meter_number]`;
 
@@ -2673,26 +2639,14 @@ Wallet Status: ${wallet?.isActive ? "Active" : "Inactive"}
 Reply with HELP for available commands.`;
   }
 
-  // ============================================================
-  // ✅ AIRTIME - AUTO-DETECT NUMBER IF NOT PROVIDED
-  // ============================================================
+  // ========== AIRTIME ==========
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     const [, phoneNumber, amount] = parts;
-    
-    // ✅ If no phone number provided, use user's registered number
-    let targetPhone = phoneNumber;
-    if (!phoneNumber || phoneNumber.length < 10) {
-      targetPhone = user.phone;
-      console.log(`📱 [WhatsApp] No phone number provided, using registered number: ${targetPhone}`);
-    }
-    
-    if (!amount) {
+    if (!phoneNumber || !amount) {
       return `To buy airtime, reply with:
-AIRTIME [amount]
-Or AIRTIME [phone number] [amount]
+AIRTIME [phone number] [amount]
 
-Example: AIRTIME 500 (buys for your registered number)
-Example: AIRTIME 08012345678 500 (buys for a different number)
+Example: AIRTIME 08012345678 500
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE
 Minimum: NGN 50 | Maximum: NGN 50,000`;
@@ -2701,16 +2655,7 @@ Minimum: NGN 50 | Maximum: NGN 50,000`;
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
       return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
-Example: AIRTIME 500`;
-    }
-
-    // ✅ Auto-detect network from the target phone number
-    const detectedNetwork = detectNetworkFromPhone(targetPhone);
-    if (!detectedNetwork) {
-      return `Could not detect network for ${targetPhone}.
-Please ensure the phone number is correct.
-
-Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
+Example: AIRTIME 08012345678 500`;
     }
 
     if (!user.pinHash) {
@@ -2724,41 +2669,20 @@ Example: PIN 1234
 Your PIN is required for all transactions.`;
     }
 
-    return await processAirtimePurchaseWhatsApp(user, targetPhone, amountNum);
+    return await processAirtimePurchaseWhatsApp(user, phoneNumber, amountNum);
   }
 
-  // ============================================================
-  // ✅ DATA - AUTO-DETECT NUMBER IF NOT PROVIDED
-  // ============================================================
+  // ========== DATA ==========
   if (command.startsWith("DATA")) {
     const [, phoneNumber, planQuery] = parts;
-    
-    // ✅ If no phone number provided, use user's registered number
-    let targetPhone = phoneNumber;
-    if (!phoneNumber || phoneNumber.length < 10) {
-      targetPhone = user.phone;
-      console.log(`📱 [WhatsApp] No phone number provided, using registered number: ${targetPhone}`);
-    }
-    
-    if (!planQuery) {
+    if (!phoneNumber || !planQuery) {
       const availablePlans = await getAvailablePlansForWhatsApp();
       return `To buy data, reply with:
-DATA [plan]
-Or DATA [phone number] [plan]
+DATA [phone number] [plan]
 
-Example: DATA 1GB (buys for your registered number)
-Example: DATA 08012345678 1GB (buys for a different number)
+${availablePlans}
 
-${availablePlans}`;
-    }
-
-    // ✅ Auto-detect network from the target phone number
-    const detectedNetwork = detectNetworkFromPhone(targetPhone);
-    if (!detectedNetwork) {
-      return `Could not detect network for ${targetPhone}.
-Please ensure the phone number is correct.
-
-${await getAvailablePlansForWhatsApp()}`;
+Example: DATA 08012345678 1GB`;
     }
 
     if (!user.pinHash) {
@@ -2772,12 +2696,10 @@ Example: PIN 1234
 Your PIN is required for all transactions.`;
     }
 
-    return await processDataPurchaseWhatsApp(user, targetPhone, planQuery);
+    return await processDataPurchaseWhatsApp(user, phoneNumber, planQuery);
   }
 
-  // ============================================================
-  // ✅ METER MANAGEMENT - WITH QR CODE
-  // ============================================================
+  // ========== METER MANAGEMENT ==========
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
@@ -2796,7 +2718,7 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
 
     const [, meterNumber, disco, ...nameParts] = parts;
     const name = nameParts.join(" ");
-    return await addMeterWithVerificationAndQR(user.id, meterNumber, disco, name);
+    return await addMeterWithVerification(user.id, meterNumber, disco, name);
   }
 
   if (command === "METERS" || command === "LIST METERS") {
@@ -2868,10 +2790,8 @@ Or: SETDEFAULTDECODER 1234567890`;
     return await setDefaultDecoder(user.id, decoderId);
   }
 
-  // ============================================================
-  // ✅ ELECTRICITY - CHANGED TO ELECTRIC
-  // ============================================================
-  if (command === "ELECTRIC" || command === "ELEC" || command === "POWER") {
+  // ========== ELECTRICITY ==========
+  if (command === "ELECTRICITY" || command === "ELEC" || command === "POWER") {
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -2889,23 +2809,7 @@ ${discosList}
 
 Example: ADDMETER 1234567890 ABUJA HOME
 
-After adding, you can buy electricity by just typing ELECTRIC!`;
-    }
-
-    // ✅ If only one meter, auto-select it
-    if (meters.length === 1) {
-      const meter = meters[0];
-      return `Buy Electricity:
-
-Meter: ${meter.meterNumber}
-DisCo: ${meter.disco}
-Name: ${meter.name || 'Meter'}
-
-Reply with: ELECTRIC [amount]
-
-Example: ELECTRIC 5000
-
-Or type ELECTRIC to see all saved meters.`;
+After adding, you can buy electricity by just typing ELECTRICITY!`;
     }
 
     let message = "Your Saved Meters:\n\n";
@@ -2916,66 +2820,17 @@ Or type ELECTRIC to see all saved meters.`;
       message += `   ${meter.meterNumber}\n\n`;
     });
 
-    message += `Reply with: ELECTRIC [index] [amount]\n`;
-    message += `Example: ELECTRIC 1 5000\n\n`;
+    message += `Reply with: ELECTRICITY [number] [amount]\n`;
+    message += `Example: ELECTRICITY 1 5000\n\n`;
     message += `To add more meters: ADDMETER [meter] [disco] [name]\n`;
     message += `To get available DisCos: DISCOS`;
 
     return message;
   }
 
-  // ✅ ELECTRICITY PURCHASE
-  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || command.startsWith("POWER")) {
+  if (command.startsWith("ELECTRICITY") || command.startsWith("ELEC") || command.startsWith("POWER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     
-    const meters = await prisma.savedMeter.findMany({
-      where: { userId: user.id },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-    });
-
-    if (meters.length === 0) {
-      return `You don't have any saved meters.
-
-To add your first meter:
-ADDMETER [meter_number] [disco_code] [name]
-
-Example: ADDMETER 1234567890 ABUJA HOME`;
-    }
-
-    // ✅ Case 1: Only amount provided (single meter or auto-select default)
-    if (parts.length === 2) {
-      const amountStr = parts[1];
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid amount. Minimum is NGN 100.
-Example: ELECTRIC 5000`;
-      }
-
-      // Find default meter or the only meter
-      let selectedMeter = meters.find(m => m.isDefault) || meters[0];
-      
-      if (!user.pinHash) {
-        return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-      }
-      
-      return await processElectricityPurchaseWhatsApp(
-        user, 
-        selectedMeter.meterNumber, 
-        amount, 
-        selectedMeter.disco,
-        selectedMeter.meterType || "Prepaid"
-      );
-    }
-
-    // ✅ Case 2: Index and amount provided
     if (parts.length >= 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -2983,13 +2838,18 @@ Your PIN is required for all transactions.`;
       
       if (isNaN(index) || index < 0) {
         return `Invalid selection. Please choose a number from the list.
-Example: ELECTRIC 1 5000`;
+Example: ELECTRICITY 1 5000`;
       }
       
       if (isNaN(amount) || amount < 100) {
         return `Invalid amount. Minimum is NGN 100.
-Example: ELECTRIC 1 5000`;
+Example: ELECTRICITY 1 5000`;
       }
+      
+      const meters = await prisma.savedMeter.findMany({
+        where: { userId: user.id },
+        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      });
       
       if (index >= meters.length) {
         return `Invalid selection. Please choose a number from the list.`;
@@ -3016,22 +2876,11 @@ Your PIN is required for all transactions.`;
         selectedMeter.meterType || "Prepaid"
       );
     }
-
-    // Show help
-    let message = "Your Saved Meters:\n\n";
-    meters.forEach((meter: any, index: number) => {
-      const defaultTag = meter.isDefault ? " (Default)" : "";
-      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-      message += `   ${meter.disco}\n`;
-      message += `   ${meter.meterNumber}\n\n`;
-    });
-
-    message += `Reply with: ELECTRIC [index] [amount]\n`;
-    message += `Example: ELECTRIC 1 5000\n\n`;
-    message += `Or if you have only one meter: ELECTRIC [amount]\n`;
-    message += `Example: ELECTRIC 5000`;
-
-    return message;
+    
+    if (parts.length === 2) {
+      return `Please specify the amount as well.
+Example: ELECTRICITY ${parts[1]} 5000`;
+    }
   }
 
   // ========== DISCOS ==========
@@ -3335,13 +3184,10 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
-AIRTIME [amount] - Buy airtime for your number
-AIRTIME [phone] [amount] - Buy airtime for another number
-DATA [plan] - Buy data for your number
-DATA [phone] [plan] - Buy data for another number
-ELECTRIC - See saved meters
-ELECTRIC [amount] - Buy electricity (auto-selects your meter)
-ELECTRIC [index] [amount] - Buy electricity with meter selection
+AIRTIME [phone] [amount] - Buy airtime
+DATA [phone] [plan] - Buy data
+ELECTRICITY - See saved meters
+CABLE - See saved decoders
 ADDMETER [meter] [disco] [name] - Save a meter
 ADDDECODER [decoder] [provider] [name] - Save a decoder
 METERS - List your saved meters
@@ -3367,15 +3213,12 @@ TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
 Airtime & Data:
-AIRTIME [amount] - Buy airtime for your number
-AIRTIME [phone] [amount] - Buy airtime for another number
-DATA [plan] - Buy data for your number
-DATA [phone] [plan] - Buy data for another number
+AIRTIME [phone] [amount] - Buy airtime
+DATA [phone] [plan] - Buy data
 
 Electricity:
-ELECTRIC - Show saved meters
-ELECTRIC [amount] - Buy electricity (auto-selects default meter)
-ELECTRIC [index] [amount] - Buy electricity with meter selection
+ELECTRICITY - Show saved meters
+ELECTRICITY [index] [amount] - Buy electricity
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
 DISCOS - Show available DisCos
