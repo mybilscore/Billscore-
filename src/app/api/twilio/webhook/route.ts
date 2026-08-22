@@ -126,322 +126,6 @@ function getApiUrl(): string {
 }
 
 // ============================================================
-// DATA PLAN CATEGORY MAPPING
-// ============================================================
-
-// ✅ Map plan to category based on validity
-function getPlanCategoryForWhatsApp(plan: any): string {
-  // If planType is SME, keep as SME
-  if (plan.planType?.toUpperCase() === 'SME') {
-    return 'SME';
-  }
-
-  // For GIFTING or other types, determine by validity
-  const validity = plan.validity || 0;
-  const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
-
-  // Map based on validity duration
-  if (unit === 'HOURS' || unit === 'MINUTES') {
-    return 'Hourly';
-  }
-  
-  if (unit === 'DAYS') {
-    if (validity <= 1) return 'Daily';
-    if (validity <= 7) return 'Weekly';
-    if (validity <= 30) return 'Monthly';
-    if (validity <= 60) return '2 Monthly';
-    if (validity <= 365) return 'Yearly';
-    return 'Monthly';
-  }
-  
-  if (unit === 'MONTHS') {
-    if (validity <= 1) return 'Monthly';
-    if (validity <= 2) return '2 Monthly';
-    if (validity <= 12) return 'Yearly';
-    return 'Monthly';
-  }
-  
-  if (unit === 'YEARS') {
-    if (validity <= 1) return 'Yearly';
-    return 'Yearly';
-  }
-
-  return 'Monthly';
-}
-
-// ✅ Category order for display
-const CATEGORY_ORDER = ['SME', 'Daily', 'Weekly', 'Monthly', '2 Monthly', 'Yearly', 'Gifting', 'Hourly'];
-
-function sortCategoriesForDisplay(categories: any[]) {
-  return [...categories].sort((a, b) => {
-    const aIndex = CATEGORY_ORDER.indexOf(a.name);
-    const bIndex = CATEGORY_ORDER.indexOf(b.name);
-    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-  });
-}
-
-// ============================================================
-// GET AVAILABLE PLANS FOR WHATSAPP WITH CATEGORIES
-// ============================================================
-
-async function getAvailablePlansForWhatsApp(): Promise<string> {
-  try {
-    const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
-    
-    console.log(`📡 [WhatsApp] Fetching plans from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
-      return getFallbackPlans();
-    }
-
-    const result = await response.json();
-    
-    if (result.success && result.data?.plans) {
-      const { plans } = result.data;
-      let message = "📱 *Available Data Plans*\n\n";
-      
-      for (const provider of plans) {
-        const networkName = provider.name;
-        message += `*${networkName}*\n`;
-        
-        // Sort categories by order
-        const sortedCategories = sortCategoriesForDisplay(provider.categories || []);
-        
-        for (const category of sortedCategories) {
-          const planSizes = category.plans
-            .filter((plan: any) => plan.price > 0)
-            .map((plan: any) => plan.data)
-            .join(', ');
-          
-          if (planSizes) {
-            message += `  *${category.name}*: ${planSizes}\n`;
-          }
-        }
-        message += '\n';
-      }
-      
-      message += `To buy data: DATA [phone] [plan]\n`;
-      message += `Example: DATA 08012345678 1GB\n\n`;
-      message += `To see plans for a specific network:\n`;
-      message += `PLANS [network]\n`;
-      message += `Example: PLANS MTN`;
-      
-      return message;
-    }
-
-    console.warn(`⚠️ [WhatsApp] No plans data from API, using fallback`);
-    return getFallbackPlans();
-
-  } catch (error) {
-    console.error('❌ [WhatsApp] Error fetching plans:', error);
-    return getFallbackPlans();
-  }
-}
-
-// ============================================================
-// GET PLANS FOR SPECIFIC NETWORK WITH CATEGORIES
-// ============================================================
-
-async function getNetworkPlansWithCategories(network: string): Promise<string> {
-  try {
-    const apiUrl = getApiUrl();
-    const networkEnum = mapNetwork(network);
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${networkEnum}`;
-    
-    console.log(`📡 [WhatsApp] Fetching network plans from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ [WhatsApp] Failed to fetch network plans: ${response.status}`);
-      return `Could not fetch plans for ${network}. Please try again.`;
-    }
-
-    const result = await response.json();
-    
-    if (!result.success || !result.data?.plans) {
-      return `No plans available for ${network}.`;
-    }
-
-    const { plans } = result.data;
-    const networkProvider = plans.find((p: any) => 
-      p.name.toLowerCase() === network.toLowerCase()
-    );
-
-    if (!networkProvider || !networkProvider.categories) {
-      return `No plans found for ${network}.`;
-    }
-
-    const sortedCategories = sortCategoriesForDisplay(networkProvider.categories);
-
-    let message = `📱 *${network} Data Plans*\n\n`;
-    
-    for (const category of sortedCategories) {
-      message += `*${category.name}*\n`;
-      for (const plan of category.plans) {
-        if (plan.price > 0) {
-          const validity = plan.validity ? ` (${plan.validity})` : '';
-          message += `  ${plan.data}${validity} - NGN ${plan.price.toFixed(2)}\n`;
-        }
-      }
-      message += '\n';
-    }
-
-    message += `To buy: DATA [phone] [plan]\n`;
-    message += `Example: DATA 08012345678 1GB`;
-    
-    return message;
-
-  } catch (error) {
-    console.error('❌ [WhatsApp] Error fetching network plans:', error);
-    return `Could not fetch plans for ${network}. Please try again.`;
-  }
-}
-
-// ============================================================
-// FALLBACK PLANS WITH CATEGORIES
-// ============================================================
-
-function getFallbackPlans(): string {
-  return `📱 *Available Data Plans*
-
-*MTN*
-  *SME*: 100MB, 200MB, 500MB
-  *Daily*: 50MB, 100MB, 200MB, 500MB
-  *Weekly*: 1GB, 2GB
-  *Monthly*: 3GB, 5GB, 10GB, 20GB
-  *2 Monthly*: 15GB, 25GB
-  *Yearly*: 50GB, 100GB
-
-*GLO*
-  *Daily*: 50MB, 100MB, 200MB
-  *Weekly*: 1GB, 2GB
-  *Monthly*: 3GB, 5GB, 10GB
-  *2 Monthly*: 12GB
-
-*AIRTEL*
-  *Daily*: 50MB, 100MB, 200MB
-  *Weekly*: 1GB, 2GB
-  *Monthly*: 3GB, 5GB, 8GB
-  *2 Monthly*: 10GB, 20GB
-
-*9MOBILE*
-  *Daily*: 50MB, 100MB, 200MB
-  *Weekly*: 1GB
-  *Monthly*: 2GB, 5GB
-
-To buy data: DATA [phone] [plan]
-Example: DATA 08012345678 1GB
-
-To see plans for a specific network:
-PLANS [network]
-Example: PLANS MTN`;
-}
-
-// ============================================================
-// FIND DATA PLAN FROM VENDOR API WITH CATEGORY SUPPORT
-// ============================================================
-
-async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
-  try {
-    const apiUrl = getApiUrl();
-    const networkEnum = mapNetwork(network);
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${networkEnum}`;
-    
-    console.log(`📡 [WhatsApp] Finding plan from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
-      return null;
-    }
-
-    const result = await response.json();
-    
-    if (!result.success || !result.data?.plans) {
-      return null;
-    }
-
-    const { plans } = result.data;
-    const normalizedQuery = planQuery.toLowerCase().trim();
-    
-    let mbValue = 0;
-    const gbMatch = normalizedQuery.match(/(\d+\.?\d*)\s*gb/i);
-    const mbMatch = normalizedQuery.match(/(\d+)\s*mb/i);
-    if (gbMatch) mbValue = parseFloat(gbMatch[1]) * 1024;
-    else if (mbMatch) mbValue = parseFloat(mbMatch[1]);
-
-    let foundPlan = null;
-    let closestPlan = null;
-    let closestDiff = Infinity;
-
-    for (const provider of plans) {
-      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
-      
-      for (const category of provider.categories || []) {
-        for (const plan of category.plans || []) {
-          const planData = plan.data?.toLowerCase() || '';
-          
-          // Exact match
-          if (planData === normalizedQuery || 
-              planData === `${mbValue}mb` || 
-              planData === `${mbValue/1024}gb`) {
-            return { ...plan, provider: provider.name, category: category.name };
-          }
-
-          // Partial match
-          if (!foundPlan && (planData.includes(normalizedQuery) || 
-              normalizedQuery.includes(planData))) {
-            foundPlan = { ...plan, provider: provider.name, category: category.name };
-          }
-
-          // Closest match by MB
-          if (mbValue > 0 && plan.amountMB) {
-            const diff = Math.abs(plan.amountMB - mbValue);
-            if (diff < closestDiff) {
-              closestDiff = diff;
-              closestPlan = { ...plan, provider: provider.name, category: category.name };
-            }
-          }
-        }
-      }
-    }
-
-    return foundPlan || closestPlan || null;
-
-  } catch (error) {
-    console.error('❌ [WhatsApp] Error finding data plan:', error);
-    return null;
-  }
-}
-
-// ============================================================
 // MAIN WEBHOOK HANDLER
 // ============================================================
 
@@ -891,6 +575,9 @@ REG [Full Name] [Email] [Username]
 
 Example: REG John Doe john@email.com johndoe
 
+If you don't have an email, you can skip it:
+REG John Doe - johndoe
+
 Or visit our website:
 ${getAppUrl()}/auth`;
 
@@ -1002,7 +689,159 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 // FALLBACK FUNCTIONS
 // ============================================================
 
-// Fallback is now handled by getFallbackPlans() above
+function getFallbackPlans(): string {
+  return `Available plans:
+MTN: 1GB, 2GB, 5GB, 10GB
+GLO: 1GB, 3GB, 5GB
+AIRTEL: 1GB, 3GB, 8GB
+9MOBILE: 1GB, 2GB, 5GB
+
+Example: DATA 08012345678 1GB`;
+}
+
+// ============================================================
+// GET AVAILABLE PLANS FOR WHATSAPP
+// ============================================================
+
+async function getAvailablePlansForWhatsApp(): Promise<string> {
+  try {
+    const apiUrl = getApiUrl();
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
+    
+    console.log(`📡 [WhatsApp] Fetching plans from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
+      return getFallbackPlans();
+    }
+
+    const result = await response.json();
+    
+    if (result.success && result.data?.plans) {
+      const { plans } = result.data;
+      let message = "Available plans:\n";
+      const groupedPlans: Record<string, string[]> = {};
+      
+      for (const provider of plans) {
+        const networkName = provider.name;
+        if (!groupedPlans[networkName]) {
+          groupedPlans[networkName] = [];
+        }
+        for (const category of provider.categories || []) {
+          for (const plan of category.plans || []) {
+            if (plan.price && plan.price > 0) {
+              groupedPlans[networkName].push(plan.data);
+            }
+          }
+        }
+      }
+      
+      for (const [network, planSizes] of Object.entries(groupedPlans)) {
+        const uniquePlans = [...new Set(planSizes)];
+        message += `${network}: ${uniquePlans.join(', ')}\n`;
+      }
+      
+      return message;
+    }
+
+    console.warn(`⚠️ [WhatsApp] No plans data from API, using fallback`);
+    return getFallbackPlans();
+
+  } catch (error) {
+    console.error('❌ [WhatsApp] Error fetching plans:', error);
+    return getFallbackPlans();
+  }
+}
+
+// ============================================================
+// FIND DATA PLAN FROM VENDOR API
+// ============================================================
+
+async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
+  try {
+    const apiUrl = getApiUrl();
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(network)}`;
+    
+    console.log(`📡 [WhatsApp] Finding plan from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
+      return null;
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.data?.plans) {
+      return null;
+    }
+
+    const { plans } = result.data;
+    const normalizedQuery = planQuery.toLowerCase().trim();
+    
+    let mbValue = 0;
+    const gbMatch = normalizedQuery.match(/(\d+\.?\d*)\s*gb/i);
+    const mbMatch = normalizedQuery.match(/(\d+)\s*mb/i);
+    if (gbMatch) mbValue = parseFloat(gbMatch[1]) * 1024;
+    else if (mbMatch) mbValue = parseFloat(mbMatch[1]);
+
+    let foundPlan = null;
+    let closestPlan = null;
+    let closestDiff = Infinity;
+
+    for (const provider of plans) {
+      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
+      
+      for (const category of provider.categories || []) {
+        for (const plan of category.plans || []) {
+          const planData = plan.data?.toLowerCase() || '';
+          
+          if (planData === normalizedQuery || 
+              planData === `${mbValue}mb` || 
+              planData === `${mbValue/1024}gb`) {
+            return { ...plan, provider: provider.name };
+          }
+
+          if (!foundPlan && (planData.includes(normalizedQuery) || 
+              normalizedQuery.includes(planData))) {
+            foundPlan = { ...plan, provider: provider.name };
+          }
+
+          if (mbValue > 0 && plan.amountMB) {
+            const diff = Math.abs(plan.amountMB - mbValue);
+            if (diff < closestDiff) {
+              closestDiff = diff;
+              closestPlan = { ...plan, provider: provider.name };
+            }
+          }
+        }
+      }
+    }
+
+    return foundPlan || closestPlan || null;
+
+  } catch (error) {
+    console.error('❌ [WhatsApp] Error finding data plan:', error);
+    return null;
+  }
+}
 
 // ============================================================
 // GET AVAILABLE DISCOS FOR WHATSAPP
@@ -2008,10 +1847,6 @@ After confirming, your airtime will be sent.`;
   }
 }
 
-// ============================================================
-// PROCESS DATA PURCHASE WHATSAPP - UPDATED WITH CATEGORIES
-// ============================================================
-
 async function processDataPurchaseWhatsApp(user: any, phoneNumber: string, planQuery: string): Promise<string> {
   try {
     let cleanedNumber = phoneNumber.replace(/\D/g, '');
@@ -2040,11 +1875,12 @@ ${await getAvailablePlansForWhatsApp()}`;
     const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
     
     if (!planData) {
-      // Show network-specific plans with categories
-      const networkPlans = await getNetworkPlansWithCategories(detectedNetwork);
+      const availablePlans = await getAvailablePlansForWhatsApp();
       return `No data plan found for ${detectedNetwork} with "${planQuery}".
 
-${networkPlans}`;
+${availablePlans}
+
+Example: DATA 08012345678 1GB`;
     }
 
     const amount = Number(planData.price);
@@ -2100,7 +1936,6 @@ Please fund your wallet and try again.`;
           planQuery: planQuery,
           planName: planData.name,
           dataAmount: planData.amountMB,
-          category: planData.category || 'Monthly',
           customerId: customer.id,
           pinVerified: false,
         },
@@ -2140,7 +1975,6 @@ Please fund your wallet and try again.`;
           phoneNumber: normalizedPhone,
           network: detectedNetwork,
           planQuery: planQuery,
-          category: planData.category || 'Monthly',
         },
       },
     });
@@ -2149,17 +1983,14 @@ Please fund your wallet and try again.`;
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
     const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-    const categoryDisplay = planData.category || 'Monthly';
-    const validityDisplay = planData.validity || '30 days';
 
-    return `📱 *Data Purchase Initiated!*
+    return `Data Purchase Initiated!
 
 Phone: ${normalizedPhone}
 Plan: ${dataDisplay} (${planData.name || detectedNetwork})
-Category: *${categoryDisplay}*
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
-Validity: ${validityDisplay}
+Validity: ${planData.validity || "30 days"}
 Reference: ${transaction.id.substring(0, 10)}
 
 To complete this purchase, please confirm your PIN:
@@ -2175,10 +2006,6 @@ After confirming, your data bundle will be activated.`;
     return `Failed to initiate data purchase. Please try again.`;
   }
 }
-
-// ============================================================
-// PROCESS ELECTRICITY PURCHASE WHATSAPP
-// ============================================================
 
 async function processElectricityPurchaseWhatsApp(
   user: any, 
@@ -2303,10 +2130,6 @@ After confirming, your electricity token will be sent here.`;
     return `Failed to initiate electricity purchase. Please try again.`;
   }
 }
-
-// ============================================================
-// PROCESS CABLE PURCHASE WHATSAPP
-// ============================================================
 
 async function processCablePurchaseWhatsApp(
   user: any, 
@@ -2476,10 +2299,6 @@ After confirming, your subscription will be activated.`;
   }
 }
 
-// ============================================================
-// PROCESS EDUCATION PURCHASE WHATSAPP
-// ============================================================
-
 async function processEducationPurchaseWhatsApp(
   user: any,
   productType: string,
@@ -2632,10 +2451,6 @@ After confirming, your ${quantity > 1 ? 'PINs will' : 'PIN will'} be sent to you
     return `Failed to initiate education purchase. Please try again.`;
   }
 }
-
-// ============================================================
-// PROCESS SUBSCRIPTION WHATSAPP
-// ============================================================
 
 async function processSubscriptionWhatsApp(
   user: any,
@@ -2915,7 +2730,7 @@ Your PIN is required for all transactions.`;
   // ============================================================
   // ✅ DATA - AUTO-DETECT NUMBER IF NOT PROVIDED
   // ============================================================
-  if (command.startsWith("DATA") || command === "DATA") {
+  if (command.startsWith("DATA")) {
     const [, phoneNumber, planQuery] = parts;
     
     // ✅ If no phone number provided, use user's registered number
@@ -2933,10 +2748,6 @@ Or DATA [phone number] [plan]
 
 Example: DATA 1GB (buys for your registered number)
 Example: DATA 08012345678 1GB (buys for a different number)
-
-To see plans for a specific network:
-PLANS [network]
-Example: PLANS MTN
 
 ${availablePlans}`;
     }
@@ -2962,26 +2773,6 @@ Your PIN is required for all transactions.`;
     }
 
     return await processDataPurchaseWhatsApp(user, targetPhone, planQuery);
-  }
-
-  // ============================================================
-  // ✅ PLANS - VIEW PLANS FOR SPECIFIC NETWORK
-  // ============================================================
-  if (command.startsWith("PLANS") || command === "PLAN") {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length >= 2) {
-      const network = parts[1].toUpperCase();
-      const validNetworks = ["MTN", "GLO", "AIRTEL", "9MOBILE"];
-      if (validNetworks.includes(network)) {
-        return await getNetworkPlansWithCategories(network);
-      } else {
-        return `Invalid network. Available: ${validNetworks.join(", ")}
-Example: PLANS MTN`;
-      }
-    }
-    
-    // If no network specified, show all plans
-    return await getAvailablePlansForWhatsApp();
   }
 
   // ============================================================
@@ -3548,7 +3339,6 @@ AIRTIME [amount] - Buy airtime for your number
 AIRTIME [phone] [amount] - Buy airtime for another number
 DATA [plan] - Buy data for your number
 DATA [phone] [plan] - Buy data for another number
-PLANS [network] - See plans for a specific network (MTN, GLO, AIRTEL, 9MOBILE)
 ELECTRIC - See saved meters
 ELECTRIC [amount] - Buy electricity (auto-selects your meter)
 ELECTRIC [index] [amount] - Buy electricity with meter selection
@@ -3581,7 +3371,6 @@ AIRTIME [amount] - Buy airtime for your number
 AIRTIME [phone] [amount] - Buy airtime for another number
 DATA [plan] - Buy data for your number
 DATA [phone] [plan] - Buy data for another number
-PLANS [network] - View plans by category (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
 
 Electricity:
 ELECTRIC - Show saved meters
