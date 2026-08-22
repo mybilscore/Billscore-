@@ -1,5 +1,4 @@
-// app/qr/display/[id]/page.tsx - UPDATED
-
+// app/qr/display/[id]/page.tsx
 import { notFound, redirect } from "next/navigation";
 import { QRDisplayClient } from "./page.client";
 import { verifyQRHash } from "~/lib/qr-hash";
@@ -33,7 +32,7 @@ export default async function QRDisplayPage({ params, searchParams }: QRDisplayP
     redirect("/");
   }
 
-  // ✅ Verify the QR hash
+  // ✅ Verify the QR hash using the same function as Buy Now
   const isValid = verifyQRHash({
     identifier: id,
     type: type,

@@ -1,6 +1,4 @@
 // app/api/auth/register/route.ts
-// FIXED - Let PalmPay create the wallet
-
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
@@ -34,8 +32,6 @@ const registrationSchema = z.object({
   userType: z.string().optional(),
   preferredChannel: z.string().optional(),
 });
-
-type RegistrationData = z.infer<typeof registrationSchema>;
 
 // ============================================================
 // HELPER FUNCTIONS
@@ -236,7 +232,27 @@ export async function POST(request: NextRequest) {
     const referralCode = generateReferralCode();
 
     // ============================================================
-    // STEP 7: CREATE USER ONLY (NO WALLET YET)
+    // STEP 7: GET REFERRER INFO (if referral code provided)
+    // ============================================================
+    let referrerId = null;
+
+    if (validated.referralCode) {
+      const code = validated.referralCode.toUpperCase();
+      const referrer = await prisma.user.findUnique({
+        where: { referralCode: code },
+        select: { id: true },
+      });
+
+      if (referrer) {
+        referrerId = referrer.id;
+        console.log(`✅ Referrer found: ${referrerId}`);
+      } else {
+        console.log(`⚠️ Invalid referral code: ${code}`);
+      }
+    }
+
+    // ============================================================
+    // STEP 8: CREATE USER
     // ============================================================
     const user = await prisma.user.create({
       data: {
@@ -255,24 +271,45 @@ export async function POST(request: NextRequest) {
         pinAttempts: 0,
         pinLockedUntil: null,
         kycStatus: "PENDING",
-        ...(validated.referralCode ? { referredBy: validated.referralCode } : {}),
+        ...(referrerId ? { referredBy: referrerId } : {}),
       },
     });
 
     console.log(`✅ User created: ${user.id}`);
 
     // ============================================================
-    // STEP 8: RECORD SUCCESSFUL ATTEMPT
+    // STEP 9: CREATE REFERRAL RECORD (if referral code was valid)
+    // ============================================================
+    if (referrerId) {
+      try {
+        await prisma.referral.create({
+          data: {
+            referrerId: referrerId,
+            refereeId: user.id,
+            referralCode: validated.referralCode.toUpperCase(),
+            status: "PENDING",
+            rewardAmount: 0, // Will be calculated on first deposit
+            channel: validated.preferredChannel as ChannelType || "MOBILE_APP",
+          },
+        });
+        console.log(`✅ Referral record created: ${referrerId} -> ${user.id}`);
+      } catch (error) {
+        console.error("❌ Failed to create referral record:", error);
+        // Continue with registration even if referral record fails
+      }
+    }
+
+    // ============================================================
+    // STEP 10: RECORD SUCCESSFUL ATTEMPT
     // ============================================================
     try {
       await registrationBruteForce.recordSuccessfulAttempt(body.email, ip as string);
     } catch (e) {
-      // Ignore if record doesn't exist
       console.log('⚠️ Registration attempt record not found, skipping');
     }
 
     // ============================================================
-    // STEP 9: CREATE PALMPAY WALLET (Synchronous - required)
+    // STEP 11: CREATE PALMPAY WALLET
     // ============================================================
     let wallet: any = null;
     let virtualAccountNo: string | null = null;
@@ -303,7 +340,7 @@ export async function POST(request: NextRequest) {
       console.error('❌ PalmPay virtual account creation failed:', error);
       palmpayError = error.message;
       
-      // ✅ If PalmPay fails, create a fallback wallet
+      // Create a fallback wallet
       const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
       
       wallet = await prisma.wallet.create({
@@ -325,7 +362,6 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Update user
       await prisma.user.update({
         where: { id: user.id },
         data: { hasWallet: true },
@@ -335,12 +371,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // STEP 10: CREDIT WELCOME BONUS
+    // STEP 12: CREDIT WELCOME BONUS
     // ============================================================
     const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
 
     if (wallet) {
-      // Check if welcome bonus was already credited
       const existingBonus = await prisma.walletTransaction.findFirst({
         where: {
           walletId: wallet.id,
@@ -368,7 +403,7 @@ export async function POST(request: NextRequest) {
               balanceBefore: currentBalance,
               balanceAfter: currentBalance + WELCOME_BONUS,
               reference: `WELCOME_BONUS_${user.id}`,
-              description: `🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+              description: `Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
               status: "SUCCESS",
               category: "SYSTEM",
               metadata: {
@@ -380,7 +415,6 @@ export async function POST(request: NextRequest) {
           }),
         ]);
 
-        // Update user
         await prisma.user.update({
           where: { id: user.id },
           data: { 
@@ -393,54 +427,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // STEP 11: REFERRAL BONUS (Non-blocking)
-    // ============================================================
-    let referralBonus = 0;
-
-    if (validated.referralCode && wallet) {
-      (async () => {
-        try {
-          const referrer = await prisma.user.findUnique({
-            where: { referralCode: validated.referralCode },
-            include: { wallet: true },
-          });
-
-          if (referrer && referrer.wallet) {
-            referralBonus = 500;
-            
-            await prisma.$transaction([
-              prisma.wallet.update({
-                where: { id: referrer.wallet.id },
-                data: {
-                  walletBalance: {
-                    increment: referralBonus,
-                  },
-                },
-              }),
-              prisma.walletTransaction.create({
-                data: {
-                  walletId: referrer.wallet.id,
-                  userId: referrer.id,
-                  type: "CREDIT",
-                  amount: referralBonus,
-                  balanceBefore: Number(referrer.wallet.walletBalance),
-                  balanceAfter: Number(referrer.wallet.walletBalance) + referralBonus,
-                  reference: `REFERRAL_${user.id}`,
-                  description: `Referral bonus for ${user.fullName}`,
-                  status: "SUCCESS",
-                  category: "SYSTEM",
-                },
-              }),
-            ]);
-          }
-        } catch (e) {
-          console.error('❌ Referral bonus failed:', e);
-        }
-      })();
-    }
-
-    // ============================================================
-    // STEP 12: AUDIT LOG (Non-blocking)
+    // STEP 13: AUDIT LOG
     // ============================================================
     auditLogger.log({
       userId: user.id,
@@ -451,6 +438,7 @@ export async function POST(request: NextRequest) {
         role: user.role,
         referralCode: user.referralCode,
         referredBy: user.referredBy,
+        referrerId: referrerId,
         ip,
         userAgent,
       },
@@ -459,7 +447,7 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
 
     // ============================================================
-    // STEP 13: Return success response
+    // STEP 14: Return success response
     // ============================================================
     const finalWalletBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
@@ -476,6 +464,7 @@ export async function POST(request: NextRequest) {
         referralCode: user.referralCode,
         hasWallet: true,
         walletBalance: finalWalletBalance,
+        referredBy: !!referrerId,
       },
       wallet: wallet ? {
         id: wallet.id,
@@ -489,7 +478,6 @@ export async function POST(request: NextRequest) {
         accountNumber: virtualAccountNo,
         isSimulation: isSimulation,
       } : null,
-      referralBonus: referralBonus,
       welcomeBonus: WELCOME_BONUS,
       palmpayError: palmpayError,
       isSimulationMode: isSimulation,
@@ -498,7 +486,6 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("❌ Registration error:", error);
 
-    // Record failed attempt
     try {
       const body = await request.json().catch(() => ({}));
       await registrationBruteForce.recordFailedAttempt(
@@ -506,11 +493,8 @@ export async function POST(request: NextRequest) {
         request.headers.get('x-forwarded-for') || 'unknown',
         { error: error.message }
       );
-    } catch (e) {
-      // Ignore
-    }
+    } catch (e) {}
 
-    // Zod validation errors
     if (error.name === "ZodError") {
       const errors = error.errors.map((err: any) => ({
         field: err.path.join('.'),
@@ -528,7 +512,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Prisma unique constraint violation
     if (error.code === "P2002") {
       const target = error.meta?.target || [];
       let field = "User";
@@ -558,10 +541,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// ============================================================
-// GET: Check username availability
-// ============================================================
 
 export async function GET(request: NextRequest) {
   try {

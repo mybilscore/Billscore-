@@ -1,8 +1,8 @@
-// app/dashboard/buy/data/page.client.tsx - UPDATED WITH DROPDOWN
-
+// app/dashboard/buy/data/page.client.tsx - COMPLETE FIXED
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   Phone,
   Wifi,
@@ -29,6 +29,13 @@ import {
   EyeOff,
   Layers,
   Search,
+  Calendar,
+  Briefcase,
+  Sun,
+  CalendarDays,
+  CalendarRange,
+  CalendarCheck,
+  CalendarClock,
 } from "lucide-react";
 
 interface Plan {
@@ -41,6 +48,7 @@ interface Plan {
   vendorPrice?: number;
   description?: string;
   amountMB?: number;
+  planType?: string;
 }
 
 interface Category {
@@ -195,7 +203,7 @@ const ServiceDetection = ({
   );
 };
 
-// ✅ Provider Button (Same as Airtime)
+// ✅ Provider Button
 const ProviderButton = ({
   provider,
   isSelected,
@@ -227,7 +235,6 @@ const ProviderButton = ({
       )}
       <div className="h-10 w-10">
         {!imageError && provider.iconPath ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={provider.iconPath}
             alt={provider.name}
@@ -257,7 +264,7 @@ const ProviderButton = ({
   );
 };
 
-// ✅ Category Tag
+// ✅ Category Tag - Updated for Plan Types (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
 const CategoryTag = ({
   category,
   isSelected,
@@ -271,17 +278,48 @@ const CategoryTag = ({
 }) => {
   const getColor = (name: string, selected: boolean) => {
     if (selected) return "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40";
-    if (name === "SME") return "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30";
-    if (name === "GIFTING") return "text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30";
-    if (name === "COOPERATE_GIFTING") return "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30";
+    
+    if (name === 'SME') {
+      return "text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30";
+    }
+    if (name === 'Daily') {
+      return "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30";
+    }
+    if (name === 'Weekly') {
+      return "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30";
+    }
+    if (name === 'Monthly') {
+      return "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30";
+    }
+    if (name === '2 Monthly') {
+      return "text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30";
+    }
+    if (name === 'Yearly') {
+      return "text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30";
+    }
     return "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800";
   };
 
   const getIcon = (name: string) => {
-    if (name === "SME") return <Tag className="h-3 w-3" />;
-    if (name === "GIFTING") return <Gift className="h-3 w-3" />;
-    if (name === "COOPERATE_GIFTING") return <Layers className="h-3 w-3" />;
-    return <Tag className="h-3 w-3" />;
+    if (name === 'SME') {
+      return <Briefcase className="h-3 w-3" />;
+    }
+    if (name === 'Daily') {
+      return <Sun className="h-3 w-3" />;
+    }
+    if (name === 'Weekly') {
+      return <CalendarDays className="h-3 w-3" />;
+    }
+    if (name === 'Monthly') {
+      return <CalendarRange className="h-3 w-3" />;
+    }
+    if (name === '2 Monthly') {
+      return <CalendarCheck className="h-3 w-3" />;
+    }
+    if (name === 'Yearly') {
+      return <CalendarClock className="h-3 w-3" />;
+    }
+    return <Calendar className="h-3 w-3" />;
   };
 
   return (
@@ -399,6 +437,7 @@ export function DataClient({
   vendorInfo,
   networks = [],
 }: DataClientProps) {
+  const router = useRouter();
   const [user, setUser] = useState(initialUser);
   const [selectedProvider, setSelectedProvider] = useState<string>(defaultProvider);
   const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -745,7 +784,7 @@ export function DataClient({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Form - 2 columns */}
           <div className="lg:col-span-2 space-y-6">
-            {/* ✅ Phone Number & Network Provider - SAME CARD with dropdown */}
+            {/* ✅ Phone Number & Network Provider */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Recipient Details
@@ -869,15 +908,15 @@ export function DataClient({
               </div>
             </div>
 
-            {/* Categories */}
-            {currentProvider && currentProvider.categories.length > 0 && (
+            {/* Categories - Grouped by Plan Type (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly) */}
+            {currentProvider && currentProvider.categories.length > 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    Categories
+                    Plan Categories
                   </h2>
                   <span className="text-[10px] text-gray-500">
-                    {currentProvider.categories.length} available
+                    {currentProvider.categories.length} options
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -892,10 +931,16 @@ export function DataClient({
                   ))}
                 </div>
               </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+                  No data plans available for {currentProvider?.name || 'this provider'}
+                </p>
+              </div>
             )}
 
             {/* Data Plans - 5 columns */}
-            {currentCategory && plans.length > 0 && (
+            {currentCategory && plans.length > 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -916,7 +961,13 @@ export function DataClient({
                   ))}
                 </div>
               </div>
-            )}
+            ) : currentCategory ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+                  No plans available in this category
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {/* Sidebar - Order Summary */}
@@ -965,7 +1016,7 @@ export function DataClient({
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <Tag className="h-4 w-4 text-gray-400" />
+                      <Briefcase className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Category</span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">
@@ -989,13 +1040,23 @@ export function DataClient({
                       <span className="text-gray-600 dark:text-gray-400">Validity</span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPlan?.validity || "—"}
+                      {selectedPlan?.validity || "Not selected"}
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-600 dark:text-gray-400">Amount</span>
+                    </div>
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {selectedPlan ? formatCurrency(selectedPlan.price) : "Not selected"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-gray-400" />
                       <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                     </div>
                     <span className={`font-medium ${user.walletBalance >= (selectedPlan?.price || 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -1100,7 +1161,7 @@ export function DataClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Click categories to filter plans
+                  Filter plans by category (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>

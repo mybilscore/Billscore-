@@ -1,5 +1,4 @@
 // app/dashboard/buy/data/page.tsx
-
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { DataClient } from "./page.client";
@@ -10,12 +9,76 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// ✅ Fetch plans from active vendor - FIXED API URL
+// ✅ Map plan to category based on validity (same as API route)
+function getPlanCategory(plan: any): string {
+  // If plan has explicit category, use it
+  if (plan.category) {
+    return plan.category;
+  }
+
+  // If planType is SME, keep as SME
+  if (plan.planType?.toUpperCase() === 'SME') {
+    return 'SME';
+  }
+
+  // For GIFTING or other types, determine by validity
+  const validity = plan.validity || 0;
+  const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
+
+  // Map based on validity duration
+  if (unit === 'HOURS' || unit === 'MINUTES') {
+    return 'Hourly';
+  }
+  
+  if (unit === 'DAYS') {
+    if (validity <= 1) return 'Daily';
+    if (validity <= 7) return 'Weekly';
+    if (validity <= 30) return 'Monthly';
+    if (validity <= 60) return '2 Monthly';
+    if (validity <= 365) return 'Yearly';
+    return 'Monthly';
+  }
+  
+  if (unit === 'MONTHS') {
+    if (validity <= 1) return 'Monthly';
+    if (validity <= 2) return '2 Monthly';
+    if (validity <= 12) return 'Yearly';
+    return 'Monthly';
+  }
+  
+  if (unit === 'YEARS') {
+    if (validity <= 1) return 'Yearly';
+    return 'Yearly';
+  }
+
+  return 'Monthly';
+}
+
+// ✅ Sort categories in specific order
+function sortCategories(categories: any[]) {
+  const order: Record<string, number> = {
+    'SME': 0,
+    'Daily': 1,
+    'Weekly': 2,
+    'Monthly': 3,
+    '2 Monthly': 4,
+    'Yearly': 5,
+    'Gifting': 6,
+    'Hourly': 7,
+  };
+
+  return categories.sort((a, b) => {
+    const aOrder = order[a.name] ?? 99;
+    const bOrder = order[b.name] ?? 99;
+    return aOrder - bOrder;
+  });
+}
+
+// ✅ Fetch plans from active vendor
 async function fetchActiveVendorPlans() {
   try {
-    // ✅ Remove /api from the URL since it's already in NEXT_PUBLIC_API_URL
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-    const url = `${apiUrl}/vendors/plans`;  // 
+    const url = `${apiUrl}/vendors/plans`;
     console.log(`📊 [DATA] Fetching plans from: ${url}`);
     
     const response = await fetch(url, {
@@ -111,7 +174,7 @@ export default async function DataPage() {
     walletBalance: walletBalance,
   };
 
-  // ✅ Fetch plans from database
+  // ✅ Fetch plans from API
   const plansData = await fetchActiveVendorPlans();
   
   // ✅ Extract providers from the response
@@ -119,13 +182,11 @@ export default async function DataPage() {
   let networks = plansData?.networks || [];
   let vendorInfo = plansData?.vendor || null;
 
-  // ✅ If no providers from API, use the admin endpoint as fallback
+  // ✅ Fallback: If no providers from API, query database directly
   if (providers.length === 0) {
-    console.log('⚠️ [DATA] No providers from /vendors/plans, trying admin endpoint...');
+    console.log('⚠️ [DATA] No providers from /vendors/plans, trying direct database...');
     
     try {
-      // Try the admin endpoint which we know works
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
       const vendorService = await prisma.vendorService.findFirst({
         where: {
           serviceType: "DATA",
@@ -148,7 +209,6 @@ export default async function DataPage() {
           },
           orderBy: [
             { network: 'asc' },
-            { planType: 'asc' },
             { amountMB: 'asc' },
           ],
           include: {
@@ -157,13 +217,12 @@ export default async function DataPage() {
         });
 
         if (plans.length > 0) {
-          // Group plans manually
-          const groupedPlans: Record<string, any> = {};
+          const groupedByNetwork: Record<string, any> = {};
           
           for (const plan of plans) {
             const networkKey = plan.network;
-            if (!groupedPlans[networkKey]) {
-              groupedPlans[networkKey] = {
+            if (!groupedByNetwork[networkKey]) {
+              groupedByNetwork[networkKey] = {
                 id: networkKey.toLowerCase(),
                 name: plan.networkConfig?.displayName || networkKey,
                 code: plan.networkConfig?.code || networkKey,
@@ -173,41 +232,65 @@ export default async function DataPage() {
               };
             }
 
-            const planTypeKey = plan.planType;
-            if (!groupedPlans[networkKey].categories[planTypeKey]) {
-              groupedPlans[networkKey].categories[planTypeKey] = {
-                id: planTypeKey.toLowerCase(),
-                name: planTypeKey,
+            // ✅ Determine category based on plan attributes
+            const categoryName = getPlanCategory(plan);
+            
+            if (!groupedByNetwork[networkKey].categories[categoryName]) {
+              groupedByNetwork[networkKey].categories[categoryName] = {
+                id: categoryName.toLowerCase().replace(/\s+/g, '_'),
+                name: categoryName,
                 plans: [],
               };
             }
 
-            groupedPlans[networkKey].categories[planTypeKey].plans.push({
+            // Get validity display
+            let validityDisplay = '';
+            if (plan.validity && plan.validityUnit) {
+              const unit = plan.validityUnit.toLowerCase();
+              const val = plan.validity;
+              if (val === 1) {
+                validityDisplay = `1 ${unit.slice(0, -1)}`;
+              } else {
+                validityDisplay = `${val} ${unit}`;
+              }
+            }
+
+            groupedByNetwork[networkKey].categories[categoryName].plans.push({
               id: plan.id,
               name: plan.name,
               data: plan.amountMB >= 1024 
                 ? `${(plan.amountMB / 1024).toFixed(1)}GB` 
                 : `${plan.amountMB}MB`,
               price: Number(plan.ourPrice),
-              validity: `${plan.validity} ${plan.validityUnit}`.toLowerCase(),
+              validity: validityDisplay || `${plan.validity} ${plan.validityUnit}`.toLowerCase(),
               planCode: plan.vendorPlanId,
               vendorPrice: Number(plan.vendorPrice),
               description: plan.description,
               amountMB: plan.amountMB,
+              planType: plan.planType,
             });
           }
 
-          // Convert to array format
-          providers = Object.keys(groupedPlans).map((key) => ({
-            ...groupedPlans[key],
-            categories: Object.keys(groupedPlans[key].categories).map((catKey) => ({
-              id: catKey.toLowerCase(),
-              name: catKey,
-              plans: groupedPlans[key].categories[catKey].plans,
-            })),
+          // Sort plans within each category by amountMB
+          for (const networkKey in groupedByNetwork) {
+            for (const categoryKey in groupedByNetwork[networkKey].categories) {
+              groupedByNetwork[networkKey].categories[categoryKey].plans.sort((a: any, b: any) => {
+                return (a.amountMB || 0) - (b.amountMB || 0);
+              });
+            }
+          }
+
+          providers = Object.keys(groupedByNetwork).map((key) => ({
+            ...groupedByNetwork[key],
+            categories: sortCategories(
+              Object.keys(groupedByNetwork[key].categories).map((catKey) => ({
+                id: groupedByNetwork[key].categories[catKey].id,
+                name: catKey,
+                plans: groupedByNetwork[key].categories[catKey].plans,
+              }))
+            ),
           }));
 
-          // Get networks
           const networkConfigs = await prisma.networkConfig.findMany({
             where: { isActive: true },
             orderBy: { priority: 'asc' },
@@ -233,6 +316,12 @@ export default async function DataPage() {
     } catch (error) {
       console.error('❌ [DATA] Fallback error:', error);
     }
+  }
+
+  // ✅ If still no providers, use empty array
+  if (providers.length === 0) {
+    console.warn('⚠️ [DATA] No providers found, using empty array');
+    providers = [];
   }
 
   const defaultProvider = providers.length > 0 ? providers[0].id : "mtn";

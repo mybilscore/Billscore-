@@ -33,8 +33,6 @@ function SocialButtons({
   setIsLoading: (loading: boolean) => void;
   setError: (error: string) => void;
 }) {
-  // Social sign-in is removed - this component is now empty
-  // We keep it as a placeholder but it renders nothing
   return null;
 }
 
@@ -374,7 +372,7 @@ export default function AuthPage() {
   }, [signUpData.referralCode]);
 
   // ============================================
-  // SIGN IN HANDLER
+  // SIGN IN HANDLER - OPTIMIZED
   // ============================================
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -404,40 +402,47 @@ export default function AuthPage() {
             : "Login failed. Please try again";
 
         setError(errorMessage);
-      } else if (result?.ok) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        setLoading(false);
+        return;
+      }
 
-        const sessionRes = await fetch("/api/auth/session");
-        const session = await sessionRes.json();
+      if (!result?.ok) {
+        setError("Login failed. Please try again.");
+        setLoading(false);
+        return;
+      }
 
-        if (session?.user) {
-          const { role } = session.user;
+      // ✅ Get session and redirect in one step
+      const sessionRes = await fetch("/api/auth/session");
+      const session = await sessionRes.json();
 
-          if (role === "SUPER_ADMIN" || role === "ADMIN") {
-            router.push("/admin");
-          } else if (role === "AGENT" || role === "RETAILER") {
-            router.push("/agent/dashboard");
-          } else if (role === "DEVELOPER") {
-            router.push("/developer/dashboard");
-          } else {
-            router.push(callbackUrl);
-          }
+      if (session?.user) {
+        const { role } = session.user;
+
+        if (role === "SUPER_ADMIN" || role === "ADMIN") {
+          router.push("/admin");
+        } else if (role === "AGENT" || role === "RETAILER") {
+          router.push("/agent/dashboard");
+        } else if (role === "DEVELOPER") {
+          router.push("/developer/dashboard");
         } else {
           router.push(callbackUrl);
         }
       } else {
-        setError("Login failed. Please try again.");
+        router.push(callbackUrl);
       }
+
+      setLoading(false);
+
     } catch (err) {
       console.error("Login error:", err);
       setError("An unexpected error occurred. Please try again later.");
-    } finally {
       setLoading(false);
     }
   };
 
   // ============================================
-  // SIGN UP HANDLER
+  // SIGN UP HANDLER - OPTIMIZED
   // ============================================
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -512,6 +517,7 @@ export default function AuthPage() {
         throw new Error(result.error || "Registration failed");
       }
 
+      // ✅ Auto sign in after registration
       const signInResult = await signIn("credentials", {
         email: signUpData.email,
         password: signUpData.password,
@@ -519,28 +525,31 @@ export default function AuthPage() {
       });
 
       if (signInResult?.error) {
+        // If auto sign-in fails, go to login page
         router.push("/auth?registered=true");
         setSignUpLoading(false);
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        
-        const sessionRes = await fetch("/api/auth/session");
-        const session = await sessionRes.json();
-
-        if (session?.user) {
-          const { role: userRole } = session.user;
-          if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") {
-            router.push("/admin");
-          } else if (userRole === "DEVELOPER") {
-            router.push("/developer/dashboard");
-          } else {
-            router.push(callbackUrl);
-          }
-        } else {
-          router.push("/auth?registered=true");
-        }
-        setSignUpLoading(false);
+        return;
       }
+
+      // ✅ Get session and redirect in one step (no artificial delay)
+      const sessionRes = await fetch("/api/auth/session");
+      const session = await sessionRes.json();
+
+      if (session?.user) {
+        const { role: userRole } = session.user;
+        if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") {
+          router.push("/admin");
+        } else if (userRole === "DEVELOPER") {
+          router.push("/developer/dashboard");
+        } else {
+          router.push(callbackUrl);
+        }
+      } else {
+        router.push("/auth?registered=true");
+      }
+
+      setSignUpLoading(false);
+
     } catch (err: any) {
       console.error("Registration error:", err);
       setSignUpError(err.message);
@@ -894,16 +903,15 @@ export default function AuthPage() {
             {/* Mobile Logo */}
             <div className="lg:hidden mb-6">
               <div className="flex items-center justify-center gap-2 mb-2">
-              <div className="w-14 h-14 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
-                <img
-                  src="/uploads/log-icon.jpeg"
-                  alt="Bilscore"
-                  className="h-10 w-10 object-cover rounded-lg"
-                />
-              </div>
+                <div className="w-14 h-14 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                  <img
+                    src="/uploads/log-icon.jpeg"
+                    alt="Bilscore"
+                    className="h-10 w-10 object-cover rounded-lg"
+                  />
+                </div>
                 <span className="text-2xl font-bold text-[#1e293b]">bilscore</span>
               </div>
-          
             </div>
 
             {/* Form Card */}
@@ -990,9 +998,8 @@ export default function AuthPage() {
               {/* ========================================== */}
               {activeTab === "signin" && (
                 <>
-                  {/* Welcome Message */}
                   <div className="mb-6 text-center">
-                    <h2 className="text-xl font-bold text-[#1e293b]">Welcome Back </h2>
+                    <h2 className="text-xl font-bold text-[#1e293b]">Welcome Back</h2>
                     <p className="text-sm text-gray-500 mt-0.5">Sign in to continue managing your payments</p>
                   </div>
 
@@ -1086,9 +1093,8 @@ export default function AuthPage() {
               {/* ========================================== */}
               {activeTab === "signup" && (
                 <>
-                  {/* Welcome Message */}
                   <div className="mb-5 text-center">
-                    <h2 className="text-xl font-bold text-[#1e293b]">Create Your Account </h2>
+                    <h2 className="text-xl font-bold text-[#1e293b]">Create Your Account</h2>
                     <p className="text-sm text-gray-500 mt-0.5">Start managing your bills, airtime, and data in minutes</p>
                   </div>
 

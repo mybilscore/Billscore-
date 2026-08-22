@@ -1,14 +1,15 @@
-// app/qr/display/[id]/page.client.tsx - DARKER TEXT FOR THERMAL PRINTING
-
+// app/qr/display/[id]/page.client.tsx
 "use client";
 
 import { useRef } from "react";
+import Image from "next/image";
 import QRCode from "react-qr-code";
 import {
   Shield,
   Phone,
   Mail,
   Printer,
+  CheckCircle,
 } from "lucide-react";
 import { generateQRUrl } from "~/lib/qr-hash";
 
@@ -76,6 +77,18 @@ export function QRDisplayClient({
           </div>
         )}
 
+        {/* ✅ Valid Badge */}
+        {!isExpired && (
+          <div className="mb-2 bg-green-50 border-2 border-green-500 rounded-lg p-1 text-center print:mb-1 print:border-green-700">
+            <div className="flex items-center justify-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-green-600 print:text-green-800" />
+              <p className="text-[9px] font-bold text-green-700 uppercase tracking-wider print:text-[8px] print:text-green-900">
+                ✅ Valid QR Code
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ✅ QR Code - MAXIMUM SIZE */}
         <div ref={qrRef} className="flex justify-center mb-3 print:mb-2">
           <div className="rounded-xl border-2 border-gray-300 bg-white p-3 print:border-4 print:border-black">
@@ -127,11 +140,15 @@ export function QRDisplayClient({
         {/* Divider */}
         <div className="border-t border-gray-300 my-2 print:my-1.5 print:border-black" />
 
-        {/* ✅ Bilscore Branding - Darker */}
+        {/* ✅ Bilscore Branding - WITH LOGO IMAGE */}
         <div className="text-center mb-2 print:mb-1.5">
           <div className="flex items-center justify-center gap-2">
-            <div className="h-6 w-6 rounded-full bg-[#1e293b] flex items-center justify-center print:h-5 print:w-5 print:border-2 print:border-black print:bg-white">
-              <span className="text-white text-xs font-bold print:text-black print:text-[10px]">B</span>
+            <div className="h-8 w-8 rounded-lg overflow-hidden flex-shrink-0 print:h-7 print:w-7 print:border-2 print:border-black">
+              <img
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                className="h-full w-full object-cover"
+              />
             </div>
             <span className="text-base font-bold text-gray-900 print:text-black tracking-tight">Bilscore</span>
             <span className="text-[10px] text-gray-500 print:text-black">|</span>
@@ -260,6 +277,12 @@ export function QRDisplayClient({
           .print\\:w-5 {
             width: 20px !important;
           }
+          .print\\:h-7 {
+            height: 28px !important;
+          }
+          .print\\:w-7 {
+            width: 28px !important;
+          }
           .print\\:border-2 {
             border-width: 2px !important;
           }
@@ -361,6 +384,13 @@ export function QRDisplayClient({
           }
           .print\\:font-bold {
             font-weight: 700 !important;
+          }
+          /* Ensure logo prints properly */
+          .print\\:rounded-none {
+            border-radius: 0 !important;
+          }
+          .print\\:overflow-hidden {
+            overflow: hidden !important;
           }
         }
       `}</style>

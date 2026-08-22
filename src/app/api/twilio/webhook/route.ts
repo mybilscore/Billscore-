@@ -1,4 +1,5 @@
-// app/api/twilio/webhook/route.ts
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
@@ -26,6 +27,7 @@ import {
   isPalmPaySimulationMode 
 } from "~/lib/palmpay/palmpay-wallet.service";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+import { generateQRUrl } from "~/lib/qr-hash";
 
 // ============================================================
 // HELPER: Generate Short Validation Token (for link)
@@ -38,6 +40,35 @@ function generateValidationToken(): string {
     token += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return token;
+}
+
+// ============================================================
+// GENERATE QR CODE FOR METER
+// ============================================================
+
+async function generateMeterQRCode(userId: string, meterNumber: string, disco: string): Promise<string> {
+  try {
+    const appUrl = getAppUrl();
+    const baseUrl = appUrl;
+    
+    const qrValue = generateQRUrl(baseUrl, {
+      identifier: meterNumber,
+      type: "electricity",
+      provider: disco,
+    });
+    
+    const url = new URL(qrValue);
+    const params = new URLSearchParams(url.search);
+    const hash = params.get('h');
+    const expiresAt = params.get('e');
+    
+    const qrDisplayLink = `${baseUrl}/qr/display/${meterNumber}?t=electricity&p=${encodeURIComponent(disco)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+    
+    return qrDisplayLink;
+  } catch (error) {
+    console.error("QR code generation error:", error);
+    return "";
+  }
 }
 
 // ============================================================
@@ -82,19 +113,332 @@ function getAppUrl(): string {
 // ============================================================
 
 function getApiUrl(): string {
-  // In production, use the actual domain
   if (process.env.NODE_ENV === 'production') {
-    // Use the same URL as the app
     return process.env.NEXTAUTH_URL || 
            process.env.NEXT_PUBLIC_APP_URL || 
            process.env.APP_URL ||
            'https://app.bilscore.com';
   }
   
-  // In development, use localhost
   return process.env.NEXT_PUBLIC_API_URL || 
          process.env.NEXTAUTH_URL || 
          'http://localhost:3000';
+}
+
+// ============================================================
+// DATA PLAN CATEGORY MAPPING
+// ============================================================
+
+// ✅ Map plan to category based on validity
+function getPlanCategoryForWhatsApp(plan: any): string {
+  // If planType is SME, keep as SME
+  if (plan.planType?.toUpperCase() === 'SME') {
+    return 'SME';
+  }
+
+  // For GIFTING or other types, determine by validity
+  const validity = plan.validity || 0;
+  const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
+
+  // Map based on validity duration
+  if (unit === 'HOURS' || unit === 'MINUTES') {
+    return 'Hourly';
+  }
+  
+  if (unit === 'DAYS') {
+    if (validity <= 1) return 'Daily';
+    if (validity <= 7) return 'Weekly';
+    if (validity <= 30) return 'Monthly';
+    if (validity <= 60) return '2 Monthly';
+    if (validity <= 365) return 'Yearly';
+    return 'Monthly';
+  }
+  
+  if (unit === 'MONTHS') {
+    if (validity <= 1) return 'Monthly';
+    if (validity <= 2) return '2 Monthly';
+    if (validity <= 12) return 'Yearly';
+    return 'Monthly';
+  }
+  
+  if (unit === 'YEARS') {
+    if (validity <= 1) return 'Yearly';
+    return 'Yearly';
+  }
+
+  return 'Monthly';
+}
+
+// ✅ Category order for display
+const CATEGORY_ORDER = ['SME', 'Daily', 'Weekly', 'Monthly', '2 Monthly', 'Yearly', 'Gifting', 'Hourly'];
+
+function sortCategoriesForDisplay(categories: any[]) {
+  return [...categories].sort((a, b) => {
+    const aIndex = CATEGORY_ORDER.indexOf(a.name);
+    const bIndex = CATEGORY_ORDER.indexOf(b.name);
+    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+  });
+}
+
+// ============================================================
+// GET AVAILABLE PLANS FOR WHATSAPP WITH CATEGORIES
+// ============================================================
+
+async function getAvailablePlansForWhatsApp(): Promise<string> {
+  try {
+    const apiUrl = getApiUrl();
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
+    
+    console.log(`📡 [WhatsApp] Fetching plans from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
+      return getFallbackPlans();
+    }
+
+    const result = await response.json();
+    
+    if (result.success && result.data?.plans) {
+      const { plans } = result.data;
+      let message = "📱 *Available Data Plans*\n\n";
+      
+      for (const provider of plans) {
+        const networkName = provider.name;
+        message += `*${networkName}*\n`;
+        
+        // Sort categories by order
+        const sortedCategories = sortCategoriesForDisplay(provider.categories || []);
+        
+        for (const category of sortedCategories) {
+          const planSizes = category.plans
+            .filter((plan: any) => plan.price > 0)
+            .map((plan: any) => plan.data)
+            .join(', ');
+          
+          if (planSizes) {
+            message += `  *${category.name}*: ${planSizes}\n`;
+          }
+        }
+        message += '\n';
+      }
+      
+      message += `To buy data: DATA [phone] [plan]\n`;
+      message += `Example: DATA 08012345678 1GB\n\n`;
+      message += `To see plans for a specific network:\n`;
+      message += `PLANS [network]\n`;
+      message += `Example: PLANS MTN`;
+      
+      return message;
+    }
+
+    console.warn(`⚠️ [WhatsApp] No plans data from API, using fallback`);
+    return getFallbackPlans();
+
+  } catch (error) {
+    console.error('❌ [WhatsApp] Error fetching plans:', error);
+    return getFallbackPlans();
+  }
+}
+
+// ============================================================
+// GET PLANS FOR SPECIFIC NETWORK WITH CATEGORIES
+// ============================================================
+
+async function getNetworkPlansWithCategories(network: string): Promise<string> {
+  try {
+    const apiUrl = getApiUrl();
+    const networkEnum = mapNetwork(network);
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${networkEnum}`;
+    
+    console.log(`📡 [WhatsApp] Fetching network plans from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ [WhatsApp] Failed to fetch network plans: ${response.status}`);
+      return `Could not fetch plans for ${network}. Please try again.`;
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.data?.plans) {
+      return `No plans available for ${network}.`;
+    }
+
+    const { plans } = result.data;
+    const networkProvider = plans.find((p: any) => 
+      p.name.toLowerCase() === network.toLowerCase()
+    );
+
+    if (!networkProvider || !networkProvider.categories) {
+      return `No plans found for ${network}.`;
+    }
+
+    const sortedCategories = sortCategoriesForDisplay(networkProvider.categories);
+
+    let message = `📱 *${network} Data Plans*\n\n`;
+    
+    for (const category of sortedCategories) {
+      message += `*${category.name}*\n`;
+      for (const plan of category.plans) {
+        if (plan.price > 0) {
+          const validity = plan.validity ? ` (${plan.validity})` : '';
+          message += `  ${plan.data}${validity} - NGN ${plan.price.toFixed(2)}\n`;
+        }
+      }
+      message += '\n';
+    }
+
+    message += `To buy: DATA [phone] [plan]\n`;
+    message += `Example: DATA 08012345678 1GB`;
+    
+    return message;
+
+  } catch (error) {
+    console.error('❌ [WhatsApp] Error fetching network plans:', error);
+    return `Could not fetch plans for ${network}. Please try again.`;
+  }
+}
+
+// ============================================================
+// FALLBACK PLANS WITH CATEGORIES
+// ============================================================
+
+function getFallbackPlans(): string {
+  return `📱 *Available Data Plans*
+
+*MTN*
+  *SME*: 100MB, 200MB, 500MB
+  *Daily*: 50MB, 100MB, 200MB, 500MB
+  *Weekly*: 1GB, 2GB
+  *Monthly*: 3GB, 5GB, 10GB, 20GB
+  *2 Monthly*: 15GB, 25GB
+  *Yearly*: 50GB, 100GB
+
+*GLO*
+  *Daily*: 50MB, 100MB, 200MB
+  *Weekly*: 1GB, 2GB
+  *Monthly*: 3GB, 5GB, 10GB
+  *2 Monthly*: 12GB
+
+*AIRTEL*
+  *Daily*: 50MB, 100MB, 200MB
+  *Weekly*: 1GB, 2GB
+  *Monthly*: 3GB, 5GB, 8GB
+  *2 Monthly*: 10GB, 20GB
+
+*9MOBILE*
+  *Daily*: 50MB, 100MB, 200MB
+  *Weekly*: 1GB
+  *Monthly*: 2GB, 5GB
+
+To buy data: DATA [phone] [plan]
+Example: DATA 08012345678 1GB
+
+To see plans for a specific network:
+PLANS [network]
+Example: PLANS MTN`;
+}
+
+// ============================================================
+// FIND DATA PLAN FROM VENDOR API WITH CATEGORY SUPPORT
+// ============================================================
+
+async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
+  try {
+    const apiUrl = getApiUrl();
+    const networkEnum = mapNetwork(network);
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${networkEnum}`;
+    
+    console.log(`📡 [WhatsApp] Finding plan from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
+      return null;
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.data?.plans) {
+      return null;
+    }
+
+    const { plans } = result.data;
+    const normalizedQuery = planQuery.toLowerCase().trim();
+    
+    let mbValue = 0;
+    const gbMatch = normalizedQuery.match(/(\d+\.?\d*)\s*gb/i);
+    const mbMatch = normalizedQuery.match(/(\d+)\s*mb/i);
+    if (gbMatch) mbValue = parseFloat(gbMatch[1]) * 1024;
+    else if (mbMatch) mbValue = parseFloat(mbMatch[1]);
+
+    let foundPlan = null;
+    let closestPlan = null;
+    let closestDiff = Infinity;
+
+    for (const provider of plans) {
+      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
+      
+      for (const category of provider.categories || []) {
+        for (const plan of category.plans || []) {
+          const planData = plan.data?.toLowerCase() || '';
+          
+          // Exact match
+          if (planData === normalizedQuery || 
+              planData === `${mbValue}mb` || 
+              planData === `${mbValue/1024}gb`) {
+            return { ...plan, provider: provider.name, category: category.name };
+          }
+
+          // Partial match
+          if (!foundPlan && (planData.includes(normalizedQuery) || 
+              normalizedQuery.includes(planData))) {
+            foundPlan = { ...plan, provider: provider.name, category: category.name };
+          }
+
+          // Closest match by MB
+          if (mbValue > 0 && plan.amountMB) {
+            const diff = Math.abs(plan.amountMB - mbValue);
+            if (diff < closestDiff) {
+              closestDiff = diff;
+              closestPlan = { ...plan, provider: provider.name, category: category.name };
+            }
+          }
+        }
+      }
+    }
+
+    return foundPlan || closestPlan || null;
+
+  } catch (error) {
+    console.error('❌ [WhatsApp] Error finding data plan:', error);
+    return null;
+  }
 }
 
 // ============================================================
@@ -103,17 +447,13 @@ function getApiUrl(): string {
 
 export async function POST(request: NextRequest) {
   try {
-    // Log raw request info
     console.log(`📨 [Twilio Webhook] Request received`);
     console.log(`  Method: ${request.method}`);
     console.log(`  URL: ${request.url}`);
     console.log(`  Content-Type: ${request.headers.get('content-type')}`);
     
-    // Parse form data
     const formData = await request.formData();
     
-    // Log all form fields
-    console.log(`  Form fields:`);
     let body = "";
     let from = "";
     let to = "";
@@ -127,7 +467,6 @@ export async function POST(request: NextRequest) {
       if (key === "MessageSid") messageSid = value.toString();
     }
     
-    // Also try to get from JSON body if form data is empty
     if (!body && request.body) {
       try {
         const jsonBody = await request.json();
@@ -136,12 +475,9 @@ export async function POST(request: NextRequest) {
         from = jsonBody.From || jsonBody.from || "";
         to = jsonBody.To || jsonBody.to || "";
         messageSid = jsonBody.MessageSid || jsonBody.messageSid || "";
-      } catch (e) {
-        // Not JSON, ignore
-      }
+      } catch (e) {}
     }
 
-    // Normalize phone numbers
     const whatsappFrom = from ? from.replace("whatsapp:", "") : "";
     const whatsappTo = to ? to.replace("whatsapp:", "") : "";
 
@@ -151,7 +487,6 @@ export async function POST(request: NextRequest) {
     console.log(`  Body: "${body}"`);
     console.log(`  MessageSid: ${messageSid}`);
 
-    // If body is empty, return help response
     if (!body || body.trim() === "") {
       console.log(`⚠️ [Twilio Webhook] Empty message body - returning help response`);
       const helpResponse = `Welcome to Bilscore!
@@ -169,7 +504,6 @@ Or visit: ${getAppUrl()}`;
       });
     }
 
-    // Check if user exists
     let user = await prisma.user.findFirst({
       where: { phone: whatsappFrom },
       include: { wallet: true },
@@ -207,7 +541,6 @@ Reply with REG and your details to create your account!`;
       });
     }
 
-    // Update or create channel with upsert
     try {
       await prisma.channel.upsert({
         where: {
@@ -558,9 +891,6 @@ REG [Full Name] [Email] [Username]
 
 Example: REG John Doe john@email.com johndoe
 
-If you don't have an email, you can skip it:
-REG John Doe - johndoe
-
 Or visit our website:
 ${getAppUrl()}/auth`;
 
@@ -672,159 +1002,7 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 // FALLBACK FUNCTIONS
 // ============================================================
 
-function getFallbackPlans(): string {
-  return `Available plans:
-MTN: 1GB, 2GB, 5GB, 10GB
-GLO: 1GB, 3GB, 5GB
-AIRTEL: 1GB, 3GB, 8GB
-9MOBILE: 1GB, 2GB, 5GB
-
-Example: DATA 08012345678 1GB`;
-}
-
-// ============================================================
-// GET AVAILABLE PLANS FOR WHATSAPP
-// ============================================================
-
-async function getAvailablePlansForWhatsApp(): Promise<string> {
-  try {
-    const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
-    
-    console.log(`📡 [WhatsApp] Fetching plans from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
-      return getFallbackPlans();
-    }
-
-    const result = await response.json();
-    
-    if (result.success && result.data?.plans) {
-      const { plans } = result.data;
-      let message = "Available plans:\n";
-      const groupedPlans: Record<string, string[]> = {};
-      
-      for (const provider of plans) {
-        const networkName = provider.name;
-        if (!groupedPlans[networkName]) {
-          groupedPlans[networkName] = [];
-        }
-        for (const category of provider.categories || []) {
-          for (const plan of category.plans || []) {
-            if (plan.price && plan.price > 0) {
-              groupedPlans[networkName].push(plan.data);
-            }
-          }
-        }
-      }
-      
-      for (const [network, planSizes] of Object.entries(groupedPlans)) {
-        const uniquePlans = [...new Set(planSizes)];
-        message += `${network}: ${uniquePlans.join(', ')}\n`;
-      }
-      
-      return message;
-    }
-
-    console.warn(`⚠️ [WhatsApp] No plans data from API, using fallback`);
-    return getFallbackPlans();
-
-  } catch (error) {
-    console.error('❌ [WhatsApp] Error fetching plans:', error);
-    return getFallbackPlans();
-  }
-}
-
-// ============================================================
-// FIND DATA PLAN FROM VENDOR API
-// ============================================================
-
-async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
-  try {
-    const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(network)}`;
-    
-    console.log(`📡 [WhatsApp] Finding plan from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ [WhatsApp] Failed to fetch plans: ${response.status}`);
-      return null;
-    }
-
-    const result = await response.json();
-    
-    if (!result.success || !result.data?.plans) {
-      return null;
-    }
-
-    const { plans } = result.data;
-    const normalizedQuery = planQuery.toLowerCase().trim();
-    
-    let mbValue = 0;
-    const gbMatch = normalizedQuery.match(/(\d+\.?\d*)\s*gb/i);
-    const mbMatch = normalizedQuery.match(/(\d+)\s*mb/i);
-    if (gbMatch) mbValue = parseFloat(gbMatch[1]) * 1024;
-    else if (mbMatch) mbValue = parseFloat(mbMatch[1]);
-
-    let foundPlan = null;
-    let closestPlan = null;
-    let closestDiff = Infinity;
-
-    for (const provider of plans) {
-      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
-      
-      for (const category of provider.categories || []) {
-        for (const plan of category.plans || []) {
-          const planData = plan.data?.toLowerCase() || '';
-          
-          if (planData === normalizedQuery || 
-              planData === `${mbValue}mb` || 
-              planData === `${mbValue/1024}gb`) {
-            return { ...plan, provider: provider.name };
-          }
-
-          if (!foundPlan && (planData.includes(normalizedQuery) || 
-              normalizedQuery.includes(planData))) {
-            foundPlan = { ...plan, provider: provider.name };
-          }
-
-          if (mbValue > 0 && plan.amountMB) {
-            const diff = Math.abs(plan.amountMB - mbValue);
-            if (diff < closestDiff) {
-              closestDiff = diff;
-              closestPlan = { ...plan, provider: provider.name };
-            }
-          }
-        }
-      }
-    }
-
-    return foundPlan || closestPlan || null;
-
-  } catch (error) {
-    console.error('❌ [WhatsApp] Error finding data plan:', error);
-    return null;
-  }
-}
+// Fallback is now handled by getFallbackPlans() above
 
 // ============================================================
 // GET AVAILABLE DISCOS FOR WHATSAPP
@@ -1157,10 +1335,10 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 }
 
 // ============================================================
-// ADD METER WITH VERIFICATION
+// ADD METER WITH VERIFICATION AND QR CODE
 // ============================================================
 
-async function addMeterWithVerification(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
+async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
   try {
     const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
     const discoUpper = disco.toUpperCase();
@@ -1205,13 +1383,22 @@ Status: ${verificationResult.data?.status || "ACTIVE"}`;
         where: { id: existing.id },
         data: { disco: discoUpper, name: name || existing.name, updatedAt: new Date() },
       });
+      
+      const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
+      
       return `Meter updated successfully!${verificationMessage}
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || existing.name}
 
-Type ELECTRICITY to see all your meters and buy power!`;
+📱 Quick Buy QR Code:
+${qrLink}
+
+Scan this QR code to quickly buy electricity for this meter.
+You can also find this QR code in your saved meters.
+
+Type ELECTRIC to see all your meters and buy power!`;
     }
 
     await prisma.savedMeter.create({
@@ -1225,13 +1412,21 @@ Type ELECTRICITY to see all your meters and buy power!`;
       },
     });
 
+    const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
+
     return `Meter added successfully!${verificationMessage}
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || `${discoUpper} Meter`}
 
-Type ELECTRICITY to see all your meters and buy power!`;
+📱 Quick Buy QR Code:
+${qrLink}
+
+Scan this QR code to quickly buy electricity for this meter.
+You can also find this QR code in your saved meters.
+
+Type ELECTRIC to see all your meters and buy power!`;
   } catch (error) {
     console.error("Add meter error:", error);
     return `Failed to add meter. Please try again.`;
@@ -1342,7 +1537,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     message += `   ${meter.meterNumber}\n\n`;
   });
 
-  message += `To buy electricity: ELECTRICITY [number] [amount]
+  message += `To buy electricity: ELECTRIC [number] [amount]
 To delete: DELETEMETER [meter_number]
 To set default: SETDEFAULTMETER [meter_number]`;
 
@@ -1813,6 +2008,10 @@ After confirming, your airtime will be sent.`;
   }
 }
 
+// ============================================================
+// PROCESS DATA PURCHASE WHATSAPP - UPDATED WITH CATEGORIES
+// ============================================================
+
 async function processDataPurchaseWhatsApp(user: any, phoneNumber: string, planQuery: string): Promise<string> {
   try {
     let cleanedNumber = phoneNumber.replace(/\D/g, '');
@@ -1841,12 +2040,11 @@ ${await getAvailablePlansForWhatsApp()}`;
     const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
     
     if (!planData) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
+      // Show network-specific plans with categories
+      const networkPlans = await getNetworkPlansWithCategories(detectedNetwork);
       return `No data plan found for ${detectedNetwork} with "${planQuery}".
 
-${availablePlans}
-
-Example: DATA 08012345678 1GB`;
+${networkPlans}`;
     }
 
     const amount = Number(planData.price);
@@ -1902,6 +2100,7 @@ Please fund your wallet and try again.`;
           planQuery: planQuery,
           planName: planData.name,
           dataAmount: planData.amountMB,
+          category: planData.category || 'Monthly',
           customerId: customer.id,
           pinVerified: false,
         },
@@ -1941,6 +2140,7 @@ Please fund your wallet and try again.`;
           phoneNumber: normalizedPhone,
           network: detectedNetwork,
           planQuery: planQuery,
+          category: planData.category || 'Monthly',
         },
       },
     });
@@ -1949,14 +2149,17 @@ Please fund your wallet and try again.`;
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
     const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+    const categoryDisplay = planData.category || 'Monthly';
+    const validityDisplay = planData.validity || '30 days';
 
-    return `Data Purchase Initiated!
+    return `📱 *Data Purchase Initiated!*
 
 Phone: ${normalizedPhone}
 Plan: ${dataDisplay} (${planData.name || detectedNetwork})
+Category: *${categoryDisplay}*
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
-Validity: ${planData.validity || "30 days"}
+Validity: ${validityDisplay}
 Reference: ${transaction.id.substring(0, 10)}
 
 To complete this purchase, please confirm your PIN:
@@ -1972,6 +2175,10 @@ After confirming, your data bundle will be activated.`;
     return `Failed to initiate data purchase. Please try again.`;
   }
 }
+
+// ============================================================
+// PROCESS ELECTRICITY PURCHASE WHATSAPP
+// ============================================================
 
 async function processElectricityPurchaseWhatsApp(
   user: any, 
@@ -2096,6 +2303,10 @@ After confirming, your electricity token will be sent here.`;
     return `Failed to initiate electricity purchase. Please try again.`;
   }
 }
+
+// ============================================================
+// PROCESS CABLE PURCHASE WHATSAPP
+// ============================================================
 
 async function processCablePurchaseWhatsApp(
   user: any, 
@@ -2265,6 +2476,10 @@ After confirming, your subscription will be activated.`;
   }
 }
 
+// ============================================================
+// PROCESS EDUCATION PURCHASE WHATSAPP
+// ============================================================
+
 async function processEducationPurchaseWhatsApp(
   user: any,
   productType: string,
@@ -2417,6 +2632,10 @@ After confirming, your ${quantity > 1 ? 'PINs will' : 'PIN will'} be sent to you
     return `Failed to initiate education purchase. Please try again.`;
   }
 }
+
+// ============================================================
+// PROCESS SUBSCRIPTION WHATSAPP
+// ============================================================
 
 async function processSubscriptionWhatsApp(
   user: any,
@@ -2639,14 +2858,26 @@ Wallet Status: ${wallet?.isActive ? "Active" : "Inactive"}
 Reply with HELP for available commands.`;
   }
 
-  // ========== AIRTIME ==========
+  // ============================================================
+  // ✅ AIRTIME - AUTO-DETECT NUMBER IF NOT PROVIDED
+  // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     const [, phoneNumber, amount] = parts;
-    if (!phoneNumber || !amount) {
+    
+    // ✅ If no phone number provided, use user's registered number
+    let targetPhone = phoneNumber;
+    if (!phoneNumber || phoneNumber.length < 10) {
+      targetPhone = user.phone;
+      console.log(`📱 [WhatsApp] No phone number provided, using registered number: ${targetPhone}`);
+    }
+    
+    if (!amount) {
       return `To buy airtime, reply with:
-AIRTIME [phone number] [amount]
+AIRTIME [amount]
+Or AIRTIME [phone number] [amount]
 
-Example: AIRTIME 08012345678 500
+Example: AIRTIME 500 (buys for your registered number)
+Example: AIRTIME 08012345678 500 (buys for a different number)
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE
 Minimum: NGN 50 | Maximum: NGN 50,000`;
@@ -2655,7 +2886,16 @@ Minimum: NGN 50 | Maximum: NGN 50,000`;
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
       return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
-Example: AIRTIME 08012345678 500`;
+Example: AIRTIME 500`;
+    }
+
+    // ✅ Auto-detect network from the target phone number
+    const detectedNetwork = detectNetworkFromPhone(targetPhone);
+    if (!detectedNetwork) {
+      return `Could not detect network for ${targetPhone}.
+Please ensure the phone number is correct.
+
+Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
     }
 
     if (!user.pinHash) {
@@ -2669,20 +2909,45 @@ Example: PIN 1234
 Your PIN is required for all transactions.`;
     }
 
-    return await processAirtimePurchaseWhatsApp(user, phoneNumber, amountNum);
+    return await processAirtimePurchaseWhatsApp(user, targetPhone, amountNum);
   }
 
-  // ========== DATA ==========
-  if (command.startsWith("DATA")) {
+  // ============================================================
+  // ✅ DATA - AUTO-DETECT NUMBER IF NOT PROVIDED
+  // ============================================================
+  if (command.startsWith("DATA") || command === "DATA") {
     const [, phoneNumber, planQuery] = parts;
-    if (!phoneNumber || !planQuery) {
+    
+    // ✅ If no phone number provided, use user's registered number
+    let targetPhone = phoneNumber;
+    if (!phoneNumber || phoneNumber.length < 10) {
+      targetPhone = user.phone;
+      console.log(`📱 [WhatsApp] No phone number provided, using registered number: ${targetPhone}`);
+    }
+    
+    if (!planQuery) {
       const availablePlans = await getAvailablePlansForWhatsApp();
       return `To buy data, reply with:
-DATA [phone number] [plan]
+DATA [plan]
+Or DATA [phone number] [plan]
 
-${availablePlans}
+Example: DATA 1GB (buys for your registered number)
+Example: DATA 08012345678 1GB (buys for a different number)
 
-Example: DATA 08012345678 1GB`;
+To see plans for a specific network:
+PLANS [network]
+Example: PLANS MTN
+
+${availablePlans}`;
+    }
+
+    // ✅ Auto-detect network from the target phone number
+    const detectedNetwork = detectNetworkFromPhone(targetPhone);
+    if (!detectedNetwork) {
+      return `Could not detect network for ${targetPhone}.
+Please ensure the phone number is correct.
+
+${await getAvailablePlansForWhatsApp()}`;
     }
 
     if (!user.pinHash) {
@@ -2696,10 +2961,32 @@ Example: PIN 1234
 Your PIN is required for all transactions.`;
     }
 
-    return await processDataPurchaseWhatsApp(user, phoneNumber, planQuery);
+    return await processDataPurchaseWhatsApp(user, targetPhone, planQuery);
   }
 
-  // ========== METER MANAGEMENT ==========
+  // ============================================================
+  // ✅ PLANS - VIEW PLANS FOR SPECIFIC NETWORK
+  // ============================================================
+  if (command.startsWith("PLANS") || command === "PLAN") {
+    const parts = body.split(" ").filter(p => p.length > 0);
+    if (parts.length >= 2) {
+      const network = parts[1].toUpperCase();
+      const validNetworks = ["MTN", "GLO", "AIRTEL", "9MOBILE"];
+      if (validNetworks.includes(network)) {
+        return await getNetworkPlansWithCategories(network);
+      } else {
+        return `Invalid network. Available: ${validNetworks.join(", ")}
+Example: PLANS MTN`;
+      }
+    }
+    
+    // If no network specified, show all plans
+    return await getAvailablePlansForWhatsApp();
+  }
+
+  // ============================================================
+  // ✅ METER MANAGEMENT - WITH QR CODE
+  // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
@@ -2718,7 +3005,7 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
 
     const [, meterNumber, disco, ...nameParts] = parts;
     const name = nameParts.join(" ");
-    return await addMeterWithVerification(user.id, meterNumber, disco, name);
+    return await addMeterWithVerificationAndQR(user.id, meterNumber, disco, name);
   }
 
   if (command === "METERS" || command === "LIST METERS") {
@@ -2790,8 +3077,10 @@ Or: SETDEFAULTDECODER 1234567890`;
     return await setDefaultDecoder(user.id, decoderId);
   }
 
-  // ========== ELECTRICITY ==========
-  if (command === "ELECTRICITY" || command === "ELEC" || command === "POWER") {
+  // ============================================================
+  // ✅ ELECTRICITY - CHANGED TO ELECTRIC
+  // ============================================================
+  if (command === "ELECTRIC" || command === "ELEC" || command === "POWER") {
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -2809,7 +3098,23 @@ ${discosList}
 
 Example: ADDMETER 1234567890 ABUJA HOME
 
-After adding, you can buy electricity by just typing ELECTRICITY!`;
+After adding, you can buy electricity by just typing ELECTRIC!`;
+    }
+
+    // ✅ If only one meter, auto-select it
+    if (meters.length === 1) {
+      const meter = meters[0];
+      return `Buy Electricity:
+
+Meter: ${meter.meterNumber}
+DisCo: ${meter.disco}
+Name: ${meter.name || 'Meter'}
+
+Reply with: ELECTRIC [amount]
+
+Example: ELECTRIC 5000
+
+Or type ELECTRIC to see all saved meters.`;
     }
 
     let message = "Your Saved Meters:\n\n";
@@ -2820,17 +3125,66 @@ After adding, you can buy electricity by just typing ELECTRICITY!`;
       message += `   ${meter.meterNumber}\n\n`;
     });
 
-    message += `Reply with: ELECTRICITY [number] [amount]\n`;
-    message += `Example: ELECTRICITY 1 5000\n\n`;
+    message += `Reply with: ELECTRIC [index] [amount]\n`;
+    message += `Example: ELECTRIC 1 5000\n\n`;
     message += `To add more meters: ADDMETER [meter] [disco] [name]\n`;
     message += `To get available DisCos: DISCOS`;
 
     return message;
   }
 
-  if (command.startsWith("ELECTRICITY") || command.startsWith("ELEC") || command.startsWith("POWER")) {
+  // ✅ ELECTRICITY PURCHASE
+  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || command.startsWith("POWER")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+
+    if (meters.length === 0) {
+      return `You don't have any saved meters.
+
+To add your first meter:
+ADDMETER [meter_number] [disco_code] [name]
+
+Example: ADDMETER 1234567890 ABUJA HOME`;
+    }
+
+    // ✅ Case 1: Only amount provided (single meter or auto-select default)
+    if (parts.length === 2) {
+      const amountStr = parts[1];
+      const amount = parseFloat(amountStr);
+      
+      if (isNaN(amount) || amount < 100) {
+        return `Invalid amount. Minimum is NGN 100.
+Example: ELECTRIC 5000`;
+      }
+
+      // Find default meter or the only meter
+      let selectedMeter = meters.find(m => m.isDefault) || meters[0];
+      
+      if (!user.pinHash) {
+        return `You need to set a transaction PIN first.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+Your PIN is required for all transactions.`;
+      }
+      
+      return await processElectricityPurchaseWhatsApp(
+        user, 
+        selectedMeter.meterNumber, 
+        amount, 
+        selectedMeter.disco,
+        selectedMeter.meterType || "Prepaid"
+      );
+    }
+
+    // ✅ Case 2: Index and amount provided
     if (parts.length >= 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -2838,18 +3192,13 @@ After adding, you can buy electricity by just typing ELECTRICITY!`;
       
       if (isNaN(index) || index < 0) {
         return `Invalid selection. Please choose a number from the list.
-Example: ELECTRICITY 1 5000`;
+Example: ELECTRIC 1 5000`;
       }
       
       if (isNaN(amount) || amount < 100) {
         return `Invalid amount. Minimum is NGN 100.
-Example: ELECTRICITY 1 5000`;
+Example: ELECTRIC 1 5000`;
       }
-      
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
       
       if (index >= meters.length) {
         return `Invalid selection. Please choose a number from the list.`;
@@ -2876,11 +3225,22 @@ Your PIN is required for all transactions.`;
         selectedMeter.meterType || "Prepaid"
       );
     }
-    
-    if (parts.length === 2) {
-      return `Please specify the amount as well.
-Example: ELECTRICITY ${parts[1]} 5000`;
-    }
+
+    // Show help
+    let message = "Your Saved Meters:\n\n";
+    meters.forEach((meter: any, index: number) => {
+      const defaultTag = meter.isDefault ? " (Default)" : "";
+      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+      message += `   ${meter.disco}\n`;
+      message += `   ${meter.meterNumber}\n\n`;
+    });
+
+    message += `Reply with: ELECTRIC [index] [amount]\n`;
+    message += `Example: ELECTRIC 1 5000\n\n`;
+    message += `Or if you have only one meter: ELECTRIC [amount]\n`;
+    message += `Example: ELECTRIC 5000`;
+
+    return message;
   }
 
   // ========== DISCOS ==========
@@ -3184,10 +3544,14 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
-AIRTIME [phone] [amount] - Buy airtime
-DATA [phone] [plan] - Buy data
-ELECTRICITY - See saved meters
-CABLE - See saved decoders
+AIRTIME [amount] - Buy airtime for your number
+AIRTIME [phone] [amount] - Buy airtime for another number
+DATA [plan] - Buy data for your number
+DATA [phone] [plan] - Buy data for another number
+PLANS [network] - See plans for a specific network (MTN, GLO, AIRTEL, 9MOBILE)
+ELECTRIC - See saved meters
+ELECTRIC [amount] - Buy electricity (auto-selects your meter)
+ELECTRIC [index] [amount] - Buy electricity with meter selection
 ADDMETER [meter] [disco] [name] - Save a meter
 ADDDECODER [decoder] [provider] [name] - Save a decoder
 METERS - List your saved meters
@@ -3213,12 +3577,16 @@ TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
 Airtime & Data:
-AIRTIME [phone] [amount] - Buy airtime
-DATA [phone] [plan] - Buy data
+AIRTIME [amount] - Buy airtime for your number
+AIRTIME [phone] [amount] - Buy airtime for another number
+DATA [plan] - Buy data for your number
+DATA [phone] [plan] - Buy data for another number
+PLANS [network] - View plans by category (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
 
 Electricity:
-ELECTRICITY - Show saved meters
-ELECTRICITY [index] [amount] - Buy electricity
+ELECTRIC - Show saved meters
+ELECTRIC [amount] - Buy electricity (auto-selects default meter)
+ELECTRIC [index] [amount] - Buy electricity with meter selection
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
 DISCOS - Show available DisCos

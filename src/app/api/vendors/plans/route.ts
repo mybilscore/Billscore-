@@ -4,6 +4,72 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { NetworkProvider, PlanStatus, VtuType } from "@prisma/client";
 
+// ✅ Map plan to category based on validity
+function getPlanCategory(plan: any): string {
+  // If plan has explicit category, use it
+  if (plan.category) {
+    return plan.category;
+  }
+
+  // If planType is SME, keep as SME
+  if (plan.planType?.toUpperCase() === 'SME') {
+    return 'SME';
+  }
+
+  // For GIFTING or other types, determine by validity
+  const validity = plan.validity || 0;
+  const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
+
+  // Map based on validity duration
+  if (unit === 'HOURS' || unit === 'MINUTES') {
+    return 'Hourly';
+  }
+  
+  if (unit === 'DAYS') {
+    if (validity <= 1) return 'Daily';
+    if (validity <= 7) return 'Weekly';
+    if (validity <= 30) return 'Monthly';
+    if (validity <= 60) return '2 Monthly';
+    if (validity <= 365) return 'Yearly';
+    return 'Monthly'; // default fallback
+  }
+  
+  if (unit === 'MONTHS') {
+    if (validity <= 1) return 'Monthly';
+    if (validity <= 2) return '2 Monthly';
+    if (validity <= 12) return 'Yearly';
+    return 'Monthly';
+  }
+  
+  if (unit === 'YEARS') {
+    if (validity <= 1) return 'Yearly';
+    return 'Yearly';
+  }
+
+  // Default fallback
+  return 'Monthly';
+}
+
+// ✅ Sort categories in specific order
+function sortCategories(categories: any[]) {
+  const order: Record<string, number> = {
+    'SME': 0,
+    'Daily': 1,
+    'Weekly': 2,
+    'Monthly': 3,
+    '2 Monthly': 4,
+    'Yearly': 5,
+    'Gifting': 6,
+    'Hourly': 7,
+  };
+
+  return categories.sort((a, b) => {
+    const aOrder = order[a.name] ?? 99;
+    const bOrder = order[b.name] ?? 99;
+    return aOrder - bOrder;
+  });
+}
+
 // ✅ Get active vendor for a specific service
 async function getActiveVendor(serviceType: string) {
   const vendorService = await prisma.vendorService.findFirst({
@@ -96,41 +162,61 @@ export async function GET(request: NextRequest) {
         };
       }
 
-      const planTypeKey = plan.planType;
-      if (!groupedByNetwork[networkKey].categories[planTypeKey]) {
-        groupedByNetwork[networkKey].categories[planTypeKey] = {
-          id: planTypeKey.toLowerCase(),
-          name: planTypeKey,
+      // ✅ Determine category based on plan attributes
+      const categoryName = getPlanCategory(plan);
+      
+      if (!groupedByNetwork[networkKey].categories[categoryName]) {
+        groupedByNetwork[networkKey].categories[categoryName] = {
+          id: categoryName.toLowerCase().replace(/\s+/g, '_'),
+          name: categoryName,
           plans: [],
         };
       }
 
-      groupedByNetwork[networkKey].categories[planTypeKey].plans.push({
+      // Get validity display
+      let validityDisplay = '';
+      if (plan.validity && plan.validityUnit) {
+        const unit = plan.validityUnit.toLowerCase();
+        const val = plan.validity;
+        if (val === 1) {
+          validityDisplay = `1 ${unit.slice(0, -1)}`; // Remove 's' for singular
+        } else {
+          validityDisplay = `${val} ${unit}`;
+        }
+      }
+
+      groupedByNetwork[networkKey].categories[categoryName].plans.push({
         id: plan.id,
         name: plan.name,
         data: plan.amountMB >= 1024 
           ? `${(plan.amountMB / 1024).toFixed(1)}GB` 
           : `${plan.amountMB}MB`,
         price: Number(plan.ourPrice),
-        validity: `${plan.validity} ${plan.validityUnit}`.toLowerCase(),
+        validity: validityDisplay || `${plan.validity} ${plan.validityUnit}`.toLowerCase(),
         planCode: plan.vendorPlanId,
         vendorPrice: Number(plan.vendorPrice),
         description: plan.description,
         amountMB: plan.amountMB,
+        planType: plan.planType,
       });
     }
 
-    // ✅ Convert grouped data to array format matching frontend expectations
+    // ✅ Convert grouped data to array format with sorted categories
     const formattedPlans = Object.keys(groupedByNetwork).map((networkKey) => ({
       ...groupedByNetwork[networkKey],
-      categories: Object.keys(groupedByNetwork[networkKey].categories).map((catKey) => ({
-        id: catKey.toLowerCase(),
-        name: catKey,
-        plans: groupedByNetwork[networkKey].categories[catKey].plans,
-      })),
+      categories: sortCategories(
+        Object.keys(groupedByNetwork[networkKey].categories).map((catKey) => ({
+          id: groupedByNetwork[networkKey].categories[catKey].id,
+          name: catKey,
+          plans: groupedByNetwork[networkKey].categories[catKey].plans,
+        }))
+      ),
     }));
 
     console.log(`📊 [VENDOR PLANS API] Formatted ${formattedPlans.length} providers`);
+    console.log(`📊 [VENDOR PLANS API] Categories:`, formattedPlans.map(p => 
+      p.categories.map((c: any) => c.name).join(', ')
+    ));
 
     const response = NextResponse.json({
       success: true,

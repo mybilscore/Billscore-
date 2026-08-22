@@ -1,5 +1,4 @@
-// app/dashboard/buy/electricity/page.client.tsx - COMPLETE UPDATED
-
+// app/dashboard/buy/electricity/page.client.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -45,9 +44,10 @@ import {
   Store,
   ExternalLink,
 } from "lucide-react";
+import { toast } from "sonner";
 
 // ✅ Import QR hash utilities
-import { generateQRUrl } from "~/lib/qr-hash";
+import { generateQRUrl, verifyQRHash } from "~/lib/qr-hash";
 
 // Types
 interface DisCo {
@@ -108,7 +108,49 @@ const formatDate = (dateString: string) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ QR Code Modal - Shows the QR code with download/share options
+// ✅ Generate encrypted QR Display link
+const generateQRDisplayLink = (
+  baseUrl: string,
+  identifier: string,
+  type: string,
+  provider: string
+): string => {
+  // Generate the Buy Now link which contains the hash
+  const buyNowLink = generateQRUrl(baseUrl, {
+    identifier: identifier,
+    type: type,
+    provider: provider,
+  });
+
+  // Extract the hash from the Buy Now link
+  const url = new URL(buyNowLink);
+  const hash = url.searchParams.get('h');
+  const expiresAt = url.searchParams.get('e');
+
+  // Build QR Display link with encrypted hash
+  let displayPath = `/qr/display/${identifier}`;
+  const queryParams = new URLSearchParams();
+
+  if (hash) {
+    queryParams.set('h', hash);
+  }
+
+  queryParams.set('t', type);
+  queryParams.set('p', encodeURIComponent(provider));
+
+  if (expiresAt) {
+    queryParams.set('e', expiresAt);
+  }
+
+  const queryString = queryParams.toString();
+  if (queryString) {
+    displayPath += `?${queryString}`;
+  }
+
+  return `${baseUrl}${displayPath}`;
+};
+
+// ✅ QR Code Modal
 const QRCodeModal = ({
   isOpen,
   onClose,
@@ -151,15 +193,7 @@ const QRCodeModal = ({
   };
 
   const handleCopyQR = () => {
-    // Copy QR code as image (SVG) to clipboard
-    const qrSvg = qrRef.current?.querySelector("svg");
-    if (qrSvg) {
-      const svgData = new XMLSerializer().serializeToString(qrSvg);
-      // For simplicity, we'll copy the link instead
-      handleCopyLink();
-    } else {
-      handleCopyLink();
-    }
+    handleCopyLink();
   };
 
   const handleDownloadQR = async () => {
@@ -247,7 +281,6 @@ const QRCodeModal = ({
             </div>
           </div>
 
-          {/* QR Code */}
           <div ref={qrRef} className="flex justify-center mb-4">
             <div className="rounded-xl border-2 border-gray-200 bg-white p-4 dark:border-gray-700">
               <QRCode
@@ -270,7 +303,6 @@ const QRCodeModal = ({
             </div>
           </div>
 
-          {/* QR Code Actions - Download, Share, Copy QR */}
           <div className="flex gap-2 mb-4">
             <button
               onClick={handleDownloadQR}
@@ -304,7 +336,6 @@ const QRCodeModal = ({
             </button>
           </div>
 
-          {/* ✅ Link Section - Full URL with copy */}
           <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-3 mb-4">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">QR Link</span>
@@ -347,7 +378,6 @@ const QRCodeModal = ({
             )}
           </div>
 
-          {/* Details Grid */}
           <div className="grid grid-cols-3 gap-2 mb-4">
             <div className="rounded-lg border border-gray-200 p-2 dark:border-gray-700 text-center">
               <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</p>
@@ -363,7 +393,6 @@ const QRCodeModal = ({
             </div>
           </div>
 
-          {/* Actions */}
           <div className="space-y-2">
             <button
               onClick={onQuickOrder}
@@ -379,7 +408,7 @@ const QRCodeModal = ({
   );
 };
 
-// ✅ Saved Meters Component with both Buy Now and QR Display links
+// ✅ Saved Meters Component with Encrypted QR Links
 const SavedMeters = ({
   meters,
   onSelect,
@@ -396,7 +425,6 @@ const SavedMeters = ({
   baseUrl: string;
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [copiedBuyNowLink, setCopiedBuyNowLink] = useState<Record<string, boolean>>({});
   const [copiedQRDisplayLink, setCopiedQRDisplayLink] = useState<Record<string, boolean>>({});
 
   if (isLoading) {
@@ -416,17 +444,6 @@ const SavedMeters = ({
   }
 
   const displayMeters = isExpanded ? meters : meters.slice(0, 3);
-
-  const handleCopyBuyNowLink = async (meterNumber: string, link: string) => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopiedBuyNowLink(prev => ({ ...prev, [meterNumber]: true }));
-      setTimeout(() => setCopiedBuyNowLink(prev => ({ ...prev, [meterNumber]: false })), 3000);
-      toast.success("Buy Now link copied!");
-    } catch (error) {
-      toast.error("Failed to copy link");
-    }
-  };
 
   const handleCopyQRDisplayLink = async (meterNumber: string, link: string) => {
     try {
@@ -471,22 +488,14 @@ const SavedMeters = ({
 
       <div className="space-y-2">
         {displayMeters.map((meter) => {
-          // ✅ Generate Buy Now link with full URL (includes hash)
-          const buyNowLink = generateQRUrl(baseUrl, {
-            identifier: meter.meterNumber,
-            type: "electricity",
-            provider: meter.disco,
-          });
-          
-          // ✅ Extract hash and expiresAt from buyNowLink
-          const url = new URL(buyNowLink);
-          const params = new URLSearchParams(url.search);
-          const hash = params.get('h');
-          const expiresAt = params.get('e');
-          
-          // ✅ Build QR Display link with hash parameter
-          const qrDisplayLink = `${baseUrl}/qr/display/${meter.meterNumber}?t=electricity&p=${encodeURIComponent(meter.disco)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
-          
+          // ✅ Generate encrypted QR Display link
+          const qrDisplayLink = generateQRDisplayLink(
+            baseUrl,
+            meter.meterNumber,
+            "electricity",
+            meter.disco
+          );
+
           return (
             <div
               key={meter.id}
@@ -532,33 +541,13 @@ const SavedMeters = ({
                   </p>
                 </div>
               </div>
-              
-              {/* ✅ Buy Now Link - visible on the main page */}
-              {/* <div className="mt-1.5 flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/30 rounded-lg px-2 py-1">
-                <ShoppingBag className="h-3 w-3 text-blue-500 flex-shrink-0" />
-                <span className="text-[9px] font-medium text-blue-600 dark:text-blue-400 flex-shrink-0">Buy Now:</span>
-                <p className="text-[9px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">
-                  {buyNowLink}
-                </p>
-                <button
-                  onClick={() => handleCopyBuyNowLink(meter.meterNumber, buyNowLink)}
-                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  title="Copy Buy Now link"
-                >
-                  {copiedBuyNowLink[meter.meterNumber] ? (
-                    <Check className="h-3 w-3 text-green-500" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </button>
-              </div> */}
-              
-              {/* ✅ QR Display Link - visible on the main page */}
-              {/* <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
+
+              {/* ✅ Encrypted QR Display Link */}
+              <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
                 <LinkIcon className="h-3 w-3 text-gray-400 flex-shrink-0" />
                 <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">QR Link:</span>
                 <p className="text-[9px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">
-                  {qrDisplayLink}
+                  {qrDisplayLink.replace(/^https?:\/\/[^\/]+/, '')}
                 </p>
                 <button
                   onClick={() => handleCopyQRDisplayLink(meter.meterNumber, qrDisplayLink)}
@@ -571,7 +560,7 @@ const SavedMeters = ({
                     <Copy className="h-3 w-3" />
                   )}
                 </button>
-              </div> */}
+              </div>
             </div>
           );
         })}
@@ -836,24 +825,21 @@ export function ElectricityClient({
     ensureWallet();
   }, [user.hasWallet]);
 
-  // ✅ Handle View QR Code - Shows QR modal with Buy Now link
+  // ✅ Handle View QR Code
   const handleViewQR = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
     
-    // Generate the Buy Now QR code value
     const qrValue = generateQRUrl(baseUrl, {
       identifier: identifier,
       type: serviceType.toLowerCase(),
       provider: provider,
     });
     
-    // Extract the hash and params
     const url = new URL(qrValue);
     const params = new URLSearchParams(url.search);
     const hash = params.get('h');
     const expiresAt = params.get('e');
     
-    // ✅ Set QR data with the qrValue and show modal
     setQrData({
       identifier: identifier,
       provider: provider,
@@ -865,30 +851,22 @@ export function ElectricityClient({
     setShowQRModal(true);
   };
 
-  // ✅ Handle Get QR Display Link - Navigates to QR display page for sharing
+  // ✅ Handle Get QR Display Link - Encrypted version
   const handleGetQRDisplayLink = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
     
-    // Generate the Buy Now link to extract hash
-    const buyNowLink = generateQRUrl(baseUrl, {
-      identifier: identifier,
-      type: serviceType.toLowerCase(),
-      provider: provider,
-    });
+    // ✅ Generate encrypted QR Display link
+    const encryptedLink = generateQRDisplayLink(
+      baseUrl,
+      identifier,
+      serviceType.toLowerCase(),
+      provider
+    );
     
-    // Extract hash and expiresAt
-    const url = new URL(buyNowLink);
-    const params = new URLSearchParams(url.search);
-    const hash = params.get('h');
-    const expiresAt = params.get('e');
+    console.log(`🔗 [QR] Encrypted QR Display link: ${encryptedLink}`);
     
-    // ✅ Build QR Display link with hash parameter
-    const displayPath = `/qr/display/${identifier}?t=${serviceType.toLowerCase()}&p=${encodeURIComponent(provider)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
-    
-    console.log(`🔗 [QR] Navigating to QR display page: ${displayPath}`);
-    
-    // Navigate to the QR display page
-    router.push(displayPath);
+    // Navigate to the QR display page with the encrypted link
+    router.push(encryptedLink.replace(baseUrl, ''));
   };
 
   // ✅ Handle Quick Order from QR
@@ -896,12 +874,10 @@ export function ElectricityClient({
     if (!qrData) return;
     setShowQRModal(false);
     setMeterNumber(qrData.identifier);
-    // Find the disco that matches the provider
     const matchedDisco = discos.find(d => d.code === qrData.provider || d.name === qrData.provider);
     if (matchedDisco) {
       setSelectedDisco(matchedDisco.id);
     }
-    // Scroll to meter input
     document.getElementById('meter-number-input')?.focus();
   };
 
@@ -957,7 +933,6 @@ export function ElectricityClient({
   };
 
   const handlePurchase = async () => {
-    // Validate PIN
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
       return;
@@ -1020,7 +995,6 @@ export function ElectricityClient({
       setPin("");
       setVerifiedMeter(null);
 
-      // Refresh balance
       const balanceResponse = await fetch("/api/user/balance");
       const balanceData = await balanceResponse.json();
       if (balanceData.success) {
@@ -1030,7 +1004,6 @@ export function ElectricityClient({
         });
       }
 
-      // Refresh saved meters
       const metersResponse = await fetch("/api/saved-meters");
       const metersResult = await metersResponse.json();
       if (metersResult.success) {
@@ -1108,13 +1081,12 @@ export function ElectricityClient({
               </div>
             )}
 
-            {/* ✅ Combined Meter Number & DisCo Selection - SAME CARD */}
+            {/* Combined Meter Number & DisCo Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Meter Details
               </h2>
 
-              {/* Meter Number Input */}
               <div className="relative">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
                   <Smartphone className="h-5 w-5" />
@@ -1136,7 +1108,7 @@ export function ElectricityClient({
                 </div>
               </div>
 
-              {/* ✅ DisCo Dropdown */}
+              {/* DisCo Dropdown */}
               <div className="mt-4 relative" ref={dropdownRef}>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   Select DisCo
@@ -1167,10 +1139,8 @@ export function ElectricityClient({
                   <ChevronDownIcon className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${showDiscoDropdown ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* Dropdown List */}
                 {showDiscoDropdown && (
                   <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                    {/* Search Input */}
                     <div className="sticky top-0 bg-white dark:bg-gray-900 p-2 border-b border-gray-200 dark:border-gray-700">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1485,7 +1455,7 @@ export function ElectricityClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  View QR Code or get QR link for sharing
+                  QR codes are securely encrypted
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
