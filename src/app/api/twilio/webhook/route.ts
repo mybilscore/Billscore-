@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION (FIXED)
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -2620,7 +2620,7 @@ Your PIN is secure and will not be shared via WhatsApp.
 }
 
 // ============================================================
-// FIXED: ELECTRICITY PURCHASE - NO PIN (OWN METER)
+// ELECTRICITY PURCHASE - NO PIN (OWN METER)
 // ============================================================
 
 async function processElectricityPurchaseDirect(
@@ -3767,7 +3767,7 @@ Reply with HELP for available commands.`;
   // ============================================================
   // ✅ AIRTIME - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
   // ============================================================
-  if (command === "AIRTIME" || command.startsWith("AIRTIME ")) {
+  if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     let targetPhone: string;
     let amountNum: number;
     let isOwnNumber = false;
@@ -3837,7 +3837,7 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
   // ============================================================
   // ✅ DATA - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
   // ============================================================
-  if (command === "DATA" || command.startsWith("DATA ")) {
+  if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
     let planQuery: string;
     let isOwnNumber = false;
@@ -3996,8 +3996,9 @@ Or: SETDEFAULTDECODER 1234567890`;
   // ✅ ELECTRICITY - SUPPORTS BOTH SAVED AND EXTERNAL METERS
   // ============================================================
   
-  // Check if it's the command to show meters (no additional params)
-  if (command === "ELECTRIC" || command === "ELEC" || command === "POWER" || command === "ELECTRICITY") {
+  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
+      command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
+    
     // If only "ELECTRIC" with no params, show saved meters
     if (parts.length === 1) {
       const meters = await prisma.savedMeter.findMany({
@@ -4066,7 +4067,6 @@ Available: ${validDiscos.join(", ")}`;
       if (verificationResult.success) {
         customerName = verificationResult.data?.customerName || "Unknown";
       } else {
-        // Continue with purchase even if verification fails, but warn user
         return `⚠️ Could not verify meter: ${verificationResult.error || "Unknown error"}
 
 You can still proceed with the purchase.
