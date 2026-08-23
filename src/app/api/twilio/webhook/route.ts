@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION (NO SETTINGS)
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION (FIXED)
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -292,6 +292,16 @@ function formatErrorMessage(error: any): string {
     return `❌ Education PIN purchase failed. Please try again.`;
   }
   
+  if (errorMessage.includes('DUPLICATE TRANSACTION') || 
+      errorMessage.includes('duplicate transaction')) {
+    return `⏰ Duplicate transaction detected.
+
+You've recently purchased for this number.
+Please wait 15 seconds and try again.
+
+If this persists, try a different phone number.`;
+  }
+  
   return `❌ Purchase failed. Please try again or contact support if the issue persists.`;
 }
 
@@ -324,6 +334,54 @@ async function sendWhatsAppMessage(to: string, message: string): Promise<boolean
   } catch (error) {
     console.error("❌ [WhatsApp] Error sending message:", error);
     return false;
+  }
+}
+
+// ============================================================
+// MAP VENDOR TO ENUM
+// ============================================================
+
+function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
+  if (!vendorCode) return null;
+  const normalized = vendorCode.toUpperCase();
+  const vendorMap: Record<string, VtuVendor> = {
+    'VTPASS': VtuVendor.VTPASS,
+    'GIDIGITAL': VtuVendor.GIDIGITAL,
+    'MONIEPOINT': VtuVendor.MONIEPOINT,
+    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
+    'QUICKTELLER': VtuVendor.QUICKTELLER,
+    'BILAL_SADA': VtuVendor.BILAL_SADA,
+    'LEGITDATAWAY': VtuVendor.VTPASS,
+    'BILALSADA': VtuVendor.BILAL_SADA,
+  };
+  return vendorMap[normalized] || null;
+}
+
+// ============================================================
+// SAVE METER HELPER (Non-blocking)
+// ============================================================
+
+async function saveMeterAsync(userId: string, meterNumber: string, disco: string, meterType: string) {
+  try {
+    const existing = await prisma.savedMeter.findFirst({
+      where: { userId, meterNumber },
+    });
+
+    if (!existing) {
+      await prisma.savedMeter.create({
+        data: {
+          userId,
+          meterNumber,
+          disco: disco.toUpperCase(),
+          meterType: meterType || "Prepaid",
+          isDefault: false,
+        },
+      });
+      console.log(`✅ [WhatsApp] Meter ${meterNumber} saved automatically`);
+    }
+  } catch (error) {
+    // Non-critical - ignore
+    console.warn(`⚠️ [WhatsApp] Failed to auto-save meter: ${error}`);
   }
 }
 
@@ -857,22 +915,6 @@ function mapNetwork(networkInput: string): NetworkProvider {
     return NetworkProvider.MTN;
   }
   return mapped;
-}
-
-function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
-  if (!vendorCode) return null;
-  const normalized = vendorCode.toUpperCase();
-  const vendorMap: Record<string, VtuVendor> = {
-    'VTPASS': VtuVendor.VTPASS,
-    'GIDIGITAL': VtuVendor.GIDIGITAL,
-    'MONIEPOINT': VtuVendor.MONIEPOINT,
-    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
-    'QUICKTELLER': VtuVendor.QUICKTELLER,
-    'BILAL_SADA': VtuVendor.BILAL_SADA,
-    'LEGITDATAWAY': VtuVendor.VTPASS,
-    'BILALSADA': VtuVendor.BILAL_SADA,
-  };
-  return vendorMap[normalized] || null;
 }
 
 function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
@@ -2578,7 +2620,7 @@ Your PIN is secure and will not be shared via WhatsApp.
 }
 
 // ============================================================
-// ELECTRICITY PURCHASE - NO PIN (OWN METER)
+// FIXED: ELECTRICITY PURCHASE - NO PIN (OWN METER)
 // ============================================================
 
 async function processElectricityPurchaseDirect(
@@ -2646,107 +2688,320 @@ Please fund your wallet and try again.`;
       },
     });
 
+    let vendorEnum: VtuVendor | null = null;
+    let vendorReference: string | null = null;
+    let token: string | null = null;
+    let vendorCommission: number | null = null;
+    let vendorTotalAmount: number | null = null;
+    let commissionRate: number | null = null;
+    let commissionType: string | null = null;
+    let commissionDetails: any = null;
+    let costPrice: number | null = null;
+    let grossProfit: number | null = null;
+    let profitMargin: number | null = null;
+    let platformCommission: number | null = null;
+    let vendorTransactionId: string | null = null;
+
     try {
+      console.log(`⏳ [WhatsApp] Calling vendor for meter ${meterNumber}...`);
+      const startTime = Date.now();
+      
       const vendorService = getVendorService();
-      const result = await vendorService.buyElectricity(
+      const TIMEOUT_MS = 30000;
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Vendor timeout after 30 seconds')), TIMEOUT_MS);
+      });
+      
+      const vendorPromise = vendorService.buyElectricity(
         {
           meterNumber: meterNumber,
           amount: amount,
           discoCode: discoCode,
-          meterType: meterType,
+          meterType: meterType || 'Prepaid',
           phone: user.phone,
         },
         user.id
       );
+      
+      const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
+      
+      const elapsed = Date.now() - startTime;
+      console.log(`✅ [WhatsApp] Vendor responded in ${elapsed}ms`);
 
-      if (!result || !result.success) {
-        await prisma.vtuTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            status: TransactionStatus.FAILED,
-            metadata: {
-              ...transaction.metadata,
-              failureReason: result?.error || "Vendor purchase failed",
-              failedAt: new Date().toISOString(),
-            },
-          },
-        });
-        return formatErrorMessage(result?.error || "Electricity purchase failed");
+      if (result.data) {
+        vendorCommission = result.data.commission || null;
+        vendorTotalAmount = result.data.totalAmount || null;
+        
+        if (result.metadata?.commissionDetails) {
+          commissionDetails = result.metadata.commissionDetails;
+          commissionRate = commissionDetails.rate ? parseFloat(commissionDetails.rate) : null;
+          commissionType = commissionDetails.rate_type || null;
+        }
+        
+        costPrice = vendorTotalAmount ?? amount;
+        grossProfit = amount - costPrice;
+        profitMargin = amount > 0 ? (grossProfit / amount) * 100 : 0;
+        platformCommission = grossProfit;
       }
 
-      const token = result.data?.token || result.data?.purchased_code || null;
-      const vendorReference = result.vendorReference || null;
+      vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
+      vendorReference = result.vendorReference || null;
 
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: wallet.id },
+      vendorTransactionId = result.data?.transactionId || 
+                           result.data?.transactions?.transactionId || 
+                           result.data?.content?.transactions?.transactionId ||
+                           null;
+
+      if (result.success) {
+        token = result.data?.token || result.data?.purchased_code || null;
+        
+        console.log(`✅ [WhatsApp] Purchase successful! Token: ${token?.substring(0, 20)}...`);
+
+        await prisma.customer.update({
+          where: { id: customer.id },
           data: {
-            walletBalance: { decrement: amount },
+            totalTransactions: { increment: 1 },
+            totalSpent: { increment: amount },
+            lastTransactionAt: new Date(),
           },
-        }),
-        prisma.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            userId: user.id,
-            type: "DEBIT",
-            amount: amount,
-            balanceBefore: walletBalance,
-            balanceAfter: walletBalance - amount,
-            reference: `VTU_${transaction.id}`,
-            description: `Electricity purchase for meter ${meterNumber}`,
-            status: "SUCCESS",
-            category: "ELECTRICITY",
-          },
-        }),
-        prisma.vtuTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            status: TransactionStatus.SUCCESS,
-            totalDebited: amount,
-            token: token,
-            vendorReference: vendorReference,
-            vendor: result.vendor as VtuVendor || null,
-            deliveredAt: new Date(),
-            metadata: {
-              ...transaction.metadata,
-              processed: true,
-              vendorResponse: result.data,
-              completedAt: new Date().toISOString(),
+        });
+
+        await prisma.$transaction([
+          prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              walletBalance: { decrement: amount },
             },
-          },
-        }),
-      ]);
+          }),
+          prisma.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              userId: user.id,
+              type: "DEBIT",
+              amount: amount,
+              balanceBefore: walletBalance,
+              balanceAfter: walletBalance - amount,
+              reference: `VTU_${transaction.id}`,
+              description: `Electricity purchase for meter ${meterNumber} (${discoCode})`,
+              status: TransactionStatus.SUCCESS,
+              category: "ELECTRICITY",
+            },
+          }),
+          prisma.vtuTransaction.update({
+            where: { id: transaction.id },
+            data: {
+              status: TransactionStatus.SUCCESS,
+              totalDebited: amount,
+              token: token,
+              vendorReference: vendorReference,
+              vendor: vendorEnum,
+              deliveredAt: new Date(),
+              vendorCommission: vendorCommission,
+              vendorTotalAmount: vendorTotalAmount,
+              commissionRate: commissionRate,
+              commissionType: commissionType,
+              commissionMetadata: commissionDetails,
+              costPrice: costPrice,
+              sellingPrice: amount,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
+              platformCommission: platformCommission,
+              platformTotalAmount: amount,
+              netProfit: grossProfit,
+              totalCommission: (vendorCommission || 0) + (platformCommission || 0),
+              effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+              metadata: {
+                ...transaction.metadata,
+                vendorResponse: result.data,
+                vendorName: result.vendor,
+                vendorReference: vendorReference,
+                vendorTransactionId: vendorTransactionId,
+                vendorSwitched: result.vendorSwitched,
+                switchedFrom: result.switchedFrom,
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  commissionDetails: commissionDetails,
+                  platformCommission: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                  costPrice: costPrice,
+                  sellingPrice: amount,
+                },
+                processed: true,
+                completedAt: new Date().toISOString(),
+                wasDebited: true,
+                elapsedMs: elapsed,
+              },
+            },
+          }),
+          prisma.customerTransaction.create({
+            data: {
+              customerId: customer.id,
+              userId: user.id,
+              vtuTransactionId: transaction.id,
+              transactionType: VtuType.ELECTRICITY_INSTANT,
+              amount: amount,
+              totalAmount: amount,
+              product: discoCode,
+              meterNumber: meterNumber,
+              status: TransactionStatus.SUCCESS,
+              commissionAmount: vendorCommission || 0,
+              commissionRate: commissionRate || 0,
+              commissionPaid: true,
+              commissionPaidAt: new Date(),
+              metadata: {
+                vendorName: result.vendor || 'unknown',
+                vendorReference: vendorReference || '',
+                vendorTransactionId: vendorTransactionId,
+                vendorSwitched: result.vendorSwitched || false,
+                switchedFrom: result.switchedFrom || [],
+                token: token,
+                meterType: meterType,
+                completedAt: new Date().toISOString(),
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  platformProfit: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                },
+              },
+            },
+          }),
+        ]);
 
-      const successMessage = `✅ Electricity Purchase Successful!
+        saveMeterAsync(user.id, meterNumber, discoCode, meterType).catch(() => {});
+
+        const successMessage = `✅ Electricity Purchase Successful!
 
 Meter: ${meterNumber}
 DisCo: ${discoCode}
 Amount: NGN ${amount.toFixed(2)}
 ${token ? `Token: ${token}` : ''}
+${vendorTransactionId ? `Vendor Ref: ${vendorTransactionId}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 Please use this token to recharge your meter.
 Thank you for using Bilscore!`;
 
-      await sendWhatsAppMessage(user.phone, successMessage);
-      return successMessage;
+        console.log(`📤 [WhatsApp] Sending success message to ${user.phone}`);
+        await sendWhatsAppMessage(user.phone, successMessage);
+        
+        return successMessage;
+      } else {
+        console.error(`❌ [WhatsApp] Vendor failed: ${result.error}`);
+
+        await prisma.vtuTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: TransactionStatus.FAILED,
+            totalDebited: 0,
+            vendor: vendorEnum,
+            vendorReference: vendorReference,
+            metadata: {
+              ...transaction.metadata,
+              error: result.error || "Vendor transaction failed",
+              vendor: result.vendor,
+              vendorErrors: result.vendorErrors || [],
+              vendorSwitched: result.vendorSwitched || false,
+              switchedFrom: result.switchedFrom || [],
+              failedAt: new Date().toISOString(),
+              wasDebited: false,
+            },
+          },
+        });
+
+        await prisma.customerTransaction.create({
+          data: {
+            customerId: customer.id,
+            userId: user.id,
+            vtuTransactionId: transaction.id,
+            transactionType: VtuType.ELECTRICITY_INSTANT,
+            amount: amount,
+            totalAmount: amount,
+            product: discoCode,
+            meterNumber: meterNumber,
+            status: TransactionStatus.FAILED,
+            notes: `Vendor failure: ${result.error || "Unknown error"}`,
+            metadata: {
+              vendorName: result.vendor || 'unknown',
+              vendorReference: vendorReference || '',
+              failureReason: result.error,
+              vendorErrors: result.vendorErrors || [],
+              meterType: meterType,
+              failedAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: {
+            totalTransactions: { increment: 1 },
+            lastTransactionAt: new Date(),
+          },
+        });
+
+        return formatErrorMessage(result.error || "Vendor transaction failed");
+      }
     } catch (vendorError: any) {
-      console.error("Vendor error:", vendorError);
+      console.error(`❌ [WhatsApp] Vendor error:`, vendorError.message);
+
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
+          totalDebited: 0,
+          vendor: vendorEnum || VtuVendor.VTPASS,
           metadata: {
             ...transaction.metadata,
-            failureReason: vendorError?.message || "Vendor error",
+            error: vendorError.message || "Unknown vendor error",
+            errorType: vendorError.name || 'UnknownError',
+            failedAt: new Date().toISOString(),
+            wasDebited: false,
+          },
+        },
+      });
+
+      await prisma.customerTransaction.create({
+        data: {
+          customerId: customer.id,
+          userId: user.id,
+          vtuTransactionId: transaction.id,
+          transactionType: VtuType.ELECTRICITY_INSTANT,
+          amount: amount,
+          totalAmount: amount,
+          product: discoCode,
+          meterNumber: meterNumber,
+          status: TransactionStatus.FAILED,
+          notes: `Vendor Error: ${vendorError.message || 'Unknown error'}`,
+          metadata: {
+            failureReason: vendorError.message,
+            errorType: vendorError.name,
+            meterType: meterType,
             failedAt: new Date().toISOString(),
           },
         },
       });
+
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: {
+          totalTransactions: { increment: 1 },
+          lastTransactionAt: new Date(),
+        },
+      });
+
       return formatErrorMessage(vendorError);
     }
   } catch (error: any) {
-    console.error("Direct electricity purchase error:", error);
+    console.error("❌ [WhatsApp] Purchase error:", error);
     return formatErrorMessage(error);
   }
 }
@@ -3649,8 +3904,8 @@ ${await getAvailablePlansForWhatsApp()}`;
   // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 4) {
+    const addParts = body.split(" ").filter(p => p.length > 0);
+    if (addParts.length < 4) {
       const discosList = await getAvailableDiscosForWhatsApp();
       return `To add a meter, reply with:
 ADDMETER [meter_number] [disco_code] [name]
@@ -3663,7 +3918,7 @@ Example: ADDMETER 1234567890 ABUJA HOME
 Name can be: HOME, OFFICE, SHOP, etc.`;
     }
 
-    const [, meterNumber, disco, ...nameParts] = parts;
+    const [, meterNumber, disco, ...nameParts] = addParts;
     const name = nameParts.join(" ");
     return await addMeterWithVerificationAndQR(user.id, meterNumber, disco, name);
   }
@@ -3673,31 +3928,31 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
   }
 
   if (command.startsWith("DELETEMETER") || command.startsWith("DELETE METER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 2) {
+    const deleteParts = body.split(" ").filter(p => p.length > 0);
+    if (deleteParts.length < 2) {
       return `Please specify the meter number to delete.
 Example: DELETEMETER 1234567890`;
     }
-    const meterNumber = parts[1];
+    const meterNumber = deleteParts[1];
     return await deleteMeter(user.id, meterNumber);
   }
 
   if (command.startsWith("SETDEFAULTMETER") || command.startsWith("SET DEFAULT METER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 2) {
+    const defaultParts = body.split(" ").filter(p => p.length > 0);
+    if (defaultParts.length < 2) {
       return `Please specify the meter number or index.
 Example: SETDEFAULTMETER 1
 Or: SETDEFAULTMETER 1234567890`;
     }
-    const meterId = parts[1];
+    const meterId = defaultParts[1];
     return await setDefaultMeter(user.id, meterId);
   }
 
   // ========== DECODER MANAGEMENT ==========
   
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 4) {
+    const addParts = body.split(" ").filter(p => p.length > 0);
+    if (addParts.length < 4) {
       return `To add a decoder, reply with:
 ADDDECODER [decoder_number] [provider] [name]
 
@@ -3707,7 +3962,7 @@ Available providers: DSTV, GOTV, STARTIMES
 Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
     }
 
-    const [, decoderNumber, provider, ...nameParts] = parts;
+    const [, decoderNumber, provider, ...nameParts] = addParts;
     const name = nameParts.join(" ");
     return await addDecoderWithVerification(user.id, decoderNumber, provider, name);
   }
@@ -3717,23 +3972,23 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
   }
 
   if (command.startsWith("DELETEDECODER") || command.startsWith("DELETE DECODER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 2) {
+    const deleteParts = body.split(" ").filter(p => p.length > 0);
+    if (deleteParts.length < 2) {
       return `Please specify the decoder number to delete.
 Example: DELETEDECODER 1234567890`;
     }
-    const decoderNumber = parts[1];
+    const decoderNumber = deleteParts[1];
     return await deleteDecoder(user.id, decoderNumber);
   }
 
   if (command.startsWith("SETDEFAULTDECODER") || command.startsWith("SET DEFAULT DECODER")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 2) {
+    const defaultParts = body.split(" ").filter(p => p.length > 0);
+    if (defaultParts.length < 2) {
       return `Please specify the decoder number or index.
 Example: SETDEFAULTDECODER 1
 Or: SETDEFAULTDECODER 1234567890`;
     }
-    const decoderId = parts[1];
+    const decoderId = defaultParts[1];
     return await setDefaultDecoder(user.id, decoderId);
   }
 
@@ -3741,11 +3996,8 @@ Or: SETDEFAULTDECODER 1234567890`;
   // ✅ ELECTRICITY - SUPPORTS BOTH SAVED AND EXTERNAL METERS
   // ============================================================
   
-  // First, check if it's the command to show meters
+  // Check if it's the command to show meters (no additional params)
   if (command === "ELECTRIC" || command === "ELEC" || command === "POWER" || command === "ELECTRICITY") {
-    // Check if this is a purchase command with parameters
-    const parts = body.split(" ").filter(p => p.length > 0);
-    
     // If only "ELECTRIC" with no params, show saved meters
     if (parts.length === 1) {
       const meters = await prisma.savedMeter.findMany({
@@ -3786,11 +4038,7 @@ ${discosList}`;
       return message;
     }
 
-    // Now handle purchase commands
-    const parts = body.split(" ").filter(p => p.length > 0);
-    
     // Case 1: External meter purchase - ELECTRIC [meter_number] [disco] [amount]
-    // Example: ELECTRIC 1234567890 ABUJA 5000
     if (parts.length >= 4) {
       const [, meterNumber, disco, amountStr] = parts;
       const amount = parseFloat(amountStr);
@@ -3800,7 +4048,6 @@ ${discosList}`;
 Example: ELECTRIC 1234567890 ABUJA 5000`;
       }
       
-      // Validate disco
       const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
       const discoUpper = disco.toUpperCase();
       if (!validDiscos.includes(discoUpper)) {
@@ -3808,7 +4055,7 @@ Example: ELECTRIC 1234567890 ABUJA 5000`;
 Available: ${validDiscos.join(", ")}`;
       }
       
-      // Verify the meter before purchase
+      // Verify meter before purchase
       const verificationResult = await verifyMeterWithVTpass(
         discoUpper.toLowerCase() + "-electric",
         meterNumber,
@@ -3828,7 +4075,7 @@ To continue: ELECTRIC ${meterNumber} ${discoUpper} ${amount}
 To cancel: Type HELP for other options.`;
       }
       
-      // ✅ PIN REQUIRED FOR EXTERNAL METER
+      // PIN required for external meter
       return await processElectricityPurchaseWithPin(
         user,
         meterNumber,
@@ -3840,7 +4087,6 @@ To cancel: Type HELP for other options.`;
     }
     
     // Case 2: Saved meter purchase with index - ELECTRIC [index] [amount]
-    // Example: ELECTRIC 1 5000
     if (parts.length === 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -3867,7 +4113,7 @@ Example: ELECTRIC 1 5000`;
       
       const selectedMeter = meters[index];
       
-      // ✅ NO PIN REQUIRED - Own saved meter
+      // No PIN required - own saved meter
       return await processElectricityPurchaseDirect(
         user,
         selectedMeter.meterNumber,
@@ -3878,7 +4124,6 @@ Example: ELECTRIC 1 5000`;
     }
     
     // Case 3: Only amount provided - ELECTRIC [amount]
-    // Example: ELECTRIC 5000
     if (parts.length === 2) {
       const amountStr = parts[1];
       const amount = parseFloat(amountStr);
@@ -3918,7 +4163,7 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
         return message;
       }
       
-      // ✅ NO PIN REQUIRED - Own saved meter
+      // No PIN required - own saved meter
       return await processElectricityPurchaseDirect(
         user,
         selectedMeter.meterNumber,
@@ -4007,10 +4252,10 @@ After adding, you can buy cable by just typing CABLE!`;
 
   // ✅ CABLE PURCHASE - NO PIN FOR OWN DECODERS
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
+    const cableParts = body.split(" ").filter(p => p.length > 0);
     
-    if (parts.length >= 3) {
-      const [, indexStr, packageQuery] = parts;
+    if (cableParts.length >= 3) {
+      const [, indexStr, packageQuery] = cableParts;
       const index = parseInt(indexStr) - 1;
       
       if (isNaN(index) || index < 0) {
@@ -4029,7 +4274,6 @@ Example: CABLE 1 PREMIUM`;
       
       const selectedDecoder = decoders[index];
       
-      // ✅ NO PIN REQUIRED - Own decoders
       return await processCablePurchaseDirect(
         user, 
         selectedDecoder.decoderNumber, 
@@ -4038,9 +4282,9 @@ Example: CABLE 1 PREMIUM`;
       );
     }
     
-    if (parts.length === 2) {
+    if (cableParts.length === 2) {
       return `Please specify the package as well.
-Example: CABLE ${parts[1]} PREMIUM
+Example: CABLE ${cableParts[1]} PREMIUM
 
 To see available packages: PACKAGES [provider]
 Example: PACKAGES DSTV`;
@@ -4049,17 +4293,17 @@ Example: PACKAGES DSTV`;
 
   // ========== PACKAGES ==========
   if (command.startsWith("PACKAGES") || command === "PACKAGE") {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    const provider = parts.length > 1 ? parts[1] : "DSTV";
+    const packageParts = body.split(" ").filter(p => p.length > 0);
+    const provider = packageParts.length > 1 ? packageParts[1] : "DSTV";
     const packagesList = await getAvailablePackagesForWhatsApp(provider);
     return packagesList;
   }
 
   // ========== SUBSCRIPTIONS ==========
   if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
+    const scheduleParts = body.split(" ").filter(p => p.length > 0);
     
-    if (parts.length < 4) {
+    if (scheduleParts.length < 4) {
       return `To schedule electricity token delivery:
 SCHEDULE [meter_index] [amount] [days]
 
@@ -4071,7 +4315,7 @@ Available meters:
 ${await getSavedMetersList(user.id)}`;
     }
 
-    const [, indexStr, amountStr, daysStr] = parts;
+    const [, indexStr, amountStr, daysStr] = scheduleParts;
     const index = parseInt(indexStr) - 1;
     const amount = parseFloat(amountStr);
     const days = parseInt(daysStr);
@@ -4116,8 +4360,8 @@ Example: SCHEDULE 1 5000 7`;
   }
 
   if (command.startsWith("CANCEL") || command.startsWith("UNSUBSCRIBE")) {
-    const parts = body.split(" ").filter(p => p.length > 0);
-    if (parts.length < 2) {
+    const cancelParts = body.split(" ").filter(p => p.length > 0);
+    if (cancelParts.length < 2) {
       return `To cancel a subscription:
 CANCEL [subscription_id]
 
@@ -4125,7 +4369,7 @@ Example: CANCEL SUB-123456
 
 To see your active subscriptions: SUBSCRIPTIONS`;
     }
-    const subscriptionId = parts[1];
+    const subscriptionId = cancelParts[1];
     return await cancelSubscription(user.id, subscriptionId);
   }
 
@@ -4134,7 +4378,8 @@ To see your active subscriptions: SUBSCRIPTIONS`;
       command.startsWith("WAEC") || command.startsWith("JAMB") || 
       command.startsWith("NECO") || command === "WAEC-RESULT") {
     
-    const cmd = parts[0].toUpperCase();
+    const eduParts = body.split(" ").filter(p => p.length > 0);
+    const cmd = eduParts[0].toUpperCase();
     
     if (cmd === "EDU" || cmd === "EDUCATION") {
       const productsList = await getAvailableEducationProducts();
@@ -4153,9 +4398,9 @@ EDU NECO 3
 Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
     }
 
-    if (parts.length >= 3 && (cmd === "EDU" || cmd === "EDUCATION")) {
-      const product = parts[1].toUpperCase();
-      const quantity = parseInt(parts[2]);
+    if (eduParts.length >= 3 && (cmd === "EDU" || cmd === "EDUCATION")) {
+      const product = eduParts[1].toUpperCase();
+      const quantity = parseInt(eduParts[2]);
       if (isNaN(quantity) || quantity < 1) {
         return `Invalid quantity. Please enter a number greater than 0.
 Example: EDU WAEC 2`;
@@ -4163,8 +4408,8 @@ Example: EDU WAEC 2`;
       return await processEducationPurchaseWhatsApp(user, product, quantity);
     }
 
-    if (parts.length >= 2 && ["WAEC", "JAMB", "NECO", "WAEC-RESULT"].includes(cmd)) {
-      const quantity = parseInt(parts[1]);
+    if (eduParts.length >= 2 && ["WAEC", "JAMB", "NECO", "WAEC-RESULT"].includes(cmd)) {
+      const quantity = parseInt(eduParts[1]);
       if (isNaN(quantity) || quantity < 1) {
         return `Invalid quantity. Please enter a number greater than 0.
 Example: WAEC 2`;
