@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE FIXED VERSION
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED FIXED VERSION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -123,6 +123,114 @@ function getApiUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL || 
          process.env.NEXTAUTH_URL || 
          'http://localhost:3000';
+}
+
+// ============================================================
+// FIXED: NETWORK DETECTION WITH COUNTRY CODE SUPPORT
+// ============================================================
+
+function detectNetworkFromPhone(phoneNumber: string): string | null {
+  // Remove all non-digit characters (+, -, spaces, etc.)
+  let cleanNumber = phoneNumber.replace(/\D/g, "");
+  
+  // If it starts with 234 (Nigeria country code), remove it
+  if (cleanNumber.startsWith("234")) {
+    cleanNumber = cleanNumber.substring(3);
+  }
+  
+  // If it starts with 0, remove it (we want the 10-digit number without 0)
+  if (cleanNumber.startsWith("0")) {
+    cleanNumber = cleanNumber.substring(1);
+  }
+  
+  // Ensure we have at least 10 digits for Nigerian numbers
+  if (cleanNumber.length < 10) {
+    console.warn(`Phone number too short after cleaning: ${cleanNumber} (original: ${phoneNumber})`);
+    return null;
+  }
+  
+  // Take the last 10 digits (in case of extra digits)
+  if (cleanNumber.length > 10) {
+    cleanNumber = cleanNumber.slice(-10);
+  }
+  
+  console.log(`🔍 [Network Detection] Cleaned number: ${cleanNumber}`);
+  
+  // MTN: 080, 081, 070, 090, 091
+  if (cleanNumber.startsWith("80") || cleanNumber.startsWith("81") || 
+      cleanNumber.startsWith("70") || cleanNumber.startsWith("90") || 
+      cleanNumber.startsWith("91")) {
+    return "MTN";
+  }
+  
+  // AIRTEL: 0802, 0808, 0812, 0901, 0902, 0907, 0701, 0708
+  if (cleanNumber.startsWith("802") || cleanNumber.startsWith("808") || 
+      cleanNumber.startsWith("812") || cleanNumber.startsWith("901") || 
+      cleanNumber.startsWith("902") || cleanNumber.startsWith("907") || 
+      cleanNumber.startsWith("701") || cleanNumber.startsWith("708")) {
+    return "AIRTEL";
+  }
+  
+  // GLO: 0805, 0807, 0811, 0815, 0905, 0909
+  if (cleanNumber.startsWith("805") || cleanNumber.startsWith("807") || 
+      cleanNumber.startsWith("811") || cleanNumber.startsWith("815") || 
+      cleanNumber.startsWith("905") || cleanNumber.startsWith("909")) {
+    return "GLO";
+  }
+  
+  // 9MOBILE: 0809, 0817, 0818, 0908, 0903, 0904
+  if (cleanNumber.startsWith("809") || cleanNumber.startsWith("817") || 
+      cleanNumber.startsWith("818") || cleanNumber.startsWith("908") || 
+      cleanNumber.startsWith("903") || cleanNumber.startsWith("904")) {
+    return "9MOBILE";
+  }
+  
+  console.warn(`Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
+  return null;
+}
+
+// ============================================================
+// FIXED: NORMALIZE PHONE NUMBER (Handle all formats)
+// ============================================================
+
+function normalizePhoneNumber(phoneNumber: string): string {
+  // Remove all non-digit characters
+  let clean = phoneNumber.replace(/\D/g, '');
+  
+  console.log(`🔍 [Normalize] Original: ${phoneNumber}, Cleaned: ${clean}`);
+  
+  // If it starts with 234 (Nigeria country code), convert to 0 format
+  if (clean.startsWith('234')) {
+    clean = '0' + clean.substring(3);
+  }
+  
+  // If it starts with 0, keep it as is
+  if (clean.startsWith('0') && clean.length === 11) {
+    return clean;
+  }
+  
+  // If it doesn't start with 0 and is 10 digits, add 0
+  if (!clean.startsWith('0') && clean.length === 10) {
+    clean = '0' + clean;
+  }
+  
+  // If it's less than 11 digits but more than 10, pad with 0
+  if (clean.length < 11 && clean.length >= 10) {
+    clean = '0' + clean;
+  }
+  
+  // Ensure we have exactly 11 digits (0 + 10 digits)
+  if (clean.length < 11) {
+    clean = clean.padStart(11, '0');
+  }
+  
+  // Take only 11 digits (first 11)
+  if (clean.length > 11) {
+    clean = clean.substring(0, 11);
+  }
+  
+  console.log(`✅ [Normalize] Result: ${clean}`);
+  return clean;
 }
 
 // ============================================================
@@ -617,37 +725,6 @@ function mapNetwork(networkInput: string): NetworkProvider {
     return NetworkProvider.MTN;
   }
   return mapped;
-}
-
-function detectNetworkFromPhone(phoneNumber: string): string | null {
-  const cleanNumber = phoneNumber.replace(/\D/g, "");
-  
-  if (cleanNumber.startsWith("080") || cleanNumber.startsWith("081") || 
-      cleanNumber.startsWith("070") || cleanNumber.startsWith("090") || 
-      cleanNumber.startsWith("091")) {
-    return "MTN";
-  }
-  
-  if (cleanNumber.startsWith("0802") || cleanNumber.startsWith("0808") || 
-      cleanNumber.startsWith("0812") || cleanNumber.startsWith("0901") || 
-      cleanNumber.startsWith("0902") || cleanNumber.startsWith("0907") || 
-      cleanNumber.startsWith("0701") || cleanNumber.startsWith("0708")) {
-    return "AIRTEL";
-  }
-  
-  if (cleanNumber.startsWith("0805") || cleanNumber.startsWith("0807") || 
-      cleanNumber.startsWith("0811") || cleanNumber.startsWith("0815") || 
-      cleanNumber.startsWith("0905") || cleanNumber.startsWith("0909")) {
-    return "GLO";
-  }
-  
-  if (cleanNumber.startsWith("0809") || cleanNumber.startsWith("0817") || 
-      cleanNumber.startsWith("0818") || cleanNumber.startsWith("0908") || 
-      cleanNumber.startsWith("0903") || cleanNumber.startsWith("0904")) {
-    return "9MOBILE";
-  }
-  
-  return null;
 }
 
 function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
@@ -1705,31 +1782,16 @@ If the problem persists, type HELP for support.`;
 }
 
 // ============================================================
-// WHATSAPP PURCHASE HANDLERS
+// DIRECT PURCHASE HANDLERS (NO PIN REQUIRED)
 // ============================================================
 
-async function processAirtimePurchaseWhatsApp(user: any, phoneNumber: string, amount: number): Promise<string> {
+async function processAirtimePurchaseDirect(
+  user: any, 
+  phoneNumber: string, 
+  amount: number,
+  detectedNetwork: string
+): Promise<string> {
   try {
-    let cleanedNumber = phoneNumber.replace(/\D/g, '');
-    if (cleanedNumber.startsWith('234')) {
-      cleanedNumber = '0' + cleanedNumber.substring(3);
-    }
-    if (cleanedNumber.length < 10) {
-      cleanedNumber = cleanedNumber.padStart(10, '0');
-    }
-    if (cleanedNumber.length > 11) {
-      cleanedNumber = cleanedNumber.substring(0, 11);
-    }
-    const normalizedPhone = cleanedNumber;
-
-    const detectedNetwork = detectNetworkFromPhone(normalizedPhone);
-    if (!detectedNetwork) {
-      return `Could not detect network for ${normalizedPhone}.
-Please ensure the phone number is correct.
-
-Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
-    }
-
     const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
     if (!wallet) return `Wallet not found. Please contact support.`;
 
@@ -1744,14 +1806,14 @@ Please fund your wallet and try again.`;
     const networkEnum = mapNetwork(detectedNetwork);
 
     let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: normalizedPhone } },
+      where: { userId_phone: { userId: user.id, phone: phoneNumber } },
     });
 
     if (!customer) {
       customer = await prisma.customer.create({
         data: {
           userId: user.id,
-          phone: normalizedPhone,
+          phone: phoneNumber,
           fullName: null,
           email: null,
           customerType: "REGULAR",
@@ -1771,7 +1833,330 @@ Please fund your wallet and try again.`;
         product: detectedNetwork,
         amount: amount,
         totalDebited: 0,
-        phoneNumber: normalizedPhone,
+        phoneNumber: phoneNumber,
+        network: networkEnum,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "AIRTIME",
+          timestamp: new Date().toISOString(),
+          network: detectedNetwork,
+          networkEnum: networkEnum,
+          customerId: customer.id,
+          pinVerified: true,
+          skipPin: true,
+          isOwnNumber: true,
+        },
+      },
+    });
+
+    const vendorService = getVendorService();
+    const result = await vendorService.buyAirtime(
+      {
+        phoneNumber: phoneNumber,
+        amount: amount,
+        network: detectedNetwork,
+      },
+      user.id
+    );
+
+    if (!result || !result.success) {
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.FAILED,
+          metadata: {
+            ...transaction.metadata,
+            failureReason: result?.error || "Vendor purchase failed",
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+      return `❌ Airtime purchase failed: ${result?.error || "Unknown error"}`;
+    }
+
+    await prisma.$transaction([
+      prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          walletBalance: { decrement: amount },
+        },
+      }),
+      prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          userId: user.id,
+          type: "DEBIT",
+          amount: amount,
+          balanceBefore: walletBalance,
+          balanceAfter: walletBalance - amount,
+          reference: `VTU_${transaction.id}`,
+          description: `Airtime purchase for ${phoneNumber}`,
+          status: "SUCCESS",
+          category: "AIRTIME",
+        },
+      }),
+      prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.SUCCESS,
+          totalDebited: amount,
+          token: result.data?.token || null,
+          vendorReference: result.vendorReference || null,
+          vendor: result.vendor as VtuVendor || null,
+          deliveredAt: new Date(),
+          metadata: {
+            ...transaction.metadata,
+            processed: true,
+            vendorResponse: result.data,
+            completedAt: new Date().toISOString(),
+          },
+        },
+      }),
+    ]);
+
+    return `✅ Airtime Purchase Successful!
+
+Phone: ${phoneNumber}
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Reference: ${transaction.id.substring(0, 10)}
+
+💡 Tip: To buy for others, use: AIRTIME [phone] [amount]
+
+Thank you for using Bilscore!`;
+  } catch (error) {
+    console.error("Direct airtime purchase error:", error);
+    return `Failed to process airtime purchase. Please try again.`;
+  }
+}
+
+async function processDataPurchaseDirect(
+  user: any, 
+  phoneNumber: string, 
+  planQuery: string,
+  detectedNetwork: string
+): Promise<string> {
+  try {
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
+
+    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
+    
+    if (!planData) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `No data plan found for ${detectedNetwork} with "${planQuery}".
+
+${availablePlans}
+
+Example: DATA 1GB`;
+    }
+
+    const amount = Number(planData.price);
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
+
+Please fund your wallet and try again.`;
+    }
+
+    const networkEnum = mapNetwork(detectedNetwork);
+
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: phoneNumber } },
+    });
+
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: phoneNumber,
+          fullName: null,
+          email: null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.DATA,
+        product: `${detectedNetwork} - ${planData.data}`,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: phoneNumber,
+        network: networkEnum,
+        networkPlan: planData.planCode || planQuery,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "DATA",
+          timestamp: new Date().toISOString(),
+          network: detectedNetwork,
+          networkEnum: networkEnum,
+          planQuery: planQuery,
+          planName: planData.name,
+          dataAmount: planData.amountMB,
+          customerId: customer.id,
+          pinVerified: true,
+          skipPin: true,
+          isOwnNumber: true,
+        },
+      },
+    });
+
+    const vendorService = getVendorService();
+    const result = await vendorService.buyData(
+      {
+        phoneNumber: phoneNumber,
+        planCode: planData.planCode || planQuery,
+        network: detectedNetwork,
+        amount: amount,
+      },
+      user.id
+    );
+
+    if (!result || !result.success) {
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.FAILED,
+          metadata: {
+            ...transaction.metadata,
+            failureReason: result?.error || "Vendor purchase failed",
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+      return `❌ Data purchase failed: ${result?.error || "Unknown error"}`;
+    }
+
+    await prisma.$transaction([
+      prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          walletBalance: { decrement: amount },
+        },
+      }),
+      prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          userId: user.id,
+          type: "DEBIT",
+          amount: amount,
+          balanceBefore: walletBalance,
+          balanceAfter: walletBalance - amount,
+          reference: `VTU_${transaction.id}`,
+          description: `Data purchase for ${phoneNumber}`,
+          status: "SUCCESS",
+          category: "DATA",
+        },
+      }),
+      prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.SUCCESS,
+          totalDebited: amount,
+          token: result.data?.token || null,
+          vendorReference: result.vendorReference || null,
+          vendor: result.vendor as VtuVendor || null,
+          deliveredAt: new Date(),
+          metadata: {
+            ...transaction.metadata,
+            processed: true,
+            vendorResponse: result.data,
+            completedAt: new Date().toISOString(),
+          },
+        },
+      }),
+    ]);
+
+    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+    return `✅ Data Purchase Successful!
+
+Phone: ${phoneNumber}
+Plan: ${dataDisplay} (${planData.name || detectedNetwork})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Reference: ${transaction.id.substring(0, 10)}
+
+💡 Tip: To buy for others, use: DATA [phone] [plan]
+
+Thank you for using Bilscore!`;
+  } catch (error) {
+    console.error("Direct data purchase error:", error);
+    return `Failed to process data purchase. Please try again.`;
+  }
+}
+
+// ============================================================
+// WHATSAPP PURCHASE HANDLERS (WITH PIN)
+// ============================================================
+
+async function processAirtimePurchaseWhatsApp(user: any, phoneNumber: string, amount: number): Promise<string> {
+  try {
+    let cleanedNumber = normalizePhoneNumber(phoneNumber);
+    
+    const detectedNetwork = detectNetworkFromPhone(cleanedNumber);
+    if (!detectedNetwork) {
+      return `Could not detect network for ${cleanedNumber}.
+Please ensure the phone number is correct.
+
+Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
+    }
+
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) return `Wallet not found. Please contact support.`;
+
+    const walletBalance = Number(wallet.walletBalance);
+    if (walletBalance < amount) {
+      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+Need NGN ${amount.toFixed(2)}.
+
+Please fund your wallet and try again.`;
+    }
+
+    const networkEnum = mapNetwork(detectedNetwork);
+
+    let customer = await prisma.customer.findUnique({
+      where: { userId_phone: { userId: user.id, phone: cleanedNumber } },
+    });
+
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          userId: user.id,
+          phone: cleanedNumber,
+          fullName: null,
+          email: null,
+          customerType: "REGULAR",
+          totalTransactions: 0,
+          totalSpent: 0,
+          totalCommissionEarned: 0,
+          firstTransactionAt: new Date(),
+          tags: [],
+        },
+      });
+    }
+
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.AIRTIME,
+        product: detectedNetwork,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: cleanedNumber,
         network: networkEnum,
         status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
@@ -1783,6 +2168,8 @@ Please fund your wallet and try again.`;
           networkEnum: networkEnum,
           customerId: customer.id,
           pinVerified: false,
+          originalPhone: phoneNumber,
+          normalizedPhone: cleanedNumber,
         },
       },
     });
@@ -1817,7 +2204,7 @@ Please fund your wallet and try again.`;
         metadata: {
           validationToken: validationToken,
           expiresAt: validationExpiry.toISOString(),
-          phoneNumber: normalizedPhone,
+          phoneNumber: cleanedNumber,
           network: detectedNetwork,
         },
       },
@@ -1828,7 +2215,7 @@ Please fund your wallet and try again.`;
 
     return `Airtime Purchase Initiated!
 
-Phone: ${normalizedPhone}
+Phone: ${cleanedNumber}
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
@@ -1849,21 +2236,11 @@ After confirming, your airtime will be sent.`;
 
 async function processDataPurchaseWhatsApp(user: any, phoneNumber: string, planQuery: string): Promise<string> {
   try {
-    let cleanedNumber = phoneNumber.replace(/\D/g, '');
-    if (cleanedNumber.startsWith('234')) {
-      cleanedNumber = '0' + cleanedNumber.substring(3);
-    }
-    if (cleanedNumber.length < 10) {
-      cleanedNumber = cleanedNumber.padStart(10, '0');
-    }
-    if (cleanedNumber.length > 11) {
-      cleanedNumber = cleanedNumber.substring(0, 11);
-    }
-    const normalizedPhone = cleanedNumber;
-
-    const detectedNetwork = detectNetworkFromPhone(normalizedPhone);
+    let cleanedNumber = normalizePhoneNumber(phoneNumber);
+    
+    const detectedNetwork = detectNetworkFromPhone(cleanedNumber);
     if (!detectedNetwork) {
-      return `Could not detect network for ${normalizedPhone}.
+      return `Could not detect network for ${cleanedNumber}.
 Please ensure the phone number is correct.
 
 ${await getAvailablePlansForWhatsApp()}`;
@@ -1895,14 +2272,14 @@ Please fund your wallet and try again.`;
     const networkEnum = mapNetwork(detectedNetwork);
 
     let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: normalizedPhone } },
+      where: { userId_phone: { userId: user.id, phone: cleanedNumber } },
     });
 
     if (!customer) {
       customer = await prisma.customer.create({
         data: {
           userId: user.id,
-          phone: normalizedPhone,
+          phone: cleanedNumber,
           fullName: null,
           email: null,
           customerType: "REGULAR",
@@ -1922,7 +2299,7 @@ Please fund your wallet and try again.`;
         product: `${detectedNetwork} - ${planData.data}`,
         amount: amount,
         totalDebited: 0,
-        phoneNumber: normalizedPhone,
+        phoneNumber: cleanedNumber,
         network: networkEnum,
         networkPlan: planData.planCode || planQuery,
         status: TransactionStatus.PENDING,
@@ -1938,6 +2315,8 @@ Please fund your wallet and try again.`;
           dataAmount: planData.amountMB,
           customerId: customer.id,
           pinVerified: false,
+          originalPhone: phoneNumber,
+          normalizedPhone: cleanedNumber,
         },
       },
     });
@@ -1972,7 +2351,7 @@ Please fund your wallet and try again.`;
         metadata: {
           validationToken: validationToken,
           expiresAt: validationExpiry.toISOString(),
-          phoneNumber: normalizedPhone,
+          phoneNumber: cleanedNumber,
           network: detectedNetwork,
           planQuery: planQuery,
         },
@@ -1986,7 +2365,7 @@ Please fund your wallet and try again.`;
 
     return `Data Purchase Initiated!
 
-Phone: ${normalizedPhone}
+Phone: ${cleanedNumber}
 Plan: ${dataDisplay} (${planData.name || detectedNetwork})
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
@@ -2674,11 +3053,12 @@ Reply with HELP for available commands.`;
   }
 
   // ============================================================
-  // ✅ AIRTIME - SIMPLIFIED AUTO-DETECTION
+  // ✅ AIRTIME - WITH COUNTRY CODE SUPPORT & PIN SKIP FOR OWN NUMBER
   // ============================================================
   if (command === "AIRTIME" || command.startsWith("AIRTIME ")) {
     let targetPhone: string;
     let amountNum: number;
+    let isOwnNumber = false;
     
     // Parse intelligently
     if (parts.length === 2) {
@@ -2689,23 +3069,30 @@ Reply with HELP for available commands.`;
         // It's an amount - use user's phone
         targetPhone = user.phone;
         amountNum = parseFloat(param);
+        isOwnNumber = true;
       } else {
         // It's a phone number - missing amount
         return `Please specify the amount.
-Example: AIRTIME 500
-Or: AIRTIME 08012345678 500`;
+Example: AIRTIME 500 (buys for your number)
+Or: AIRTIME 08012345678 500 (buys for another number)
+Or: AIRTIME +2348012345678 500 (with country code)`;
       }
     } else if (parts.length >= 3) {
       // Two parameters: phone and amount
       targetPhone = parts[1];
       amountNum = parseFloat(parts[2]);
+      // Check if this is the user's own number
+      const normalizedTarget = normalizePhoneNumber(targetPhone);
+      const normalizedUser = normalizePhoneNumber(user.phone);
+      isOwnNumber = normalizedTarget === normalizedUser;
     } else {
       return `To buy airtime, reply with:
-AIRTIME [amount] - Buy for your number
+AIRTIME [amount] - Buy for YOUR number (no PIN required)
 AIRTIME [phone] [amount] - Buy for another number
 
 Example: AIRTIME 500
 Example: AIRTIME 08012345678 500
+Example: AIRTIME +2348012345678 500 (with country code)
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE
 Minimum: NGN 50 | Maximum: NGN 50,000`;
@@ -2720,55 +3107,77 @@ Example: AIRTIME 500`;
     // Use user's phone if targetPhone is invalid
     if (!targetPhone || targetPhone.length < 10) {
       targetPhone = user.phone;
-      console.log(`📱 [WhatsApp] Using registered number: ${targetPhone}`);
+      isOwnNumber = true;
     }
     
-    // Auto-detect network
-    const detectedNetwork = detectNetworkFromPhone(targetPhone);
+    // Normalize the target phone (handles country codes)
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    
+    // Auto-detect network from normalized number
+    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     if (!detectedNetwork) {
-      return `Could not detect network for ${targetPhone}.
+      return `Could not detect network for ${normalizedTarget}.
 Please ensure the phone number is correct.
+
+Supported formats:
+- 08012345678
+- +2348012345678
+- 2348012345678
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
     }
 
+    // ✅ SKIP PIN VALIDATION IF IT'S THE USER'S OWN NUMBER
+    if (isOwnNumber) {
+      console.log(`✅ [WhatsApp] Own number detected - skipping PIN validation`);
+      return await processAirtimePurchaseDirect(user, normalizedTarget, amountNum, detectedNetwork);
+    }
+
+    // For other numbers, require PIN
     if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first to buy airtime for other numbers.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-Your PIN is required for all transactions.`;
+For your own number, just use: AIRTIME 500 (no PIN needed)`;
     }
 
-    return await processAirtimePurchaseWhatsApp(user, targetPhone, amountNum);
+    return await processAirtimePurchaseWhatsApp(user, normalizedTarget, amountNum);
   }
 
   // ============================================================
-  // ✅ DATA - SIMPLIFIED AUTO-DETECTION
+  // ✅ DATA - WITH COUNTRY CODE SUPPORT & PIN SKIP FOR OWN NUMBER
   // ============================================================
   if (command === "DATA" || command.startsWith("DATA ")) {
     let targetPhone: string;
     let planQuery: string;
+    let isOwnNumber = false;
     
     if (parts.length === 2) {
       // Only one parameter - it's the plan
       targetPhone = user.phone;
       planQuery = parts[1];
+      isOwnNumber = true;
     } else if (parts.length >= 3) {
       // Two parameters: phone and plan
       targetPhone = parts[1];
       planQuery = parts.slice(2).join(' ');
+      // Check if this is the user's own number
+      const normalizedTarget = normalizePhoneNumber(targetPhone);
+      const normalizedUser = normalizePhoneNumber(user.phone);
+      isOwnNumber = normalizedTarget === normalizedUser;
     } else {
       const availablePlans = await getAvailablePlansForWhatsApp();
       return `To buy data, reply with:
-DATA [plan] - Buy for your number
+DATA [plan] - Buy for YOUR number (no PIN required)
 DATA [phone] [plan] - Buy for another number
 
 Example: DATA 1GB
 Example: DATA 08012345678 1GB
+Example: DATA +2348012345678 1GB (with country code)
 
 ${availablePlans}`;
     }
@@ -2785,30 +3194,45 @@ ${availablePlans}`;
     // Use user's phone if targetPhone is invalid
     if (!targetPhone || targetPhone.length < 10) {
       targetPhone = user.phone;
-      console.log(`📱 [WhatsApp] Using registered number: ${targetPhone}`);
+      isOwnNumber = true;
     }
     
-    // Auto-detect network
-    const detectedNetwork = detectNetworkFromPhone(targetPhone);
+    // Normalize the target phone (handles country codes)
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    
+    // Auto-detect network from normalized number
+    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     if (!detectedNetwork) {
-      return `Could not detect network for ${targetPhone}.
+      return `Could not detect network for ${normalizedTarget}.
 Please ensure the phone number is correct.
+
+Supported formats:
+- 08012345678
+- +2348012345678
+- 2348012345678
 
 ${await getAvailablePlansForWhatsApp()}`;
     }
 
+    // ✅ SKIP PIN VALIDATION IF IT'S THE USER'S OWN NUMBER
+    if (isOwnNumber) {
+      console.log(`✅ [WhatsApp] Own number detected - skipping PIN validation for DATA`);
+      return await processDataPurchaseDirect(user, normalizedTarget, planQuery, detectedNetwork);
+    }
+
+    // For other numbers, require PIN
     if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
+      return `You need to set a transaction PIN first to buy data for other numbers.
 
 To set your PIN, reply with:
 PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-Your PIN is required for all transactions.`;
+For your own number, just use: DATA 1GB (no PIN needed)`;
     }
 
-    return await processDataPurchaseWhatsApp(user, targetPhone, planQuery);
+    return await processDataPurchaseWhatsApp(user, normalizedTarget, planQuery);
   }
 
   // ============================================================
@@ -2928,7 +3352,6 @@ Example: ADDMETER 1234567890 ABUJA HOME
 After adding, you can buy electricity by just typing ELECTRIC!`;
     }
 
-    // If only one meter, show quick buy option
     if (meters.length === 1) {
       const meter = meters[0];
       return `Buy Electricity:
@@ -2960,7 +3383,7 @@ Or type ELECTRIC to see all saved meters.`;
     return message;
   }
 
-  // ✅ ELECTRICITY PURCHASE - SUPPORTS BOTH
+  // ✅ ELECTRICITY PURCHASE
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     
@@ -2988,10 +3411,8 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
 Example: ELECTRIC 5000`;
       }
 
-      // Find default meter or the only meter
       let selectedMeter = meters.find(m => m.isDefault) || meters[0];
       
-      // If multiple meters and no default, ask user to select
       if (meters.length > 1 && !meters.find(m => m.isDefault)) {
         let message = "Multiple meters found. Please select one:\n\n";
         meters.forEach((meter: any, index: number) => {
@@ -3383,9 +3804,9 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
-AIRTIME [amount] - Buy airtime for your number
+AIRTIME [amount] - Buy airtime for your number (no PIN)
 AIRTIME [phone] [amount] - Buy airtime for another number
-DATA [plan] - Buy data for your number
+DATA [plan] - Buy data for your number (no PIN)
 DATA [phone] [plan] - Buy data for another number
 ELECTRIC - See saved meters
 ELECTRIC [amount] - Buy electricity (auto-selects your meter)
@@ -3414,11 +3835,11 @@ BALANCE - Check wallet balance
 TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
-Airtime & Data:
-AIRTIME [amount] - Buy airtime for your number
-AIRTIME [phone] [amount] - Buy airtime for another number
-DATA [plan] - Buy data for your number
-DATA [phone] [plan] - Buy data for another number
+Airtime & Data (NO PIN for own number):
+AIRTIME [amount] - Buy airtime for YOUR number ✨
+AIRTIME [phone] [amount] - Buy airtime for others
+DATA [plan] - Buy data for YOUR number ✨
+DATA [phone] [plan] - Buy data for others
 
 Electricity:
 ELECTRIC - Show saved meters
@@ -3450,7 +3871,8 @@ REFERRAL - Get referral link
 Help:
 HELP - Show this message
 
-All purchases require PIN validation via secure link.
+✨ = No PIN required when buying for your own number
+All other purchases require PIN validation via secure link.
 
 Need help? Visit: ${getAppUrl()}/support`;
 }
