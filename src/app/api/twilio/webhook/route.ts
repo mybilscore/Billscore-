@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - UPDATED WITH REQUESTED CHANGES
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -379,6 +379,57 @@ async function saveMeterAsync(userId: string, meterNumber: string, disco: string
   } catch (error) {
     // Non-critical - ignore
     console.warn(`[WhatsApp] Failed to auto-save meter: ${error}`);
+  }
+}
+
+// ============================================================
+// FIXED: METER VERIFICATION USING API ROUTE (Same as Dashboard)
+// ============================================================
+
+async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
+  try {
+    // ✅ Use the same API route that the dashboard uses
+    const apiUrl = getApiUrl();
+    const url = `${apiUrl}/api/vendors/electricity/verify-meter`;
+    
+    console.log(`[VTpass] Calling verify-meter API: ${url}`);
+    console.log(`[VTpass] Service: ${serviceID}, Meter: ${meterNumber}, Type: ${meterType}`);
+    
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        serviceID: serviceID,
+        meterNumber: meterNumber,
+        meterType: meterType,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const result = await response.json();
+    
+    console.log(`[VTpass] API Response:`, result.success ? 'Success' : 'Failed');
+    
+    if (!response.ok || !result.success) {
+      console.error(`[VTpass] Verification failed:`, result.error);
+      return {
+        success: false,
+        error: result.error || "Meter verification failed",
+      };
+    }
+
+    return {
+      success: true,
+      data: result.data,
+    };
+  } catch (error: any) {
+    console.error('[VTpass] Verification error:', error.message);
+    return {
+      success: false,
+      error: error.message || "Network error",
+    };
   }
 }
 
@@ -1313,61 +1364,8 @@ async function getAvailableEducationProducts(): Promise<string> {
 }
 
 // ============================================================
-// METER & DECODER VERIFICATION
+// VERIFY DECODER WITH VTPASS
 // ============================================================
-
-async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
-  try {
-    const isProduction = process.env.NODE_ENV === "production";
-    const baseUrl = isProduction 
-      ? "https://vtpass.com/api/merchant-verify"
-      : "https://sandbox.vtpass.com/api/merchant-verify";
-    
-    const apiKey = isProduction 
-      ? process.env.VTPASS_LIVE_API_KEY 
-      : process.env.VTPASS_SANDBOX_API_KEY;
-    
-    const secretKey = isProduction
-      ? process.env.VTPASS_LIVE_SECRET_KEY
-      : process.env.VTPASS_SANDBOX_SECRET_KEY;
-
-    const response = await fetch(baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": apiKey || "",
-        "secret-key": secretKey || "",
-      },
-      body: JSON.stringify({
-        serviceID: serviceID,
-        billersCode: meterNumber,
-        type: meterType,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-
-    const data = await response.json();
-    if (data.code === "000" && data.content) {
-      return {
-        success: true,
-        data: {
-          customerName: data.content.Customer_Name || data.content.customerName || "Unknown",
-          customerAddress: data.content.Address || data.content.address || "",
-          meterNumber: data.content.Meter_Number || data.content.meterNumber || meterNumber,
-          meterType: data.content.Meter_Type || data.content.meterType || meterType,
-          status: data.content.Status || data.content.status || "ACTIVE",
-        },
-      };
-    }
-    return { success: false, error: data.response_description || "Meter verification failed" };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Network error" };
-  }
-}
 
 async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
   try {
@@ -4062,7 +4060,7 @@ Example: ELECTRIC 1234567890 ABUJA 5000`;
 Available: ${validDiscos.join(", ")}`;
       }
       
-      // Verify meter before purchase
+      // ✅ Use the API route for verification (same as dashboard)
       const verificationResult = await verifyMeterWithVTpass(
         discoUpper.toLowerCase() + "-electric",
         meterNumber,
