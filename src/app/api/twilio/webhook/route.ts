@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED FIXED VERSION
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED WITH PIN FOR EXTERNAL PURCHASES
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -1782,7 +1782,97 @@ If the problem persists, type HELP for support.`;
 }
 
 // ============================================================
-// DIRECT PURCHASE HANDLERS (NO PIN REQUIRED)
+// ERROR HANDLING HELPER - Converts errors to user-friendly messages
+// ============================================================
+
+function formatErrorMessage(error: any): string {
+  const errorMessage = error?.message || error?.error || String(error);
+  
+  console.log(`🔍 [Error Format] Original: ${errorMessage}`);
+  
+  // Network/Connection errors
+  if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') || 
+      errorMessage.includes('ETIMEDOUT') || errorMessage.includes('network')) {
+    return `⏰ Network connection issue. Please check your internet and try again.`;
+  }
+  
+  // Vendor API errors
+  if (errorMessage.includes('vendor') || errorMessage.includes('provider')) {
+    if (errorMessage.includes('timeout')) {
+      return `⏰ The service provider is taking too long to respond. Please try again in a few minutes.`;
+    }
+    if (errorMessage.includes('balance') || errorMessage.includes('insufficient')) {
+      return `⚠️ Insufficient balance on the vendor side. Please try again or contact support.`;
+    }
+    if (errorMessage.includes('invalid') || errorMessage.includes('incorrect')) {
+      return `❌ Invalid request. Please check the details and try again.`;
+    }
+    return `⚠️ Service provider is currently unavailable. Please try again later.`;
+  }
+  
+  // Wallet/Balance errors
+  if (errorMessage.includes('balance') || errorMessage.includes('insufficient')) {
+    return `⚠️ Insufficient balance. Please fund your wallet and try again.`;
+  }
+  
+  // Database errors
+  if (errorMessage.includes('database') || errorMessage.includes('prisma')) {
+    return `⚠️ System is busy. Please try again in a moment.`;
+  }
+  
+  // Phone number errors
+  if (errorMessage.includes('phone') || errorMessage.includes('number')) {
+    return `❌ Invalid phone number format. Please use: 08012345678 or +2348012345678`;
+  }
+  
+  // Meter errors
+  if (errorMessage.includes('meter')) {
+    if (errorMessage.includes('invalid')) {
+      return `❌ Invalid meter number. Please check and try again.`;
+    }
+    if (errorMessage.includes('not found')) {
+      return `❌ Meter not found. Please verify the meter number.`;
+    }
+    return `⚠️ Meter verification failed. Please try again.`;
+  }
+  
+  // Decoder errors
+  if (errorMessage.includes('decoder') || errorMessage.includes('smart card')) {
+    if (errorMessage.includes('invalid')) {
+      return `❌ Invalid decoder number. Please check and try again.`;
+    }
+    if (errorMessage.includes('not found')) {
+      return `❌ Decoder not found. Please verify the decoder number.`;
+    }
+    return `⚠️ Decoder verification failed. Please try again.`;
+  }
+  
+  // Data plan errors
+  if (errorMessage.includes('plan') || errorMessage.includes('data')) {
+    return `❌ Invalid data plan. Please check available plans with: PLANS`;
+  }
+  
+  // Airtime errors
+  if (errorMessage.includes('airtime')) {
+    return `❌ Airtime purchase failed. Please check the phone number and try again.`;
+  }
+  
+  // Cable TV errors
+  if (errorMessage.includes('cable') || errorMessage.includes('subscription')) {
+    return `❌ Cable subscription failed. Please check the decoder and try again.`;
+  }
+  
+  // Education errors
+  if (errorMessage.includes('education') || errorMessage.includes('pin')) {
+    return `❌ Education PIN purchase failed. Please try again.`;
+  }
+  
+  // Generic fallback
+  return `❌ Purchase failed. Please try again or contact support if the issue persists.`;
+}
+
+// ============================================================
+// DIRECT PURCHASE HANDLERS (NO PIN REQUIRED - OWN NUMBER/METER)
 // ============================================================
 
 async function processAirtimePurchaseDirect(
@@ -1797,7 +1887,7 @@ async function processAirtimePurchaseDirect(
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+      return `⚠️ Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
 Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
@@ -1851,115 +1941,133 @@ Please fund your wallet and try again.`;
       },
     });
 
-    const vendorService = getVendorService();
-    const result = await vendorService.buyAirtime(
-      {
-        phoneNumber: phoneNumber,
-        amount: amount,
-        network: detectedNetwork,
-      },
-      user.id
-    );
-
-    if (!result || !result.success) {
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: TransactionStatus.FAILED,
-          metadata: {
-            ...transaction.metadata,
-            failureReason: result?.error || "Vendor purchase failed",
-            failedAt: new Date().toISOString(),
-          },
-        },
-      });
-      return `❌ Airtime purchase failed: ${result?.error || "Unknown error"}`;
-    }
-
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          walletBalance: { decrement: amount },
-        },
-      }),
-      prisma.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          userId: user.id,
-          type: "DEBIT",
+    try {
+      const vendorService = getVendorService();
+      const result = await vendorService.buyAirtime(
+        {
+          phoneNumber: phoneNumber,
           amount: amount,
-          balanceBefore: walletBalance,
-          balanceAfter: walletBalance - amount,
-          reference: `VTU_${transaction.id}`,
-          description: `Airtime purchase for ${phoneNumber}`,
-          status: "SUCCESS",
-          category: "AIRTIME",
+          network: detectedNetwork,
         },
-      }),
-      prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: TransactionStatus.SUCCESS,
-          totalDebited: amount,
-          token: result.data?.token || null,
-          vendorReference: result.vendorReference || null,
-          vendor: result.vendor as VtuVendor || null,
-          deliveredAt: new Date(),
-          metadata: {
-            ...transaction.metadata,
-            processed: true,
-            vendorResponse: result.data,
-            completedAt: new Date().toISOString(),
-          },
-        },
-      }),
-    ]);
+        user.id
+      );
 
-    return `✅ Airtime Purchase Successful!
+      if (!result || !result.success) {
+        await prisma.vtuTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: TransactionStatus.FAILED,
+            metadata: {
+              ...transaction.metadata,
+              failureReason: result?.error || "Vendor purchase failed",
+              failedAt: new Date().toISOString(),
+            },
+          },
+        });
+        return formatErrorMessage(result?.error || "Vendor purchase failed");
+      }
+
+      await prisma.$transaction([
+        prisma.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            walletBalance: { decrement: amount },
+          },
+        }),
+        prisma.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            userId: user.id,
+            type: "DEBIT",
+            amount: amount,
+            balanceBefore: walletBalance,
+            balanceAfter: walletBalance - amount,
+            reference: `VTU_${transaction.id}`,
+            description: `Airtime purchase for ${phoneNumber}`,
+            status: "SUCCESS",
+            category: "AIRTIME",
+          },
+        }),
+        prisma.vtuTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: TransactionStatus.SUCCESS,
+            totalDebited: amount,
+            token: result.data?.token || null,
+            vendorReference: result.vendorReference || null,
+            vendor: result.vendor as VtuVendor || null,
+            deliveredAt: new Date(),
+            metadata: {
+              ...transaction.metadata,
+              processed: true,
+              vendorResponse: result.data,
+              completedAt: new Date().toISOString(),
+            },
+          },
+        }),
+      ]);
+
+      return `✅ Airtime Purchase Successful!
 
 Phone: ${phoneNumber}
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
 
-💡 Tip: To buy for others, use: AIRTIME [phone] [amount]
-
 Thank you for using Bilscore!`;
-  } catch (error) {
+    } catch (vendorError: any) {
+      console.error("Vendor error:", vendorError);
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.FAILED,
+          metadata: {
+            ...transaction.metadata,
+            failureReason: vendorError?.message || "Vendor error",
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+      return formatErrorMessage(vendorError);
+    }
+  } catch (error: any) {
     console.error("Direct airtime purchase error:", error);
-    return `Failed to process airtime purchase. Please try again.`;
+    return formatErrorMessage(error);
   }
 }
 
-async function processDataPurchaseDirect(
+// ============================================================
+// EXTERNAL PURCHASE HANDLERS (PIN REQUIRED)
+// ============================================================
+
+async function processAirtimePurchaseWithPin(
   user: any, 
   phoneNumber: string, 
-  planQuery: string,
+  amount: number,
   detectedNetwork: string
 ): Promise<string> {
   try {
     const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
     if (!wallet) return `Wallet not found. Please contact support.`;
 
-    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
-    
-    if (!planData) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `No data plan found for ${detectedNetwork} with "${planQuery}".
-
-${availablePlans}
-
-Example: DATA 1GB`;
-    }
-
-    const amount = Number(planData.price);
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
+      return `⚠️ Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
 Need NGN ${amount.toFixed(2)}.
 
 Please fund your wallet and try again.`;
+    }
+
+    // Check if user has PIN set
+    if (!user.pinHash) {
+      return `🔐 You need to set a transaction PIN first to buy airtime for other numbers.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+For your own number, just use: AIRTIME 500 (no PIN needed)`;
     }
 
     const networkEnum = mapNetwork(detectedNetwork);
@@ -1988,175 +2096,11 @@ Please fund your wallet and try again.`;
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
-        transactionType: VtuType.DATA,
-        product: `${detectedNetwork} - ${planData.data}`,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: phoneNumber,
-        network: networkEnum,
-        networkPlan: planData.planCode || planQuery,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "DATA",
-          timestamp: new Date().toISOString(),
-          network: detectedNetwork,
-          networkEnum: networkEnum,
-          planQuery: planQuery,
-          planName: planData.name,
-          dataAmount: planData.amountMB,
-          customerId: customer.id,
-          pinVerified: true,
-          skipPin: true,
-          isOwnNumber: true,
-        },
-      },
-    });
-
-    const vendorService = getVendorService();
-    const result = await vendorService.buyData(
-      {
-        phoneNumber: phoneNumber,
-        planCode: planData.planCode || planQuery,
-        network: detectedNetwork,
-        amount: amount,
-      },
-      user.id
-    );
-
-    if (!result || !result.success) {
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: TransactionStatus.FAILED,
-          metadata: {
-            ...transaction.metadata,
-            failureReason: result?.error || "Vendor purchase failed",
-            failedAt: new Date().toISOString(),
-          },
-        },
-      });
-      return `❌ Data purchase failed: ${result?.error || "Unknown error"}`;
-    }
-
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          walletBalance: { decrement: amount },
-        },
-      }),
-      prisma.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          userId: user.id,
-          type: "DEBIT",
-          amount: amount,
-          balanceBefore: walletBalance,
-          balanceAfter: walletBalance - amount,
-          reference: `VTU_${transaction.id}`,
-          description: `Data purchase for ${phoneNumber}`,
-          status: "SUCCESS",
-          category: "DATA",
-        },
-      }),
-      prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: TransactionStatus.SUCCESS,
-          totalDebited: amount,
-          token: result.data?.token || null,
-          vendorReference: result.vendorReference || null,
-          vendor: result.vendor as VtuVendor || null,
-          deliveredAt: new Date(),
-          metadata: {
-            ...transaction.metadata,
-            processed: true,
-            vendorResponse: result.data,
-            completedAt: new Date().toISOString(),
-          },
-        },
-      }),
-    ]);
-
-    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
-    return `✅ Data Purchase Successful!
-
-Phone: ${phoneNumber}
-Plan: ${dataDisplay} (${planData.name || detectedNetwork})
-Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
-Reference: ${transaction.id.substring(0, 10)}
-
-💡 Tip: To buy for others, use: DATA [phone] [plan]
-
-Thank you for using Bilscore!`;
-  } catch (error) {
-    console.error("Direct data purchase error:", error);
-    return `Failed to process data purchase. Please try again.`;
-  }
-}
-
-// ============================================================
-// WHATSAPP PURCHASE HANDLERS (WITH PIN)
-// ============================================================
-
-async function processAirtimePurchaseWhatsApp(user: any, phoneNumber: string, amount: number): Promise<string> {
-  try {
-    let cleanedNumber = normalizePhoneNumber(phoneNumber);
-    
-    const detectedNetwork = detectNetworkFromPhone(cleanedNumber);
-    if (!detectedNetwork) {
-      return `Could not detect network for ${cleanedNumber}.
-Please ensure the phone number is correct.
-
-Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
-    }
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    const networkEnum = mapNetwork(detectedNetwork);
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: cleanedNumber } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: cleanedNumber,
-          fullName: null,
-          email: null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
         transactionType: VtuType.AIRTIME,
         product: detectedNetwork,
         amount: amount,
         totalDebited: 0,
-        phoneNumber: cleanedNumber,
+        phoneNumber: phoneNumber,
         network: networkEnum,
         status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
@@ -2168,8 +2112,7 @@ Please fund your wallet and try again.`;
           networkEnum: networkEnum,
           customerId: customer.id,
           pinVerified: false,
-          originalPhone: phoneNumber,
-          normalizedPhone: cleanedNumber,
+          isOwnNumber: false,
         },
       },
     });
@@ -2204,7 +2147,7 @@ Please fund your wallet and try again.`;
         metadata: {
           validationToken: validationToken,
           expiresAt: validationExpiry.toISOString(),
-          phoneNumber: cleanedNumber,
+          phoneNumber: phoneNumber,
           network: detectedNetwork,
         },
       },
@@ -2213,9 +2156,9 @@ Please fund your wallet and try again.`;
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `Airtime Purchase Initiated!
+    return `🔐 Airtime Purchase Requires PIN Confirmation!
 
-Phone: ${cleanedNumber}
+Phone: ${phoneNumber}
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
@@ -2227,787 +2170,15 @@ ${validationLink}
 This link expires in 5 minutes.
 Your PIN is secure and will not be shared via WhatsApp.
 
-After confirming, your airtime will be sent.`;
+💡 For your own number, use: AIRTIME 500 (no PIN needed)`;
   } catch (error) {
-    console.error("WhatsApp airtime purchase error:", error);
-    return `Failed to initiate airtime purchase. Please try again.`;
-  }
-}
-
-async function processDataPurchaseWhatsApp(user: any, phoneNumber: string, planQuery: string): Promise<string> {
-  try {
-    let cleanedNumber = normalizePhoneNumber(phoneNumber);
-    
-    const detectedNetwork = detectNetworkFromPhone(cleanedNumber);
-    if (!detectedNetwork) {
-      return `Could not detect network for ${cleanedNumber}.
-Please ensure the phone number is correct.
-
-${await getAvailablePlansForWhatsApp()}`;
-    }
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
-    
-    if (!planData) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `No data plan found for ${detectedNetwork} with "${planQuery}".
-
-${availablePlans}
-
-Example: DATA 08012345678 1GB`;
-    }
-
-    const amount = Number(planData.price);
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    const networkEnum = mapNetwork(detectedNetwork);
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: cleanedNumber } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: cleanedNumber,
-          fullName: null,
-          email: null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.DATA,
-        product: `${detectedNetwork} - ${planData.data}`,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: cleanedNumber,
-        network: networkEnum,
-        networkPlan: planData.planCode || planQuery,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "DATA",
-          timestamp: new Date().toISOString(),
-          network: detectedNetwork,
-          networkEnum: networkEnum,
-          planQuery: planQuery,
-          planName: planData.name,
-          dataAmount: planData.amountMB,
-          customerId: customer.id,
-          pinVerified: false,
-          originalPhone: phoneNumber,
-          normalizedPhone: cleanedNumber,
-        },
-      },
-    });
-
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-    await prisma.vtuTransaction.update({
-      where: { id: transaction.id },
-      data: {
-        metadata: {
-          ...transaction.metadata,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry.toISOString(),
-          pendingPin: true,
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: walletBalance,
-        balanceAfter: walletBalance,
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending data purchase - await PIN validation`,
-        status: "PENDING",
-        category: "DATA",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: validationExpiry.toISOString(),
-          phoneNumber: cleanedNumber,
-          network: detectedNetwork,
-          planQuery: planQuery,
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
-    return `Data Purchase Initiated!
-
-Phone: ${cleanedNumber}
-Plan: ${dataDisplay} (${planData.name || detectedNetwork})
-Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
-Validity: ${planData.validity || "30 days"}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your data bundle will be activated.`;
-  } catch (error) {
-    console.error("WhatsApp data purchase error:", error);
-    return `Failed to initiate data purchase. Please try again.`;
-  }
-}
-
-async function processElectricityPurchaseWhatsApp(
-  user: any, 
-  meterNumber: string, 
-  amount: number, 
-  discoCode: string,
-  meterType: string = "Prepaid"
-): Promise<string> {
-  try {
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: user.phone } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: user.phone,
-          fullName: user.fullName || null,
-          email: user.email || null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.ELECTRICITY_INSTANT,
-        product: discoCode,
-        amount: amount,
-        totalDebited: 0,
-        meterNumber: meterNumber,
-        meterType: meterType.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "ELECTRICITY",
-          timestamp: new Date().toISOString(),
-          discoCode: discoCode,
-          meterType: meterType,
-          customerId: customer.id,
-          pinVerified: false,
-        },
-      },
-    });
-
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-    await prisma.vtuTransaction.update({
-      where: { id: transaction.id },
-      data: {
-        metadata: {
-          ...transaction.metadata,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry.toISOString(),
-          pendingPin: true,
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: walletBalance,
-        balanceAfter: walletBalance,
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending electricity purchase - await PIN validation`,
-        status: "PENDING",
-        category: "ELECTRICITY",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: validationExpiry.toISOString(),
-          meterNumber: meterNumber,
-          discoCode: discoCode,
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    return `Electricity Purchase Initiated!
-
-Meter: ${meterNumber}
-DisCo: ${discoCode}
-Amount: NGN ${amount.toFixed(2)}
-Meter Type: ${meterType}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your electricity token will be sent here.`;
-  } catch (error) {
-    console.error("WhatsApp electricity purchase error:", error);
-    return `Failed to initiate electricity purchase. Please try again.`;
-  }
-}
-
-async function processCablePurchaseWhatsApp(
-  user: any, 
-  decoderNumber: string, 
-  packageQuery: string,
-  provider: string
-): Promise<string> {
-  try {
-    const serviceMap: Record<string, string> = {
-      'DSTV': 'dstv', 'dstv': 'dstv',
-      'GOTV': 'gotv', 'gotv': 'gotv',
-      'STARTIMES': 'startimes', 'startimes': 'startimes',
-    };
-
-    const serviceId = serviceMap[provider] || 'dstv';
-    const isProduction = process.env.NODE_ENV === "production";
-    const baseUrl = isProduction 
-      ? "https://vtpass.com/api/service-variations"
-      : "https://sandbox.vtpass.com/api/service-variations";
-    
-    const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    let packageData = null;
-    if (response.ok) {
-      const data = await response.json();
-      if (data.response_description === "000" && data.content?.variations) {
-        const normalizedQuery = packageQuery.toLowerCase().trim();
-        packageData = data.content.variations.find((v: any) => 
-          v.variation_code?.toLowerCase() === normalizedQuery ||
-          v.name?.toLowerCase().includes(normalizedQuery)
-        );
-        if (!packageData && data.content.variations.length > 0) {
-          packageData = data.content.variations[0];
-        }
-      }
-    }
-
-    if (!packageData) {
-      const packagesList = await getAvailablePackagesForWhatsApp(provider);
-      return `No package found for "${packageQuery}" with ${provider}.
-
-${packagesList}`;
-    }
-
-    const amount = parseFloat(packageData.variation_amount) || 0;
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: user.phone } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: user.phone,
-          fullName: user.fullName || null,
-          email: user.email || null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.CABLE_TV,
-        product: `${provider} - ${packageData.name}`,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: user.phone,
-        networkPlan: packageData.variation_code,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "CABLE_TV",
-          timestamp: new Date().toISOString(),
-          provider: provider,
-          packageCode: packageData.variation_code,
-          packageName: packageData.name,
-          smartCardNumber: decoderNumber,
-          customerId: customer.id,
-          pinVerified: false,
-        },
-      },
-    });
-
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-    await prisma.vtuTransaction.update({
-      where: { id: transaction.id },
-      data: {
-        metadata: {
-          ...transaction.metadata,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry.toISOString(),
-          pendingPin: true,
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: walletBalance,
-        balanceAfter: walletBalance,
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending cable subscription - await PIN validation`,
-        status: "PENDING",
-        category: "CABLE_TV",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: validationExpiry.toISOString(),
-          decoderNumber: decoderNumber,
-          provider: provider,
-          packageCode: packageData.variation_code,
-          packageName: packageData.name,
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    return `Cable Subscription Initiated!
-
-Decoder: ${decoderNumber}
-Provider: ${provider}
-Package: ${packageData.name}
-Amount: NGN ${amount.toFixed(2)}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your subscription will be activated.`;
-  } catch (error) {
-    console.error("WhatsApp cable purchase error:", error);
-    return `Failed to initiate cable subscription. Please try again.`;
-  }
-}
-
-async function processEducationPurchaseWhatsApp(
-  user: any,
-  productType: string,
-  quantity: number
-): Promise<string> {
-  try {
-    const serviceMap: Record<string, { serviceId: string; variationCode: string; name: string; price: number }> = {
-      'WAEC': { serviceId: 'waec-registration', variationCode: 'waec-registration', name: 'WAEC Registration PIN', price: 14450 },
-      'WAEC-RESULT': { serviceId: 'waec', variationCode: 'waecdirect', name: 'WAEC Result Checker PIN', price: 900 },
-      'JAMB': { serviceId: 'jamb', variationCode: 'utme-no-mock', name: 'JAMB UTME PIN', price: 6200 },
-      'NECO': { serviceId: 'neco', variationCode: 'neco-registration', name: 'NECO Registration PIN', price: 11000 },
-    };
-
-    const productInfo = serviceMap[productType];
-    if (!productInfo) {
-      const productsList = await getAvailableEducationProducts();
-      return `Invalid product: ${productType}
-
-Available products:
-${productsList}
-
-Examples:
-EDU WAEC 2
-EDU JAMB 1
-WAEC 2`;
-    }
-
-    const amount = productInfo.price * quantity;
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: user.phone } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: user.phone,
-          fullName: user.fullName || null,
-          email: user.email || null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.EDUCATION,
-        product: productInfo.serviceId,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: user.phone,
-        network: null,
-        networkPlan: productInfo.variationCode,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        isBulkPurchase: quantity > 1,
-        bulkQuantity: quantity > 1 ? quantity : undefined,
-        metadata: {
-          source: "WhatsApp",
-          service: "EDUCATION",
-          timestamp: new Date().toISOString(),
-          serviceId: productInfo.serviceId,
-          variationCode: productInfo.variationCode,
-          quantity: quantity,
-          productName: productInfo.name,
-          productType: productType,
-          customerId: customer.id,
-          pinVerified: false,
-        },
-      },
-    });
-
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-    await prisma.vtuTransaction.update({
-      where: { id: transaction.id },
-      data: {
-        metadata: {
-          ...transaction.metadata,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry.toISOString(),
-          pendingPin: true,
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: walletBalance,
-        balanceAfter: walletBalance,
-        reference: `PENDING_${transaction.id}`,
-        description: `Pending education purchase - await PIN validation`,
-        status: "PENDING",
-        category: "EDUCATION",
-        metadata: {
-          validationToken: validationToken,
-          expiresAt: validationExpiry.toISOString(),
-          productType: productType,
-          productName: productInfo.name,
-          quantity: quantity,
-          serviceId: productInfo.serviceId,
-        },
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-    return `Education Purchase Initiated!
-
-Product: ${productInfo.name}
-Quantity: ${quantity}
-Amount: NGN ${amount.toFixed(2)}
-Service: ${productType}
-Reference: ${transaction.id.substring(0, 10)}
-
-To complete this purchase, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your ${quantity > 1 ? 'PINs will' : 'PIN will'} be sent to you.`;
-  } catch (error) {
-    console.error("WhatsApp education purchase error:", error);
-    return `Failed to initiate education purchase. Please try again.`;
-  }
-}
-
-async function processSubscriptionWhatsApp(
-  user: any,
-  meterNumber: string,
-  discoCode: string,
-  amount: number,
-  days: number,
-  meterType: string = "Prepaid"
-): Promise<string> {
-  try {
-    const deliveryDate = new Date();
-    deliveryDate.setDate(deliveryDate.getDate() + days);
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
-    if (!wallet) return `Wallet not found. Please contact support.`;
-
-    const walletBalance = Number(wallet.walletBalance);
-    if (walletBalance < amount) {
-      return `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}.
-Need NGN ${amount.toFixed(2)}.
-
-Please fund your wallet and try again.`;
-    }
-
-    let customer = await prisma.customer.findUnique({
-      where: { userId_phone: { userId: user.id, phone: user.phone } },
-    });
-
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          userId: user.id,
-          phone: user.phone,
-          fullName: user.fullName || null,
-          email: user.email || null,
-          customerType: "REGULAR",
-          totalTransactions: 0,
-          totalSpent: 0,
-          totalCommissionEarned: 0,
-          firstTransactionAt: new Date(),
-          tags: [],
-        },
-      });
-    }
-
-    const discoEnum = mapDiscoCode(discoCode);
-    if (!discoEnum) {
-      return `Invalid DisCo: ${discoCode}`;
-    }
-
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-    const preOrder = await prisma.preOrder.create({
-      data: {
-        userId: user.id,
-        disCo: discoEnum,
-        meterNumber: meterNumber,
-        meterType: meterType.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-        meterName: `${discoCode} Meter`,
-        amount: amount,
-        serviceFee: 0,
-        totalDebited: 0,
-        deliveryDate: deliveryDate,
-        status: "PENDING",
-        isCancelled: false,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "SUBSCRIPTION",
-          timestamp: new Date().toISOString(),
-          serviceType: "electricity",
-          isSubscription: true,
-          isReserved: true,
-          reservedAmount: amount,
-          scheduledDate: deliveryDate.toISOString(),
-          tokenPurchased: false,
-          walletId: wallet.id,
-          paymentPending: true,
-          days: days,
-          customerId: customer.id,
-          pinVerified: false,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry.toISOString(),
-          pendingPin: true,
-        },
-      },
-    });
-
-    await prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        userId: user.id,
-        type: "SYSTEM",
-        amount: amount,
-        balanceBefore: walletBalance,
-        balanceAfter: walletBalance,
-        reference: `RESERVE_${preOrder.id}`,
-        description: `Reserved for electricity delivery on ${deliveryDate.toLocaleDateString()}`,
-        status: "PENDING",
-        category: "ELECTRICITY",
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          preOrderId: preOrder.id,
-          deliveryDate: deliveryDate.toISOString(),
-          serviceType: "electricity",
-          isReserved: true,
-          amountReserved: amount,
-          scheduledDate: deliveryDate.toISOString(),
-          tokenPurchased: false,
-          walletId: wallet.id,
-          paymentPending: true,
-          source: "WhatsApp",
-          validationToken: validationToken,
-        },
-      },
-    });
-
-    await prisma.job.create({
-      data: {
-        type: JobType.SUBSCRIPTION_PROCESSING,
-        status: JobStatus.PENDING,
-        payload: {
-          preOrderId: preOrder.id,
-          userId: user.id,
-          serviceType: "electricity",
-          amount: amount,
-          deliveryDate: deliveryDate.toISOString(),
-          walletId: wallet.id,
-          reserveTransactionId: `RESERVE_${preOrder.id}`,
-          tokenVaultId: null,
-          vtuTransactionId: null,
-          token: null,
-          tokenPurchased: false,
-          wasDebited: false,
-          meterNumber: meterNumber,
-          discoCode: discoCode,
-          source: "WhatsApp",
-          validationToken: validationToken,
-        },
-        priority: 5,
-        maxAttempts: 3,
-        scheduledFor: deliveryDate,
-      },
-    });
-
-    const appUrl = getAppUrl();
-    const validationLink = `${appUrl}/auth/validate-subscription?token=${validationToken}`;
-
-    const deliveryDateStr = deliveryDate.toLocaleDateString();
-
-    return `Electricity Subscription Initiated!
-
-Meter: ${meterNumber}
-DisCo: ${discoCode}
-Amount: NGN ${amount.toFixed(2)}
-Delivery Date: ${deliveryDateStr}
-Subscription ID: ${preOrder.id.substring(0, 10)}
-
-To complete this subscription, please confirm your PIN:
-
-${validationLink}
-
-This link expires in 5 minutes.
-Your PIN is secure and will not be shared via WhatsApp.
-
-After confirming, your token will be scheduled for delivery on ${deliveryDateStr}.
-
-To see your active subscriptions: SUBSCRIPTIONS
-To cancel: CANCEL [subscription_id]`;
-  } catch (error) {
-    console.error("WhatsApp subscription error:", error);
-    return `Failed to create subscription. Please try again.`;
+    console.error("Airtime purchase with PIN error:", error);
+    return formatErrorMessage(error);
   }
 }
 
 // ============================================================
-// MAIN COMMAND PROCESSOR - FIXED VERSION
+// MAIN COMMAND PROCESSOR - FIXED VERSION (PIN FOR EXTERNAL, NO PIN FOR OWN)
 // ============================================================
 
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
@@ -3053,67 +2224,55 @@ Reply with HELP for available commands.`;
   }
 
   // ============================================================
-  // ✅ AIRTIME - WITH COUNTRY CODE SUPPORT & PIN SKIP FOR OWN NUMBER
+  // ✅ AIRTIME - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
   // ============================================================
   if (command === "AIRTIME" || command.startsWith("AIRTIME ")) {
     let targetPhone: string;
     let amountNum: number;
     let isOwnNumber = false;
     
-    // Parse intelligently
     if (parts.length === 2) {
-      // Only one parameter - could be amount or phone
       const param = parts[1];
-      // Check if it looks like an amount (2-5 digits)
       if (/^\d{2,5}$/.test(param)) {
-        // It's an amount - use user's phone
         targetPhone = user.phone;
         amountNum = parseFloat(param);
         isOwnNumber = true;
       } else {
-        // It's a phone number - missing amount
         return `Please specify the amount.
-Example: AIRTIME 500 (buys for your number)
-Or: AIRTIME 08012345678 500 (buys for another number)
+Example: AIRTIME 500 (buys for your number - no PIN)
+Or: AIRTIME 08012345678 500 (buys for another number - PIN required)
 Or: AIRTIME +2348012345678 500 (with country code)`;
       }
     } else if (parts.length >= 3) {
-      // Two parameters: phone and amount
       targetPhone = parts[1];
       amountNum = parseFloat(parts[2]);
-      // Check if this is the user's own number
       const normalizedTarget = normalizePhoneNumber(targetPhone);
       const normalizedUser = normalizePhoneNumber(user.phone);
       isOwnNumber = normalizedTarget === normalizedUser;
     } else {
-      return `To buy airtime, reply with:
-AIRTIME [amount] - Buy for YOUR number (no PIN required)
-AIRTIME [phone] [amount] - Buy for another number
+      return `To buy airtime:
+AIRTIME [amount] - For YOUR number (no PIN required)
+AIRTIME [phone] [amount] - For another number (PIN required)
 
 Example: AIRTIME 500
 Example: AIRTIME 08012345678 500
-Example: AIRTIME +2348012345678 500 (with country code)
+Example: AIRTIME +2348012345678 500
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE
 Minimum: NGN 50 | Maximum: NGN 50,000`;
     }
     
-    // Validate amount
     if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
       return `Invalid amount. Please enter between NGN 50 and NGN 50,000.
 Example: AIRTIME 500`;
     }
     
-    // Use user's phone if targetPhone is invalid
     if (!targetPhone || targetPhone.length < 10) {
       targetPhone = user.phone;
       isOwnNumber = true;
     }
     
-    // Normalize the target phone (handles country codes)
     const normalizedTarget = normalizePhoneNumber(targetPhone);
-    
-    // Auto-detect network from normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     if (!detectedNetwork) {
       return `Could not detect network for ${normalizedTarget}.
@@ -3127,29 +2286,16 @@ Supported formats:
 Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
     }
 
-    // ✅ SKIP PIN VALIDATION IF IT'S THE USER'S OWN NUMBER
+    // ✅ NO PIN for own number, PIN required for external
     if (isOwnNumber) {
-      console.log(`✅ [WhatsApp] Own number detected - skipping PIN validation`);
       return await processAirtimePurchaseDirect(user, normalizedTarget, amountNum, detectedNetwork);
+    } else {
+      return await processAirtimePurchaseWithPin(user, normalizedTarget, amountNum, detectedNetwork);
     }
-
-    // For other numbers, require PIN
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first to buy airtime for other numbers.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-For your own number, just use: AIRTIME 500 (no PIN needed)`;
-    }
-
-    return await processAirtimePurchaseWhatsApp(user, normalizedTarget, amountNum);
   }
 
   // ============================================================
-  // ✅ DATA - WITH COUNTRY CODE SUPPORT & PIN SKIP FOR OWN NUMBER
+  // ✅ DATA - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
   // ============================================================
   if (command === "DATA" || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -3157,32 +2303,28 @@ For your own number, just use: AIRTIME 500 (no PIN needed)`;
     let isOwnNumber = false;
     
     if (parts.length === 2) {
-      // Only one parameter - it's the plan
       targetPhone = user.phone;
       planQuery = parts[1];
       isOwnNumber = true;
     } else if (parts.length >= 3) {
-      // Two parameters: phone and plan
       targetPhone = parts[1];
       planQuery = parts.slice(2).join(' ');
-      // Check if this is the user's own number
       const normalizedTarget = normalizePhoneNumber(targetPhone);
       const normalizedUser = normalizePhoneNumber(user.phone);
       isOwnNumber = normalizedTarget === normalizedUser;
     } else {
       const availablePlans = await getAvailablePlansForWhatsApp();
-      return `To buy data, reply with:
-DATA [plan] - Buy for YOUR number (no PIN required)
-DATA [phone] [plan] - Buy for another number
+      return `To buy data:
+DATA [plan] - For YOUR number (no PIN required)
+DATA [phone] [plan] - For another number (PIN required)
 
 Example: DATA 1GB
 Example: DATA 08012345678 1GB
-Example: DATA +2348012345678 1GB (with country code)
+Example: DATA +2348012345678 1GB
 
 ${availablePlans}`;
     }
     
-    // Validate plan
     if (!planQuery) {
       const availablePlans = await getAvailablePlansForWhatsApp();
       return `Please specify a data plan.
@@ -3191,16 +2333,12 @@ Example: DATA 1GB
 ${availablePlans}`;
     }
     
-    // Use user's phone if targetPhone is invalid
     if (!targetPhone || targetPhone.length < 10) {
       targetPhone = user.phone;
       isOwnNumber = true;
     }
     
-    // Normalize the target phone (handles country codes)
     const normalizedTarget = normalizePhoneNumber(targetPhone);
-    
-    // Auto-detect network from normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     if (!detectedNetwork) {
       return `Could not detect network for ${normalizedTarget}.
@@ -3214,25 +2352,12 @@ Supported formats:
 ${await getAvailablePlansForWhatsApp()}`;
     }
 
-    // ✅ SKIP PIN VALIDATION IF IT'S THE USER'S OWN NUMBER
+    // ✅ NO PIN for own number, PIN required for external
     if (isOwnNumber) {
-      console.log(`✅ [WhatsApp] Own number detected - skipping PIN validation for DATA`);
       return await processDataPurchaseDirect(user, normalizedTarget, planQuery, detectedNetwork);
+    } else {
+      return await processDataPurchaseWithPin(user, normalizedTarget, planQuery, detectedNetwork);
     }
-
-    // For other numbers, require PIN
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first to buy data for other numbers.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-For your own number, just use: DATA 1GB (no PIN needed)`;
-    }
-
-    return await processDataPurchaseWhatsApp(user, normalizedTarget, planQuery);
   }
 
   // ============================================================
@@ -3329,7 +2454,7 @@ Or: SETDEFAULTDECODER 1234567890`;
   }
 
   // ============================================================
-  // ✅ ELECTRICITY - SUPPORTS BOTH ELECTRIC AND ELECTRICITY
+  // ✅ ELECTRICITY - NO PIN FOR OWN METERS, PIN FOR EXTERNAL
   // ============================================================
   if (command === "ELECTRIC" || command === "ELEC" || command === "POWER" || command === "ELECTRICITY") {
     const meters = await prisma.savedMeter.findMany({
@@ -3383,7 +2508,7 @@ Or type ELECTRIC to see all saved meters.`;
     return message;
   }
 
-  // ✅ ELECTRICITY PURCHASE
+  // ✅ ELECTRICITY PURCHASE - NO PIN FOR OWN METERS
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     
@@ -3401,7 +2526,7 @@ ADDMETER [meter_number] [disco_code] [name]
 Example: ADDMETER 1234567890 ABUJA HOME`;
     }
 
-    // Case 1: Only amount provided (single meter or auto-select default)
+    // Case 1: Only amount provided
     if (parts.length === 2) {
       const amountStr = parts[1];
       const amount = parseFloat(amountStr);
@@ -3424,18 +2549,8 @@ Example: ELECTRIC 5000`;
         return message;
       }
       
-      if (!user.pinHash) {
-        return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-      }
-      
-      return await processElectricityPurchaseWhatsApp(
+      // ✅ NO PIN REQUIRED - Own meters
+      return await processElectricityPurchaseDirect(
         user, 
         selectedMeter.meterNumber, 
         amount, 
@@ -3466,18 +2581,8 @@ Example: ELECTRIC 1 5000`;
       
       const selectedMeter = meters[index];
       
-      if (!user.pinHash) {
-        return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-      }
-      
-      return await processElectricityPurchaseWhatsApp(
+      // ✅ NO PIN REQUIRED - Own meters
+      return await processElectricityPurchaseDirect(
         user, 
         selectedMeter.meterNumber, 
         amount, 
@@ -3514,7 +2619,9 @@ To add a meter: ADDMETER [meter_number] [disco_code] [name]
 Example: ADDMETER 1234567890 ABUJA HOME`;
   }
 
-  // ========== CABLE ==========
+  // ============================================================
+  // ✅ CABLE - NO PIN FOR OWN DECODERS
+  // ============================================================
   if (command === "CABLE" || command === "TV") {
     const decoders = await prisma.savedDecoder.findMany({
       where: { userId: user.id },
@@ -3551,6 +2658,7 @@ After adding, you can buy cable by just typing CABLE!`;
     return message;
   }
 
+  // ✅ CABLE PURCHASE - NO PIN FOR OWN DECODERS
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
     const parts = body.split(" ").filter(p => p.length > 0);
     
@@ -3574,18 +2682,8 @@ Example: CABLE 1 PREMIUM`;
       
       const selectedDecoder = decoders[index];
       
-      if (!user.pinHash) {
-        return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-      }
-      
-      return await processCablePurchaseWhatsApp(
+      // ✅ NO PIN REQUIRED - Own decoders
+      return await processCablePurchaseDirect(
         user, 
         selectedDecoder.decoderNumber, 
         packageQuery,
@@ -3613,17 +2711,6 @@ Example: PACKAGES DSTV`;
   // ========== SUBSCRIPTIONS ==========
   if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
     const parts = body.split(" ").filter(p => p.length > 0);
-    
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-    }
     
     if (parts.length < 4) {
       return `To schedule electricity token delivery:
@@ -3700,17 +2787,6 @@ To see your active subscriptions: SUBSCRIPTIONS`;
       command.startsWith("WAEC") || command.startsWith("JAMB") || 
       command.startsWith("NECO") || command === "WAEC-RESULT") {
     
-    if (!user.pinHash) {
-      return `You need to set a transaction PIN first.
-
-To set your PIN, reply with:
-PIN [4-6 digit PIN]
-
-Example: PIN 1234
-
-Your PIN is required for all transactions.`;
-    }
-
     const cmd = parts[0].toUpperCase();
     
     if (cmd === "EDU" || cmd === "EDUCATION") {
@@ -3804,12 +2880,12 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
-AIRTIME [amount] - Buy airtime for your number (no PIN)
-AIRTIME [phone] [amount] - Buy airtime for another number
-DATA [plan] - Buy data for your number (no PIN)
-DATA [phone] [plan] - Buy data for another number
+AIRTIME [amount] - Buy airtime for YOUR number (no PIN)
+AIRTIME [phone] [amount] - Buy airtime for others (PIN required)
+DATA [plan] - Buy data for YOUR number (no PIN)
+DATA [phone] [plan] - Buy data for others (PIN required)
 ELECTRIC - See saved meters
-ELECTRIC [amount] - Buy electricity (auto-selects your meter)
+ELECTRIC [amount] - Buy electricity (your meters - no PIN)
 ELECTRIC [index] [amount] - Buy electricity with meter selection
 ADDMETER [meter] [disco] [name] - Save a meter
 ADDDECODER [decoder] [provider] [name] - Save a decoder
@@ -3830,20 +2906,20 @@ PIN - Set up transaction PIN`;
 function getHelpMessage(user: any): string {
   return `Bilscore WhatsApp Commands
 
-Financial:
+💰 Financial:
 BALANCE - Check wallet balance
 TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
-Airtime & Data (NO PIN for own number):
-AIRTIME [amount] - Buy airtime for YOUR number ✨
-AIRTIME [phone] [amount] - Buy airtime for others
-DATA [plan] - Buy data for YOUR number ✨
-DATA [phone] [plan] - Buy data for others
+📱 Airtime & Data:
+AIRTIME [amount] - Buy for YOUR number ✨ (no PIN)
+AIRTIME [phone] [amount] - Buy for others 🔐 (PIN required)
+DATA [plan] - Buy for YOUR number ✨ (no PIN)
+DATA [phone] [plan] - Buy for others 🔐 (PIN required)
 
-Electricity:
+⚡ Electricity (Your meters - no PIN ✨):
 ELECTRIC - Show saved meters
-ELECTRIC [amount] - Buy electricity (auto-selects default meter)
+ELECTRIC [amount] - Buy electricity
 ELECTRIC [index] [amount] - Buy electricity with meter selection
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
@@ -3852,27 +2928,27 @@ SCHEDULE [index] [amount] [days] - Schedule electricity
 SUBSCRIPTIONS - View active schedules
 CANCEL [id] - Cancel subscription
 
-Cable TV:
+📺 Cable TV (Your decoders - no PIN ✨):
 CABLE - Show saved decoders
 CABLE [index] [package] - Subscribe
 ADDDECODER [decoder] [provider] [name] - Add decoder
 DECODERS - List saved decoders
 PACKAGES [provider] - Show packages
 
-Education:
+🎓 Education:
 EDU [product] [quantity] - Buy education pins
 WAEC [quantity] - Buy WAEC pins
 JAMB [quantity] - Buy JAMB pins
 NECO [quantity] - Buy NECO pins
 
-Referral:
+🔗 Referral:
 REFERRAL - Get referral link
 
-Help:
+❓ Help:
 HELP - Show this message
 
-✨ = No PIN required when buying for your own number
-All other purchases require PIN validation via secure link.
+✨ = No PIN required (your own number/meters)
+🔐 = PIN required (for other people's numbers/meters)
 
 Need help? Visit: ${getAppUrl()}/support`;
 }
@@ -3897,7 +2973,7 @@ Type HELP to see available commands.`;
 
   let message = "Recent Transactions:\n\n";
   transactions.forEach((tx, i) => {
-    const status = tx.status === "SUCCESS" ? "OK" : tx.status === "PENDING" ? "PENDING" : "FAILED";
+    const status = tx.status === "SUCCESS" ? "✅" : tx.status === "PENDING" ? "⏳" : "❌";
     const type = tx.transactionType.replace("_", " ");
     message += `${i + 1}. ${status} ${type}\n`;
     message += `   Amount: NGN ${Number(tx.amount).toFixed(2)}\n`;
