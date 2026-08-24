@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH FIXED SYNTAX
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH FIXED NETWORK DETECTION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -126,7 +126,7 @@ function getApiUrl(): string {
 }
 
 // ============================================================
-// ✅ FIXED: NETWORK DETECTION - More accurate and comprehensive
+// ✅ FIXED: NETWORK DETECTION - Matches airtime page logic
 // ============================================================
 
 function detectNetworkFromPhone(phoneNumber: string): string | null {
@@ -153,43 +153,42 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return null;
   }
   
-  // Get the relevant digits for detection
-  const firstThree = cleanNumber.substring(0, 3);
+  // Get the relevant digits for detection (same as airtime page)
   const firstFour = cleanNumber.substring(0, 4);
+  const firstThree = cleanNumber.substring(0, 3);
   
   console.log(`[Network Detection] First 3 digits: ${firstThree}, First 4 digits: ${firstFour}`);
   
   // ============================================================
-  // AIRTEL - Check first 4 digits
+  // AIRTEL - Check first 4 digits (same as airtime page)
   // ============================================================
-  if (firstFour === "802" || firstFour === "808" || firstFour === "812" || 
-      firstFour === "901" || firstFour === "902" || firstFour === "907" || 
-      firstFour === "701" || firstFour === "708") {
+  if (firstFour === "0701" || firstFour === "0708" || firstFour === "0802" || 
+      firstFour === "0808" || firstFour === "0812" || firstFour === "0901" || 
+      firstFour === "0902" || firstFour === "0907") {
     return "AIRTEL";
   }
   
   // ============================================================
-  // GLO - Check first 4 digits
+  // GLO - Check first 4 digits (same as airtime page)
   // ============================================================
-  if (firstFour === "805" || firstFour === "807" || firstFour === "811" || 
-      firstFour === "815" || firstFour === "905" || firstFour === "909") {
+  if (firstFour === "0805" || firstFour === "0807" || firstFour === "0811" || 
+      firstFour === "0815" || firstFour === "0905" || firstFour === "0909") {
     return "GLO";
   }
   
   // ============================================================
-  // 9MOBILE - Check first 4 digits
+  // 9MOBILE - Check first 4 digits (same as airtime page)
   // ============================================================
-  if (firstFour === "809" || firstFour === "817" || firstFour === "818" || 
-      firstFour === "908" || firstFour === "903" || firstFour === "904") {
+  if (firstFour === "0809" || firstFour === "0817" || firstFour === "0818" || 
+      firstFour === "0908" || firstFour === "0903" || firstFour === "0904") {
     return "9MOBILE";
   }
   
   // ============================================================
-  // MTN - Check first 3 digits
+  // MTN - Check first 3 digits (same as airtime page)
   // ============================================================
-  if (firstThree === "080" || firstThree === "081" || 
-      firstThree === "070" || firstThree === "090" || 
-      firstThree === "091") {
+  if (firstThree === "070" || firstThree === "080" || firstThree === "081" || 
+      firstThree === "090" || firstThree === "091") {
     return "MTN";
   }
   
@@ -198,43 +197,43 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
 }
 
 // ============================================================
-// ✅ FIXED: NORMALIZE PHONE NUMBER
+// ✅ FIXED: NORMALIZE PHONE NUMBER - Handles all formats
 // ============================================================
 
 function normalizePhoneNumber(phoneNumber: string): string {
   if (!phoneNumber) return "";
   
+  // Remove all non-digit characters
   let clean = phoneNumber.replace(/\D/g, '');
   
   console.log(`[Normalize] Original: ${phoneNumber}, Cleaned: ${clean}`);
   
-  // Remove country code if present
+  // Remove country code if present (234)
   if (clean.startsWith('234')) {
     clean = clean.substring(3);
   }
   
-  // Add leading zero if not present and length is 10
-  if (!clean.startsWith('0') && clean.length === 10) {
-    clean = '0' + clean;
+  // Remove leading zero if present (we'll add it back)
+  if (clean.startsWith('0')) {
+    clean = clean.substring(1);
   }
   
-  // Ensure we have 11 digits with leading zero
-  if (clean.length < 11 && clean.length >= 10) {
-    clean = '0' + clean;
+  // Ensure we have exactly 10 digits for the phone number (without leading zero)
+  if (clean.length > 10) {
+    clean = clean.substring(clean.length - 10);
+  } else if (clean.length < 10 && clean.length >= 5) {
+    // If we have at least 5 digits, pad with leading zeros to make 10
+    clean = clean.padStart(10, '0');
+  } else if (clean.length < 5) {
+    // Too short, pad with zeros
+    clean = clean.padStart(10, '0');
   }
   
-  // Pad if too short
-  if (clean.length < 11) {
-    clean = clean.padStart(11, '0');
-  }
+  // Add leading zero for 11-digit format
+  const result = '0' + clean;
   
-  // Truncate if too long
-  if (clean.length > 11) {
-    clean = clean.substring(0, 11);
-  }
-  
-  console.log(`[Normalize] Result: ${clean}`);
-  return clean;
+  console.log(`[Normalize] Result: ${result}`);
+  return result;
 }
 
 // ============================================================
@@ -518,7 +517,7 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 }
 
 // ============================================================
-// MAIN WEBHOOK HANDLER - FIXED SYNTAX ERROR
+// MAIN WEBHOOK HANDLER
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -628,7 +627,6 @@ Or visit: ${getAppUrl()}`;
     if (!user) {
       const upperBody = body.toUpperCase().trim();
       
-      // ✅ FIXED: Removed extra closing parenthesis
       if (upperBody.startsWith("REG") || upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
         responseMessage = await handleUserRegistration(whatsappFrom, body);
       } else {
@@ -2463,7 +2461,7 @@ For your own number, use: AIRTIME 500 (no PIN needed)`;
 }
 
 // ============================================================
-// DATA PURCHASE - NO PIN (OWN NUMBER)
+// DATA PURCHASE - NO PIN (OWN NUMBER) - UPDATED WITH CORRECT DETECTION
 // ============================================================
 
 async function processDataPurchaseDirect(
@@ -2656,7 +2654,7 @@ Thank you for using Bilscore!`;
 }
 
 // ============================================================
-// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER)
+// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER) - UPDATED WITH CORRECT DETECTION
 // ============================================================
 
 async function processDataPurchaseWithPin(
@@ -2817,7 +2815,7 @@ For your own number, use: DATA 1GB (no PIN needed)`;
 }
 
 // ============================================================
-// ELECTRICITY PURCHASE - NO PIN (OWN METER) - UPDATED WITH COMPLETE INFO
+// ELECTRICITY PURCHASE - NO PIN (OWN METER)
 // ============================================================
 
 async function processElectricityPurchaseDirect(
@@ -2828,7 +2826,6 @@ async function processElectricityPurchaseDirect(
   meterType: string = "Prepaid"
 ): Promise<string> {
   try {
-    // ✅ Minimum amount check
     const MIN_ELECTRICITY_AMOUNT = 1000;
     if (amount < MIN_ELECTRICITY_AMOUNT) {
       return `Minimum electricity purchase is NGN ${MIN_ELECTRICITY_AMOUNT}.
@@ -2849,7 +2846,6 @@ Account: ${wallet.accountNumber || 'N/A'}
 Please fund your wallet and try again.`;
     }
 
-    // ✅ Verify meter to get customer info
     const serviceID = discoCode.toLowerCase() + "-electric";
     const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, meterType.toLowerCase());
     
@@ -3115,7 +3111,6 @@ Please fund your wallet and try again.`;
           }),
         ]);
 
-        // ✅ Save meter with complete customer info
         saveMeterWithCustomerInfo(
           user.id, 
           meterNumber, 
@@ -3279,7 +3274,6 @@ async function processElectricityPurchaseWithPin(
   customerName: string = "Unknown"
 ): Promise<string> {
   try {
-    // ✅ Minimum amount check
     const MIN_ELECTRICITY_AMOUNT = 1000;
     if (amount < MIN_ELECTRICITY_AMOUNT) {
       return `Minimum electricity purchase is NGN ${MIN_ELECTRICITY_AMOUNT}.
@@ -4040,7 +4034,7 @@ Reply with HELP for available commands.`;
   }
 
   // ============================================================
-  // ✅ AIRTIME - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
+  // ✅ AIRTIME - UPDATED WITH CORRECT NETWORK DETECTION
   // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     let targetPhone: string;
@@ -4088,10 +4082,16 @@ Example: AIRTIME 500`;
       isOwnNumber = true;
     }
     
+    // ✅ Normalize the phone number first
     const normalizedTarget = normalizePhoneNumber(targetPhone);
+    
+    // ✅ Then detect network from the normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+    
+    console.log(`[AIRTIME] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
+    
     if (!detectedNetwork) {
-      return `Could not detect network for ${normalizedTarget}.
+      return `Could not detect network for ${targetPhone}.
 Please ensure the phone number is correct.
 
 Supported formats:
@@ -4110,7 +4110,7 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
   }
 
   // ============================================================
-  // ✅ DATA - NO PIN FOR OWN NUMBER, PIN REQUIRED FOR EXTERNAL
+  // ✅ DATA - UPDATED WITH CORRECT NETWORK DETECTION
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -4153,10 +4153,16 @@ ${availablePlans}`;
       isOwnNumber = true;
     }
     
+    // ✅ Normalize the phone number first
     const normalizedTarget = normalizePhoneNumber(targetPhone);
+    
+    // ✅ Then detect network from the normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+    
+    console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
+    
     if (!detectedNetwork) {
-      return `Could not detect network for ${normalizedTarget}.
+      return `Could not detect network for ${targetPhone}.
 Please ensure the phone number is correct.
 
 Supported formats:
