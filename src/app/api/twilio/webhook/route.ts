@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH FIXED NETWORK DETECTION
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -125,6 +125,10 @@ function getApiUrl(): string {
          'http://localhost:3000';
 }
 
+// ============================================================
+// ✅ FIXED: NETWORK DETECTION - Complete Nigerian prefixes
+// ============================================================
+
 function detectNetworkFromPhone(phoneNumber: string): string | null {
   if (!phoneNumber) return null;
   
@@ -139,9 +143,7 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
   }
   
   // ✅ IMPORTANT: Keep the leading zero for prefix detection
-  // Don't remove it - we need it to detect prefixes like 0806
   if (!cleanNumber.startsWith("0")) {
-    // If no leading zero, add it for proper detection
     if (cleanNumber.length >= 10) {
       cleanNumber = '0' + cleanNumber;
     }
@@ -154,10 +156,11 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
   }
   
   // Get the relevant digits for detection (with leading zero preserved)
-  const firstFour = cleanNumber.substring(0, 4);  // e.g., "0806"
-  const firstFive = cleanNumber.substring(0, 5);  // e.g., "08064" or "07025"
+  const firstFour = cleanNumber.substring(0, 4);
+  const firstFive = cleanNumber.substring(0, 5);
+  const firstThree = cleanNumber.substring(0, 3);
   
-  console.log(`[Network Detection] First 4 digits: ${firstFour}, First 5 digits: ${firstFive}`);
+  console.log(`[Network Detection] First 3: ${firstThree}, First 4: ${firstFour}, First 5: ${firstFive}`);
   
   // ============================================================
   // Special: Check first 5 digits for Visafone legacy prefixes
@@ -168,11 +171,11 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
   }
   
   // ============================================================
-  // MTN - Check first 4 digits
+  // MTN - Complete list of prefixes
   // ============================================================
   const mtnPrefixes = [
-    '0703', '0704', '0706', '0803', '0806', '0810', '0813', '0814',
-    '0816', '0903', '0906', '0913', '0916'
+    '0701', '0703', '0704', '0706', '0801', '0803', '0804', '0806',
+    '0810', '0813', '0814', '0816', '0903', '0906', '0913', '0916'
   ];
   if (mtnPrefixes.includes(firstFour)) {
     console.log(`[Network Detection] Detected MTN from prefix: ${firstFour}`);
@@ -213,13 +216,18 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return "9MOBILE";
   }
   
+  // ============================================================
+  // Fallback: Check first 3 digits for older/ambiguous prefixes
+  // ============================================================
+  if (firstThree === "070" || firstThree === "080" || firstThree === "081" ||
+      firstThree === "090" || firstThree === "091") {
+    console.log(`[Network Detection] Defaulting to MTN from prefix: ${firstThree}`);
+    return "MTN";
+  }
+  
   console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
   return null;
 }
-
-// ============================================================
-// ✅ FIXED: NORMALIZE PHONE NUMBER - Handles all formats
-// ============================================================
 
 // ============================================================
 // ✅ FIXED: NORMALIZE PHONE NUMBER - Keep leading zero
@@ -240,14 +248,11 @@ function normalizePhoneNumber(phoneNumber: string): string {
   
   // ✅ Ensure we have a leading zero (for 11-digit format)
   if (!clean.startsWith('0')) {
-    // If we have 10 digits, add leading zero
     if (clean.length === 10) {
       clean = '0' + clean;
     } else if (clean.length > 10) {
-      // If more than 10 digits, take last 10 and add leading zero
       clean = '0' + clean.substring(clean.length - 10);
     } else if (clean.length < 10) {
-      // Pad with zeros if too short
       clean = '0' + clean.padStart(10, '0');
     }
   }
@@ -262,13 +267,43 @@ function normalizePhoneNumber(phoneNumber: string): string {
 }
 
 // ============================================================
-// ERROR HANDLING HELPER - Converts errors to user-friendly messages
+// ✅ FIXED: ERROR HANDLING - User-friendly messages
 // ============================================================
 
 function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, accountName?: string }): string {
   const errorMessage = error?.message || error?.error || String(error);
+  const errorCode = error?.code || error?.response_description || '';
   
-  console.log(`[Error Format] Original: ${errorMessage}`);
+  console.log(`[Error Format] Original: ${errorMessage}, Code: ${errorCode}`);
+  
+  // Handle VTpass specific error codes
+  if (errorCode === '016' || errorMessage.includes('TRANSACTION FAILED')) {
+    return `Transaction failed. This could be due to:
+• Insufficient vendor balance
+• Invalid phone number
+• Network issues
+
+Please try again or contact support.
+Amount: NGN ${error?.amount || 'N/A'}`;
+  }
+  
+  if (errorCode === '015' || errorMessage.includes('DUPLICATE TRANSACTION')) {
+    return `Duplicate transaction detected. Please wait a moment and try again.`;
+  }
+  
+  if (errorCode === '009' || errorMessage.includes('INSUFFICIENT BALANCE')) {
+    const accountInfoStr = accountInfo?.accountNumber ? `\nAccount: ${accountInfo.accountNumber}` : '';
+    return `Insufficient balance on the vendor side. Please try again later or contact support.${accountInfoStr}`;
+  }
+  
+  if (errorCode === '012' || errorMessage.includes('SERVICE UNAVAILABLE')) {
+    return `Service temporarily unavailable. Please try again in a few minutes.`;
+  }
+  
+  if (errorCode === '013' || errorMessage.includes('INVALID PHONE NUMBER')) {
+    return `Invalid phone number. Please check the number and try again.
+Format: 08012345678 or +2348012345678`;
+  }
   
   if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') || 
       errorMessage.includes('ETIMEDOUT') || errorMessage.includes('network')) {
@@ -346,11 +381,14 @@ function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, 
   if (errorMessage.includes('BELOW MINIMUM AMOUNT') || 
       errorMessage.includes('minimum amount') ||
       errorMessage.includes('MINIMUM AMOUNT')) {
-    return `Minimum electricity purchase is NGN 1,000.
-Please try again with a higher amount.`;
+    return `Minimum electricity purchase is NGN 1,000.\nPlease try again with a higher amount.`;
   }
   
-  return `Purchase failed. Please try again or contact support if the issue persists.`;
+  // Generic error with more context
+  return `Purchase failed: ${errorMessage.substring(0, 100)}
+Please try again or contact support if the issue persists.
+
+Error reference: ${errorCode || 'Unknown'}`;
 }
 
 // ============================================================
@@ -2254,18 +2292,29 @@ Please fund your wallet and try again.`;
       );
 
       if (!result || !result.success) {
+        const errorDetails = {
+          message: result?.error || "Vendor purchase failed",
+          code: result?.code || result?.response_description || '',
+          amount: amount,
+          phoneNumber: phoneNumber,
+          network: detectedNetwork,
+        };
+        
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
             status: TransactionStatus.FAILED,
             metadata: {
               ...transaction.metadata,
-              failureReason: result?.error || "Vendor purchase failed",
+              failureReason: errorDetails.message,
+              errorCode: errorDetails.code,
+              vendorResponse: result,
               failedAt: new Date().toISOString(),
             },
           },
         });
-        return formatErrorMessage(result?.error || "Vendor purchase failed");
+        
+        return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
       }
 
       const token = result.data?.token || result.data?.purchased_code || null;
@@ -2325,18 +2374,29 @@ Thank you for using Bilscore!`;
       return successMessage;
     } catch (vendorError: any) {
       console.error("Vendor error:", vendorError);
+      
+      const errorDetails = {
+        message: vendorError?.message || "Vendor error",
+        code: vendorError?.code || vendorError?.response_description || 'UNKNOWN',
+        amount: amount,
+        phoneNumber: phoneNumber,
+        network: detectedNetwork,
+      };
+      
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
           metadata: {
             ...transaction.metadata,
-            failureReason: vendorError?.message || "Vendor error",
+            failureReason: errorDetails.message,
+            errorCode: errorDetails.code,
             failedAt: new Date().toISOString(),
           },
         },
       });
-      return formatErrorMessage(vendorError, { accountNumber: wallet.accountNumber });
+      
+      return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
     }
   } catch (error: any) {
     console.error("Direct airtime purchase error:", error);
@@ -2486,7 +2546,7 @@ For your own number, use: AIRTIME 500 (no PIN needed)`;
 }
 
 // ============================================================
-// DATA PURCHASE - NO PIN (OWN NUMBER) - UPDATED WITH CORRECT DETECTION
+// DATA PURCHASE - NO PIN (OWN NUMBER)
 // ============================================================
 
 async function processDataPurchaseDirect(
@@ -2585,18 +2645,29 @@ Please fund your wallet and try again.`;
       );
 
       if (!result || !result.success) {
+        const errorDetails = {
+          message: result?.error || "Vendor purchase failed",
+          code: result?.code || result?.response_description || '',
+          amount: amount,
+          phoneNumber: phoneNumber,
+          network: detectedNetwork,
+          planQuery: planQuery,
+        };
+        
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
             status: TransactionStatus.FAILED,
             metadata: {
               ...transaction.metadata,
-              failureReason: result?.error || "Vendor purchase failed",
+              failureReason: errorDetails.message,
+              errorCode: errorDetails.code,
+              vendorResponse: result,
               failedAt: new Date().toISOString(),
             },
           },
         });
-        return formatErrorMessage(result?.error || "Vendor purchase failed");
+        return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
       }
 
       const token = result.data?.token || result.data?.purchased_code || null;
@@ -2659,18 +2730,29 @@ Thank you for using Bilscore!`;
       return successMessage;
     } catch (vendorError: any) {
       console.error("Vendor error:", vendorError);
+      
+      const errorDetails = {
+        message: vendorError?.message || "Vendor error",
+        code: vendorError?.code || vendorError?.response_description || 'UNKNOWN',
+        amount: amount,
+        phoneNumber: phoneNumber,
+        network: detectedNetwork,
+        planQuery: planQuery,
+      };
+      
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
           metadata: {
             ...transaction.metadata,
-            failureReason: vendorError?.message || "Vendor error",
+            failureReason: errorDetails.message,
+            errorCode: errorDetails.code,
             failedAt: new Date().toISOString(),
           },
         },
       });
-      return formatErrorMessage(vendorError, { accountNumber: wallet.accountNumber });
+      return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
     }
   } catch (error: any) {
     console.error("Direct data purchase error:", error);
@@ -2679,7 +2761,7 @@ Thank you for using Bilscore!`;
 }
 
 // ============================================================
-// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER) - UPDATED WITH CORRECT DETECTION
+// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER)
 // ============================================================
 
 async function processDataPurchaseWithPin(
@@ -3167,6 +3249,14 @@ Thank you for using Bilscore!`;
       } else {
         console.error(`[WhatsApp] Vendor failed: ${result.error}`);
 
+        const errorDetails = {
+          message: result?.error || "Vendor transaction failed",
+          code: result?.code || result?.response_description || '',
+          amount: amount,
+          meterNumber: meterNumber,
+          discoCode: discoCode,
+        };
+
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
@@ -3177,6 +3267,7 @@ Thank you for using Bilscore!`;
             metadata: {
               ...transaction.metadata,
               error: result.error || "Vendor transaction failed",
+              errorCode: errorDetails.code,
               vendor: result.vendor,
               vendorErrors: result.vendorErrors || [],
               vendorSwitched: result.vendorSwitched || false,
@@ -3203,6 +3294,7 @@ Thank you for using Bilscore!`;
               vendorName: result.vendor || 'unknown',
               vendorReference: vendorReference || '',
               failureReason: result.error,
+              errorCode: errorDetails.code,
               vendorErrors: result.vendorErrors || [],
               meterType: meterType,
               failedAt: new Date().toISOString(),
@@ -3223,10 +3315,18 @@ Thank you for using Bilscore!`;
           },
         });
 
-        return formatErrorMessage(result.error || "Vendor transaction failed", { accountNumber: wallet.accountNumber });
+        return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
       }
     } catch (vendorError: any) {
       console.error(`[WhatsApp] Vendor error:`, vendorError.message);
+
+      const errorDetails = {
+        message: vendorError?.message || "Unknown vendor error",
+        code: vendorError?.code || vendorError?.response_description || 'UNKNOWN',
+        amount: amount,
+        meterNumber: meterNumber,
+        discoCode: discoCode,
+      };
 
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
@@ -3237,6 +3337,7 @@ Thank you for using Bilscore!`;
           metadata: {
             ...transaction.metadata,
             error: vendorError.message || "Unknown vendor error",
+            errorCode: errorDetails.code,
             errorType: vendorError.name || 'UnknownError',
             failedAt: new Date().toISOString(),
             wasDebited: false,
@@ -3258,6 +3359,7 @@ Thank you for using Bilscore!`;
           notes: `Vendor Error: ${vendorError.message || 'Unknown error'}`,
           metadata: {
             failureReason: vendorError.message,
+            errorCode: errorDetails.code,
             errorType: vendorError.name,
             meterType: meterType,
             failedAt: new Date().toISOString(),
@@ -3278,7 +3380,7 @@ Thank you for using Bilscore!`;
         },
       });
 
-      return formatErrorMessage(vendorError, { accountNumber: wallet.accountNumber });
+      return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
     }
   } catch (error: any) {
     console.error("[WhatsApp] Purchase error:", error);
@@ -3564,18 +3666,29 @@ Please fund your wallet and try again.`;
       );
 
       if (!result || !result.success) {
+        const errorDetails = {
+          message: result?.error || "Vendor purchase failed",
+          code: result?.code || result?.response_description || '',
+          amount: amount,
+          decoderNumber: decoderNumber,
+          provider: provider,
+          packageQuery: packageQuery,
+        };
+        
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
             status: TransactionStatus.FAILED,
             metadata: {
               ...transaction.metadata,
-              failureReason: result?.error || "Vendor purchase failed",
+              failureReason: errorDetails.message,
+              errorCode: errorDetails.code,
+              vendorResponse: result,
               failedAt: new Date().toISOString(),
             },
           },
         });
-        return formatErrorMessage(result?.error || "Cable subscription failed");
+        return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
       }
 
       const token = result.data?.token || result.data?.purchased_code || null;
@@ -3637,18 +3750,29 @@ Thank you for using Bilscore!`;
       return successMessage;
     } catch (vendorError: any) {
       console.error("Vendor error:", vendorError);
+      
+      const errorDetails = {
+        message: vendorError?.message || "Vendor error",
+        code: vendorError?.code || vendorError?.response_description || 'UNKNOWN',
+        amount: amount,
+        decoderNumber: decoderNumber,
+        provider: provider,
+        packageQuery: packageQuery,
+      };
+      
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
           metadata: {
             ...transaction.metadata,
-            failureReason: vendorError?.message || "Vendor error",
+            failureReason: errorDetails.message,
+            errorCode: errorDetails.code,
             failedAt: new Date().toISOString(),
           },
         },
       });
-      return formatErrorMessage(vendorError, { accountNumber: wallet.accountNumber });
+      return formatErrorMessage(errorDetails, { accountNumber: wallet.accountNumber });
     }
   } catch (error: any) {
     console.error("Direct cable purchase error:", error);
@@ -4107,10 +4231,7 @@ Example: AIRTIME 500`;
       isOwnNumber = true;
     }
     
-    // ✅ Normalize the phone number first
     const normalizedTarget = normalizePhoneNumber(targetPhone);
-    
-    // ✅ Then detect network from the normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     
     console.log(`[AIRTIME] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
@@ -4178,10 +4299,7 @@ ${availablePlans}`;
       isOwnNumber = true;
     }
     
-    // ✅ Normalize the phone number first
     const normalizedTarget = normalizePhoneNumber(targetPhone);
-    
-    // ✅ Then detect network from the normalized number
     const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
     
     console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
@@ -4305,7 +4423,6 @@ Or: SETDEFAULTDECODER 1234567890`;
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
       command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
     
-    // If only "ELECTRIC" with no params, show saved meters
     if (parts.length === 1) {
       const meters = await prisma.savedMeter.findMany({
         where: { userId: user.id },
@@ -4352,7 +4469,6 @@ ${discosList}`;
       return message;
     }
 
-    // Case 1: External meter purchase - ELECTRIC [meter_number] [disco] [amount]
     if (parts.length >= 4) {
       const [, meterNumber, disco, amountStr] = parts;
       const amount = parseFloat(amountStr);
@@ -4387,7 +4503,6 @@ To continue: ELECTRIC ${meterNumber} ${discoUpper} ${amount}
 To cancel: Type HELP for other options.`;
       }
       
-      // PIN required for external meter
       return await processElectricityPurchaseWithPin(
         user,
         meterNumber,
@@ -4398,7 +4513,6 @@ To cancel: Type HELP for other options.`;
       );
     }
     
-    // Case 2: Saved meter purchase with index - ELECTRIC [index] [amount]
     if (parts.length === 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -4425,7 +4539,6 @@ Example: ELECTRIC 1 5000`;
       
       const selectedMeter = meters[index];
       
-      // No PIN required - own saved meter
       return await processElectricityPurchaseDirect(
         user,
         selectedMeter.meterNumber,
@@ -4435,7 +4548,6 @@ Example: ELECTRIC 1 5000`;
       );
     }
     
-    // Case 3: Only amount provided - ELECTRIC [amount]
     if (parts.length === 2) {
       const amountStr = parts[1];
       const amount = parseFloat(amountStr);
@@ -4461,7 +4573,6 @@ Example: ELECTRIC 1234567890 ABUJA 5000
 To add a meter: ADDMETER [meter_number] [disco] [name]`;
       }
       
-      // Find default meter or the only meter
       let selectedMeter = meters.find(m => m.isDefault) || meters[0];
       
       if (meters.length > 1 && !meters.find(m => m.isDefault)) {
@@ -4475,7 +4586,6 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
         return message;
       }
       
-      // No PIN required - own saved meter
       return await processElectricityPurchaseDirect(
         user,
         selectedMeter.meterNumber,
@@ -4485,7 +4595,6 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
       );
     }
     
-    // If we reach here, show help
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -4562,7 +4671,6 @@ After adding, you can buy cable by just typing CABLE!`;
     return message;
   }
 
-  // ✅ CABLE PURCHASE - NO PIN FOR OWN DECODERS
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
     const cableParts = body.split(" ").filter(p => p.length > 0);
     
