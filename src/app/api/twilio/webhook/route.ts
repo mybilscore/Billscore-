@@ -128,71 +128,96 @@ function getApiUrl(): string {
 // ============================================================
 // ✅ FIXED: NETWORK DETECTION - Matches airtime page logic
 // ============================================================
-
 function detectNetworkFromPhone(phoneNumber: string): string | null {
   if (!phoneNumber) return null;
-  
+
   // Remove all non-digit characters
   let cleanNumber = phoneNumber.replace(/\D/g, "");
-  
+
   console.log(`[Network Detection] Original: ${phoneNumber}, Cleaned: ${cleanNumber}`);
-  
+
   // Remove country code if present (234)
   if (cleanNumber.startsWith("234")) {
     cleanNumber = cleanNumber.substring(3);
   }
-  
+
   // Remove leading zero if present
   if (cleanNumber.startsWith("0")) {
     cleanNumber = cleanNumber.substring(1);
   }
-  
+
   // Ensure we have at least 10 digits for detection
   if (cleanNumber.length < 10) {
     console.warn(`[Network Detection] Phone number too short: ${cleanNumber}`);
     return null;
   }
-  
-  // Get the relevant digits for detection (same as airtime page)
-  const firstFour = cleanNumber.substring(0, 4);
+
+  // Get the relevant digits for detection
   const firstThree = cleanNumber.substring(0, 3);
-  
-  console.log(`[Network Detection] First 3 digits: ${firstThree}, First 4 digits: ${firstFour}`);
-  
+  const firstFour = cleanNumber.substring(0, 4);
+  const firstFive = cleanNumber.substring(0, 5);
+
+  console.log(`[Network Detection] First 3: ${firstThree}, First 4: ${firstFour}, First 5: ${firstFive}`);
+
   // ============================================================
-  // AIRTEL - Check first 4 digits (same as airtime page)
+  // MTN - Check special 5-digit prefixes first (Visafone legacy)
   // ============================================================
-  if (firstFour === "0701" || firstFour === "0708" || firstFour === "0802" || 
-      firstFour === "0808" || firstFour === "0812" || firstFour === "0901" || 
-      firstFour === "0902" || firstFour === "0907") {
-    return "AIRTEL";
-  }
-  
-  // ============================================================
-  // GLO - Check first 4 digits (same as airtime page)
-  // ============================================================
-  if (firstFour === "0805" || firstFour === "0807" || firstFour === "0811" || 
-      firstFour === "0815" || firstFour === "0905" || firstFour === "0909") {
-    return "GLO";
-  }
-  
-  // ============================================================
-  // 9MOBILE - Check first 4 digits (same as airtime page)
-  // ============================================================
-  if (firstFour === "0809" || firstFour === "0817" || firstFour === "0818" || 
-      firstFour === "0908" || firstFour === "0903" || firstFour === "0904") {
-    return "9MOBILE";
-  }
-  
-  // ============================================================
-  // MTN - Check first 3 digits (same as airtime page)
-  // ============================================================
-  if (firstThree === "070" || firstThree === "080" || firstThree === "081" || 
-      firstThree === "090" || firstThree === "091") {
+  if (firstFive === "07025" || firstFive === "07026") {
     return "MTN";
   }
-  
-  console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
+
+  // ============================================================
+  // MTN - Check first 4 digits
+  // ============================================================
+  const mtnPrefixes = [
+    '0703', '0704', '0706', '0803', '0806', '0810', '0813', '0814',
+    '0816', '0903', '0906', '0913', '0916'
+  ];
+  if (mtnPrefixes.includes(firstFour)) {
+    return "MTN";
+  }
+
+  // ============================================================
+  // AIRTEL - Check first 4 digits
+  // ============================================================
+  const airtelPrefixes = [
+    '0701', '0708', '0802', '0808', '0812', '0901', '0902', '0904',
+    '0907', '0911', '0912'
+  ];
+  if (airtelPrefixes.includes(firstFour)) {
+    return "AIRTEL";
+  }
+
+  // ============================================================
+  // GLO - Check first 4 digits
+  // ============================================================
+  const gloPrefixes = [
+    '0705', '0805', '0807', '0811', '0815', '0905', '0915'
+  ];
+  if (gloPrefixes.includes(firstFour)) {
+    return "GLO";
+  }
+
+  // ============================================================
+  // 9MOBILE (T2) - Check first 4 digits
+  // ============================================================
+  const nineMobilePrefixes = [
+    '0809', '0817', '0818', '0908', '0909'
+  ];
+  if (nineMobilePrefixes.includes(firstFour)) {
+    return "9MOBILE";
+  }
+
+  // ============================================================
+  // Fallback: Check first 3 digits for older/ambiguous prefixes
+  // ============================================================
+  if (firstThree === "070" || firstThree === "080" || firstThree === "081" ||
+      firstThree === "090" || firstThree === "091") {
+    // Default to MTN for ambiguous ranges (most common)
+    return "MTN";
+  }
+
+  console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber}`);
   return null;
 }
 
