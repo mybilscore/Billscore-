@@ -125,47 +125,48 @@ function getApiUrl(): string {
          'http://localhost:3000';
 }
 
-// ============================================================
-// ✅ FIXED: NETWORK DETECTION - Matches airtime page logic
-// ============================================================
 function detectNetworkFromPhone(phoneNumber: string): string | null {
   if (!phoneNumber) return null;
-
+  
   // Remove all non-digit characters
   let cleanNumber = phoneNumber.replace(/\D/g, "");
-
+  
   console.log(`[Network Detection] Original: ${phoneNumber}, Cleaned: ${cleanNumber}`);
-
+  
   // Remove country code if present (234)
   if (cleanNumber.startsWith("234")) {
     cleanNumber = cleanNumber.substring(3);
   }
-
-  // Remove leading zero if present
-  if (cleanNumber.startsWith("0")) {
-    cleanNumber = cleanNumber.substring(1);
+  
+  // ✅ IMPORTANT: Keep the leading zero for prefix detection
+  // Don't remove it - we need it to detect prefixes like 0806
+  if (!cleanNumber.startsWith("0")) {
+    // If no leading zero, add it for proper detection
+    if (cleanNumber.length >= 10) {
+      cleanNumber = '0' + cleanNumber;
+    }
   }
-
-  // Ensure we have at least 10 digits for detection
-  if (cleanNumber.length < 10) {
+  
+  // Ensure we have at least 11 digits for detection (with leading zero)
+  if (cleanNumber.length < 11) {
     console.warn(`[Network Detection] Phone number too short: ${cleanNumber}`);
     return null;
   }
-
-  // Get the relevant digits for detection
-  const firstThree = cleanNumber.substring(0, 3);
-  const firstFour = cleanNumber.substring(0, 4);
-  const firstFive = cleanNumber.substring(0, 5);
-
-  console.log(`[Network Detection] First 3: ${firstThree}, First 4: ${firstFour}, First 5: ${firstFive}`);
-
+  
+  // Get the relevant digits for detection (with leading zero preserved)
+  const firstFour = cleanNumber.substring(0, 4);  // e.g., "0806"
+  const firstFive = cleanNumber.substring(0, 5);  // e.g., "08064" or "07025"
+  
+  console.log(`[Network Detection] First 4 digits: ${firstFour}, First 5 digits: ${firstFive}`);
+  
   // ============================================================
-  // MTN - Check special 5-digit prefixes first (Visafone legacy)
+  // Special: Check first 5 digits for Visafone legacy prefixes
   // ============================================================
   if (firstFive === "07025" || firstFive === "07026") {
+    console.log(`[Network Detection] Detected MTN (Visafone) from prefix: ${firstFive}`);
     return "MTN";
   }
-
+  
   // ============================================================
   // MTN - Check first 4 digits
   // ============================================================
@@ -174,9 +175,10 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     '0816', '0903', '0906', '0913', '0916'
   ];
   if (mtnPrefixes.includes(firstFour)) {
+    console.log(`[Network Detection] Detected MTN from prefix: ${firstFour}`);
     return "MTN";
   }
-
+  
   // ============================================================
   // AIRTEL - Check first 4 digits
   // ============================================================
@@ -185,9 +187,10 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     '0907', '0911', '0912'
   ];
   if (airtelPrefixes.includes(firstFour)) {
+    console.log(`[Network Detection] Detected AIRTEL from prefix: ${firstFour}`);
     return "AIRTEL";
   }
-
+  
   // ============================================================
   // GLO - Check first 4 digits
   // ============================================================
@@ -195,9 +198,10 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     '0705', '0805', '0807', '0811', '0815', '0905', '0915'
   ];
   if (gloPrefixes.includes(firstFour)) {
+    console.log(`[Network Detection] Detected GLO from prefix: ${firstFour}`);
     return "GLO";
   }
-
+  
   // ============================================================
   // 9MOBILE (T2) - Check first 4 digits
   // ============================================================
@@ -205,24 +209,20 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     '0809', '0817', '0818', '0908', '0909'
   ];
   if (nineMobilePrefixes.includes(firstFour)) {
+    console.log(`[Network Detection] Detected 9MOBILE from prefix: ${firstFour}`);
     return "9MOBILE";
   }
-
-  // ============================================================
-  // Fallback: Check first 3 digits for older/ambiguous prefixes
-  // ============================================================
-  if (firstThree === "070" || firstThree === "080" || firstThree === "081" ||
-      firstThree === "090" || firstThree === "091") {
-    // Default to MTN for ambiguous ranges (most common)
-    return "MTN";
-  }
-
-  console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber}`);
+  
+  console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
   return null;
 }
 
 // ============================================================
 // ✅ FIXED: NORMALIZE PHONE NUMBER - Handles all formats
+// ============================================================
+
+// ============================================================
+// ✅ FIXED: NORMALIZE PHONE NUMBER - Keep leading zero
 // ============================================================
 
 function normalizePhoneNumber(phoneNumber: string): string {
@@ -238,27 +238,27 @@ function normalizePhoneNumber(phoneNumber: string): string {
     clean = clean.substring(3);
   }
   
-  // Remove leading zero if present (we'll add it back)
-  if (clean.startsWith('0')) {
-    clean = clean.substring(1);
+  // ✅ Ensure we have a leading zero (for 11-digit format)
+  if (!clean.startsWith('0')) {
+    // If we have 10 digits, add leading zero
+    if (clean.length === 10) {
+      clean = '0' + clean;
+    } else if (clean.length > 10) {
+      // If more than 10 digits, take last 10 and add leading zero
+      clean = '0' + clean.substring(clean.length - 10);
+    } else if (clean.length < 10) {
+      // Pad with zeros if too short
+      clean = '0' + clean.padStart(10, '0');
+    }
   }
   
-  // Ensure we have exactly 10 digits for the phone number (without leading zero)
-  if (clean.length > 10) {
-    clean = clean.substring(clean.length - 10);
-  } else if (clean.length < 10 && clean.length >= 5) {
-    // If we have at least 5 digits, pad with leading zeros to make 10
-    clean = clean.padStart(10, '0');
-  } else if (clean.length < 5) {
-    // Too short, pad with zeros
-    clean = clean.padStart(10, '0');
+  // Ensure we have exactly 11 digits with leading zero
+  if (clean.length > 11) {
+    clean = clean.substring(0, 11);
   }
   
-  // Add leading zero for 11-digit format
-  const result = '0' + clean;
-  
-  console.log(`[Normalize] Result: ${result}`);
-  return result;
+  console.log(`[Normalize] Result: ${clean}`);
+  return clean;
 }
 
 // ============================================================
