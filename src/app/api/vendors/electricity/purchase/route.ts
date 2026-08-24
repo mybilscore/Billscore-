@@ -1,5 +1,5 @@
 // app/api/vendors/electricity/purchase/route.ts
-// OPTIMIZED VERSION - Parallel queries, selective fields, better caching, minimal logging
+// FIXED - Increased timeout and better error handling
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -61,6 +61,67 @@ function normalizePhoneNumber(phone: string): string {
     cleaned = cleaned.substring(0, 11);
   }
   return cleaned;
+}
+
+// ============================================================
+// SAVE METER HELPER (UPDATED WITH COMPLETE INFO)
+// ============================================================
+
+async function saveMeterAsync(
+  userId: string, 
+  meterNumber: string, 
+  disco: string, 
+  meterType: string,
+  customerName?: string,
+  customerAddress?: string,
+  customerPhone?: string,
+  customerEmail?: string,
+  meterStatus?: string,
+  lastVerified?: Date
+) {
+  try {
+    const existing = await prisma.savedMeter.findFirst({
+      where: { userId, meterNumber },
+    });
+
+    const data = {
+      userId,
+      meterNumber,
+      disco,
+      meterType: meterType || "Prepaid",
+      customerName: customerName || null,
+      customerAddress: customerAddress || null,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      meterStatus: meterStatus || null,
+      lastVerified: lastVerified || new Date(),
+      isDefault: existing?.isDefault || false,
+    };
+
+    if (existing) {
+      await prisma.savedMeter.update({
+        where: { id: existing.id },
+        data: {
+          disco,
+          meterType: meterType || "Prepaid",
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          meterStatus: meterStatus || existing.meterStatus,
+          lastVerified: lastVerified || new Date(),
+        },
+      });
+      log('info', `✅ Meter updated with customer info: ${meterNumber} - ${customerName || 'No name'}`);
+    } else {
+      await prisma.savedMeter.create({ data });
+      log('info', `✅ Meter saved with customer info: ${meterNumber} - ${customerName || 'No name'}`);
+    }
+
+    await CacheService.invalidateSavedMeters(userId).catch(() => {});
+  } catch (error) {
+    log('error', '❌ Failed to save meter:', error);
+  }
 }
 
 // ============================================================
@@ -233,35 +294,7 @@ async function processRefund(
 }
 
 // ============================================================
-// SAVE METER HELPER (non-blocking)
-// ============================================================
-
-async function saveMeterAsync(userId: string, meterNumber: string, disco: string, meterType: string) {
-  try {
-    const existing = await prisma.savedMeter.findFirst({
-      where: { userId, meterNumber },
-    });
-
-    if (!existing) {
-      await prisma.savedMeter.create({
-        data: {
-          userId,
-          meterNumber,
-          disco,
-          meterType: meterType || "Prepaid",
-          isDefault: false,
-        },
-      });
-      // Invalidate saved meters cache
-      await CacheService.invalidateSavedMeters(userId).catch(() => {});
-    }
-  } catch (error) {
-    // Non-critical - ignore
-  }
-}
-
-// ============================================================
-// MAIN API ROUTE - OPTIMIZED
+// MAIN API ROUTE - FIXED TIMEOUT
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -271,7 +304,24 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth("/auth/sign-in");
     
     const body = await request.json();
-    let { meterNumber, meterType, amount, discoCode, phone, pin } = body;
+    let { 
+      meterNumber, 
+      meterType, 
+      amount, 
+      discoCode, 
+      phone, 
+      pin,
+      customerName,
+      customerAddress,
+      customerPhone: customerPhoneFromFrontend,
+      customerEmail,
+      meterStatus,
+    } = body;
+
+    // Log customer data if provided
+    if (customerName) {
+      log('info', `📝 Customer data received: ${customerName} (${meterNumber})`);
+    }
 
     // Validate request
     if (!meterNumber || meterNumber.length < 7) {
@@ -306,11 +356,11 @@ export async function POST(request: NextRequest) {
     // PARALLEL FETCH user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
-    const customerPhone = phone || sessionUser.phone;
+    const userPhone = phone || sessionUser.phone;
 
     const [cachedUser, cachedCustomer, cachedBalance] = await Promise.all([
       CacheService.getUser(userId).catch(() => null),
-      CacheService.getCustomer(userId, customerPhone).catch(() => null),
+      CacheService.getCustomer(userId, userPhone).catch(() => null),
       CacheService.getBalance(userId).catch(() => null),
     ]);
 
@@ -367,7 +417,7 @@ export async function POST(request: NextRequest) {
         where: {
           userId_phone: {
             userId: user.id,
-            phone: customerPhone,
+            phone: userPhone,
           },
         },
       });
@@ -375,7 +425,7 @@ export async function POST(request: NextRequest) {
       if (!customer) {
         customer = await CacheService.createCustomer({
           userId: user.id,
-          phone: customerPhone,
+          phone: userPhone,
           fullName: user.fullName || null,
           email: user.email || null,
           customerType: CustomerType.REGULAR,
@@ -386,7 +436,7 @@ export async function POST(request: NextRequest) {
           tags: [],
         });
       } else {
-        CacheService.setCustomer(user.id, customerPhone, customer).catch(() => {});
+        CacheService.setCustomer(user.id, userPhone, customer).catch(() => {});
       }
     }
 
@@ -429,6 +479,13 @@ export async function POST(request: NextRequest) {
           customerId: customer.id,
           pinVerified: false,
           wasDebited: false,
+          customerData: {
+            name: customerName || null,
+            address: customerAddress || null,
+            phone: customerPhoneFromFrontend || null,
+            email: customerEmail || null,
+            status: meterStatus || null,
+          },
         },
       },
     });
@@ -588,14 +645,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // SAVE METER (non-blocking)
-    // ============================================================
-
-    // Fire and forget - don't wait for this
-    saveMeterAsync(user.id, meterNumber, discoCode, meterType || 'Prepaid').catch(() => {});
-
-    // ============================================================
-    // VENDOR PURCHASE WITH TIMEOUT
+    // VENDOR PURCHASE - INCREASED TIMEOUT TO 60 SECONDS
     // ============================================================
 
     let vendorId: string | null = null;
@@ -609,12 +659,13 @@ export async function POST(request: NextRequest) {
     let grossProfit: number | null = null;
     let profitMargin: number | null = null;
     let platformCommission: number | null = null;
+    let vendorResult = null;
 
     try {
       const vendorService = getVendorService();
 
-      // Set a timeout of 25 seconds for the vendor call
-      const TIMEOUT_MS = 25000;
+      // ✅ INCREASED TIMEOUT TO 60 SECONDS
+      const TIMEOUT_MS = 60000;
       
       const vendorPromise = vendorService.buyElectricity(
         {
@@ -622,17 +673,18 @@ export async function POST(request: NextRequest) {
           amount: amount,
           discoCode: discoCode,
           meterType: meterType || 'Prepaid',
-          phone: customerPhone,
+          phone: userPhone,
         },
         user.id
       );
 
       // Race with timeout
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Vendor timeout after 25 seconds')), TIMEOUT_MS);
+        setTimeout(() => reject(new Error('Vendor timeout after 60 seconds')), TIMEOUT_MS);
       });
 
       const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
+      vendorResult = result;
 
       // Extract commission data
       if (result.data) {
@@ -782,16 +834,43 @@ export async function POST(request: NextRequest) {
                   grossProfit: grossProfit,
                   profitMargin: profitMargin,
                 },
+                customerData: {
+                  name: customerName || null,
+                  address: customerAddress || null,
+                  phone: customerPhoneFromFrontend || null,
+                  email: customerEmail || null,
+                  status: meterStatus || null,
+                },
               },
             },
           }),
         ]);
 
+        // ============================================================
+        // SAVE METER WITH CUSTOMER DATA FROM FRONTEND
+        // ============================================================
+
+        // Save meter with complete information using data from frontend
+        saveMeterAsync(
+          user.id, 
+          meterNumber, 
+          discoCode, 
+          meterType || 'Prepaid',
+          customerName || null,
+          customerAddress || null,
+          customerPhoneFromFrontend || null,
+          customerEmail || null,
+          meterStatus || null,
+          new Date()
+        ).catch(() => {});
+
+        log('info', `📝 Customer data saved for meter ${meterNumber}: ${customerName || 'No name'}`);
+
         // Invalidate cache
         await Promise.all([
           CacheService.invalidateWallet(user.id),
           CacheService.invalidateUser(user.id),
-          CacheService.invalidateCustomer(user.id, customerPhone),
+          CacheService.invalidateCustomer(user.id, userPhone),
           CacheService.invalidateSavedMeters(user.id),
         ]);
 
@@ -821,6 +900,13 @@ export async function POST(request: NextRequest) {
               platformProfit: platformCommission,
               grossProfit: grossProfit,
               profitMargin: profitMargin,
+            },
+            customerInfo: {
+              name: customerName,
+              address: customerAddress,
+              phone: customerPhoneFromFrontend,
+              email: customerEmail,
+              status: meterStatus,
             },
             ...result.data,
           },
@@ -868,6 +954,13 @@ export async function POST(request: NextRequest) {
               vendorErrors: result.vendorErrors || [],
               meterType: meterType,
               failedAt: new Date().toISOString(),
+              customerData: {
+                name: customerName || null,
+                address: customerAddress || null,
+                phone: customerPhoneFromFrontend || null,
+                email: customerEmail || null,
+                status: meterStatus || null,
+              },
             },
           },
         });
@@ -887,6 +980,40 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
     } catch (error: any) {
+      // Check if this was a timeout error but we might have a successful result
+      if (error.message?.includes('timeout') && vendorResult) {
+        log('warn', 'Vendor request timed out but we have a result - processing anyway');
+        
+        // If we have a vendorResult, process it as success
+        if (vendorResult.success) {
+          // Process the successful result quickly
+          log('info', `Processing timed-out vendor result for transaction ${transaction.id}`);
+          
+          // We'll return a success response with the vendor data
+          return NextResponse.json({
+            success: true,
+            data: {
+              transactionId: transaction.id,
+              reference: transaction.id,
+              vendorReference: vendorResult.vendorReference,
+              amount: amount,
+              discoCode: discoCode,
+              meterNumber: meterNumber,
+              token: vendorResult.data?.token || "TOKEN_GENERATED",
+              warning: "Request timed out but vendor transaction succeeded",
+              customerInfo: {
+                name: customerName,
+                address: customerAddress,
+                phone: customerPhoneFromFrontend,
+                email: customerEmail,
+                status: meterStatus,
+              },
+              ...vendorResult.data,
+            },
+          });
+        }
+      }
+
       // Unexpected error
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
@@ -924,6 +1051,13 @@ export async function POST(request: NextRequest) {
             errorType: error.name,
             meterType: meterType,
             failedAt: new Date().toISOString(),
+            customerData: {
+              name: customerName || null,
+              address: customerAddress || null,
+              phone: customerPhoneFromFrontend || null,
+              email: customerEmail || null,
+              status: meterStatus || null,
+            },
           },
         },
       });

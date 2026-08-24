@@ -1,5 +1,5 @@
 // app/api/vendors/cable/purchase/route.ts
-// OPTIMIZED VERSION - Parallel queries, selective fields, minimal logging
+// COMPLETE UPDATED VERSION - With customer info saving
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -233,30 +233,64 @@ async function processRefund(
 }
 
 // ============================================================
-// SAVE DECODER HELPER (non-blocking)
+// SAVE DECODER HELPER (UPDATED WITH COMPLETE INFO)
 // ============================================================
 
-async function saveDecoderAsync(userId: string, smartCardNumber: string, provider: string, packageCode: string) {
+async function saveDecoderAsync(
+  userId: string, 
+  decoderNumber: string, 
+  provider: string, 
+  packageCode: string,
+  customerName?: string,
+  customerAddress?: string,
+  customerPhone?: string,
+  customerEmail?: string,
+  decoderStatus?: string,
+  lastVerified?: Date
+) {
   try {
     const existing = await prisma.savedDecoder.findFirst({
-      where: { userId, decoderNumber: smartCardNumber },
+      where: { userId, decoderNumber },
     });
 
-    if (!existing) {
-      await prisma.savedDecoder.create({
+    const data = {
+      userId,
+      decoderNumber,
+      provider: provider,
+      name: `${provider} Decoder`,
+      package: packageCode || "Standard",
+      customerName: customerName || null,
+      customerAddress: customerAddress || null,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      decoderStatus: decoderStatus || null,
+      lastVerified: lastVerified || new Date(),
+      isDefault: existing?.isDefault || false,
+    };
+
+    if (existing) {
+      await prisma.savedDecoder.update({
+        where: { id: existing.id },
         data: {
-          userId,
-          decoderNumber: smartCardNumber,
-          provider: provider,
-          name: `${provider} Decoder`,
-          package: packageCode,
-          isDefault: false,
+          provider,
+          package: packageCode || "Standard",
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          decoderStatus: decoderStatus || existing.decoderStatus,
+          lastVerified: lastVerified || new Date(),
         },
       });
-      await CacheService.invalidateSavedDecoders(userId).catch(() => {});
+      log('info', `✅ Decoder updated with customer info: ${decoderNumber}`);
+    } else {
+      await prisma.savedDecoder.create({ data });
+      log('info', `✅ Decoder saved with customer info: ${decoderNumber}`);
     }
+
+    await CacheService.invalidateSavedDecoders(userId).catch(() => {});
   } catch (error) {
-    // Non-critical - ignore
+    log('error', 'Failed to save decoder:', error);
   }
 }
 
@@ -591,12 +625,6 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // SAVE DECODER (non-blocking)
-    // ============================================================
-
-    saveDecoderAsync(user.id, smartCardNumber, provider, packageCode).catch(() => {});
-
-    // ============================================================
     // VENDOR PURCHASE
     // ============================================================
 
@@ -780,6 +808,51 @@ export async function POST(request: NextRequest) {
           }),
         ]);
 
+        // ============================================================
+        // ✅ EXTRACT AND SAVE CUSTOMER INFO
+        // ============================================================
+        
+        // Extract customer info from vendor response
+        const customerName = result.data?.customerName || 
+                             result.data?.Customer_Name || 
+                             result.data?.customer?.name || 
+                             null;
+        
+        const customerAddress = result.data?.customerAddress || 
+                                result.data?.Address || 
+                                result.data?.customer?.address || 
+                                null;
+        
+        const customerPhoneFromVendor = result.data?.customerPhone || 
+                                        result.data?.phone || 
+                                        result.data?.customer?.phone || 
+                                        null;
+        
+        const customerEmailFromVendor = result.data?.customerEmail || 
+                                        result.data?.email || 
+                                        result.data?.customer?.email || 
+                                        null;
+        
+        const decoderStatus = result.data?.status || 
+                              result.data?.Status || 
+                              "ACTIVE";
+
+        // Save decoder with complete information (non-blocking)
+        saveDecoderAsync(
+          user.id, 
+          smartCardNumber, 
+          provider, 
+          packageCode || 'STANDARD',
+          customerName,
+          customerAddress,
+          customerPhoneFromVendor,
+          customerEmailFromVendor,
+          decoderStatus,
+          new Date()
+        ).catch(() => {});
+
+        log('info', `📝 Customer data saved for decoder ${smartCardNumber}: ${customerName || 'No name'}`);
+
         // Invalidate cache
         await Promise.all([
           CacheService.invalidateWallet(user.id),
@@ -814,6 +887,13 @@ export async function POST(request: NextRequest) {
               platformProfit: platformCommission,
               grossProfit: grossProfit,
               profitMargin: profitMargin,
+            },
+            customerInfo: {
+              name: customerName,
+              address: customerAddress,
+              phone: customerPhoneFromVendor,
+              email: customerEmailFromVendor,
+              status: decoderStatus,
             },
             ...result.data,
           },

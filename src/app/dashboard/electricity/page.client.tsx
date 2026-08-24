@@ -1,4 +1,6 @@
 // app/dashboard/buy/electricity/page.client.tsx
+// COMPLETE UPDATED VERSION - Auto-populates all data on saved meter click
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -43,13 +45,17 @@ import {
   Link as LinkIcon,
   Store,
   ExternalLink,
+  Mail,
+  Phone,
+  Home,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ✅ Import QR hash utilities
-import { generateQRUrl, verifyQRHash } from "~/lib/qr-hash";
+// Import QR hash utilities
+import { generateQRUrl } from "~/lib/qr-hash";
 
-// Types
+// Types - COMPLETE with all customer fields
 interface DisCo {
   id: string;
   name: string;
@@ -70,6 +76,12 @@ interface SavedMeter {
   meterType: string;
   isDefault: boolean;
   createdAt: string;
+  customerName: string | null;
+  customerAddress: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  meterStatus: string | null;
+  lastVerified: string | null;
 }
 
 interface ElectricityClientProps {
@@ -108,26 +120,23 @@ const formatDate = (dateString: string) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Generate encrypted QR Display link
+// Generate encrypted QR Display link
 const generateQRDisplayLink = (
   baseUrl: string,
   identifier: string,
   type: string,
   provider: string
 ): string => {
-  // Generate the Buy Now link which contains the hash
   const buyNowLink = generateQRUrl(baseUrl, {
     identifier: identifier,
     type: type,
     provider: provider,
   });
 
-  // Extract the hash from the Buy Now link
   const url = new URL(buyNowLink);
   const hash = url.searchParams.get('h');
   const expiresAt = url.searchParams.get('e');
 
-  // Build QR Display link with encrypted hash
   let displayPath = `/qr/display/${identifier}`;
   const queryParams = new URLSearchParams();
 
@@ -150,7 +159,7 @@ const generateQRDisplayLink = (
   return `${baseUrl}${displayPath}`;
 };
 
-// ✅ QR Code Modal
+// QR Code Modal
 const QRCodeModal = ({
   isOpen,
   onClose,
@@ -408,7 +417,7 @@ const QRCodeModal = ({
   );
 };
 
-// ✅ Saved Meters Component with Encrypted QR Links
+// SavedMeters Component - Shows complete customer info
 const SavedMeters = ({
   meters,
   onSelect,
@@ -488,7 +497,6 @@ const SavedMeters = ({
 
       <div className="space-y-2">
         {displayMeters.map((meter) => {
-          // ✅ Generate encrypted QR Display link
           const qrDisplayLink = generateQRDisplayLink(
             baseUrl,
             meter.meterNumber,
@@ -496,10 +504,14 @@ const SavedMeters = ({
             meter.disco
           );
 
+          const hasCustomerInfo = meter.customerName || meter.customerAddress || meter.customerPhone || meter.customerEmail;
+
           return (
             <div
               key={meter.id}
-              className="rounded-lg border border-gray-100 p-2 transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600"
+              className={`rounded-lg border p-2 transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 ${
+                hasCustomerInfo ? 'border-green-200 dark:border-green-800/30' : 'border-gray-100'
+              }`}
             >
               <div className="flex items-center justify-between">
                 <button
@@ -516,11 +528,69 @@ const SavedMeters = ({
                     <span className="text-[8px] bg-gray-100 text-gray-700 px-1 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
                       {meter.meterType}
                     </span>
+                    {meter.meterStatus && (
+                      <span className={`text-[8px] px-1 py-0.5 rounded ${
+                        meter.meterStatus.toLowerCase() === 'active' 
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                      }`}>
+                        {meter.meterStatus}
+                      </span>
+                    )}
                   </div>
+                  
                   <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     {meter.meterNumber} • {meter.disco}
                   </p>
+                  
+                  {/* Customer Information Section */}
+                  {hasCustomerInfo && (
+                    <div className="mt-1.5 p-1.5 bg-gray-50 dark:bg-gray-800/50 rounded border border-gray-100 dark:border-gray-700/50">
+                      {meter.customerName && (
+                        <div className="flex items-center gap-1 text-[9px] text-gray-700 dark:text-gray-300">
+                          <User className="h-2.5 w-2.5 text-gray-400" />
+                          <span className="font-medium">{meter.customerName}</span>
+                        </div>
+                      )}
+                      {meter.customerAddress && (
+                        <div className="flex items-center gap-1 text-[9px] text-gray-500 dark:text-gray-400">
+                          <MapPin className="h-2.5 w-2.5 text-gray-400" />
+                          <span className="truncate">{meter.customerAddress}</span>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                        {meter.customerPhone && (
+                          <div className="flex items-center gap-0.5 text-[9px] text-gray-500 dark:text-gray-400">
+                            <Phone className="h-2.5 w-2.5 text-gray-400" />
+                            <span>{meter.customerPhone}</span>
+                          </div>
+                        )}
+                        {meter.customerEmail && (
+                          <div className="flex items-center gap-0.5 text-[9px] text-gray-500 dark:text-gray-400">
+                            <Mail className="h-2.5 w-2.5 text-gray-400" />
+                            <span className="truncate max-w-[120px]">{meter.customerEmail}</span>
+                          </div>
+                        )}
+                      </div>
+                      {meter.lastVerified && (
+                        <div className="flex items-center gap-1 text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">
+                          <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />
+                          <span>Verified: {new Date(meter.lastVerified).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {!hasCustomerInfo && (
+                    <div className="mt-1 text-[9px] text-gray-400 dark:text-gray-500">
+                      <span className="inline-flex items-center gap-1">
+                        <AlertCircle className="h-2.5 w-2.5" />
+                        No customer details available
+                      </span>
+                    </div>
+                  )}
                 </button>
+                
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                   <button
                     onClick={() => onViewQR(meter.meterNumber, meter.disco, "Electricity")}
@@ -542,7 +612,7 @@ const SavedMeters = ({
                 </div>
               </div>
 
-              {/* ✅ Encrypted QR Display Link */}
+              {/* QR Display Link */}
               <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
                 <LinkIcon className="h-3 w-3 text-gray-400 flex-shrink-0" />
                 <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">QR Link:</span>
@@ -569,7 +639,7 @@ const SavedMeters = ({
   );
 };
 
-// ✅ Status Message Component
+// Status Message Component
 const StatusMessage = ({ 
   error, 
   success, 
@@ -615,7 +685,7 @@ const StatusMessage = ({
   return null;
 };
 
-// ✅ Amount Button
+// Amount Button
 const AmountButton = ({
   amount,
   isSelected,
@@ -641,7 +711,7 @@ const AmountButton = ({
   );
 };
 
-// ✅ Main Component
+// Main Component
 export function ElectricityClient({
   user: initialUser,
   discos,
@@ -662,7 +732,7 @@ export function ElectricityClient({
   const [savedMeters, setSavedMeters] = useState<SavedMeter[]>([]);
   const [loadingMeters, setLoadingMeters] = useState(false);
   
-  // ✅ QR Code state
+  // QR Code state
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrData, setQrData] = useState<{ 
     identifier: string; 
@@ -678,7 +748,7 @@ export function ElectricityClient({
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
   
-  // Meter verification state
+  // Meter verification state - PERSISTED with all customer data
   const [verifying, setVerifying] = useState(false);
   const [verifiedMeter, setVerifiedMeter] = useState<{
     customerName: string;
@@ -686,16 +756,18 @@ export function ElectricityClient({
     meterType: string;
     status: string;
     customerAddress?: string;
+    customerPhone?: string;
+    customerEmail?: string;
   } | null>(null);
 
-  // ✅ Dropdown state for DisCo
+  // Dropdown state for DisCo
   const [showDiscoDropdown, setShowDiscoDropdown] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const currentDisco = discos.find((d) => d.id === selectedDisco);
 
-  // ✅ Get base URL
+  // Get base URL
   const getBaseUrl = () => {
     if (typeof window !== 'undefined') {
       return window.location.origin;
@@ -703,14 +775,14 @@ export function ElectricityClient({
     return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   };
 
-  // ✅ Filter discos based on search
+  // Filter discos based on search
   const filteredDiscos = discos.filter((d) =>
     d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     d.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     d.region.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // ✅ Handle click outside to close dropdown
+  // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -724,7 +796,7 @@ export function ElectricityClient({
     };
   }, []);
 
-  // ✅ Verify meter using API route
+  // Verify meter using API route - PERSISTS customer data
   useEffect(() => {
     const verifyMeter = async () => {
       if (!meterNumber || meterNumber.length < 10 || !selectedDisco) {
@@ -754,12 +826,15 @@ export function ElectricityClient({
         const result = await response.json();
         
         if (result.success) {
+          // Store ALL customer data from verification
           setVerifiedMeter({
             customerName: result.data.customerName,
             meterNumber: result.data.meterNumber,
             meterType: result.data.meterType,
             status: result.data.status,
             customerAddress: result.data.customerAddress,
+            customerPhone: result.data.customerPhone,
+            customerEmail: result.data.customerEmail,
           });
         } else {
           setVerifiedMeter(null);
@@ -772,7 +847,6 @@ export function ElectricityClient({
       }
     };
     
-    // Debounce verification
     const timer = setTimeout(verifyMeter, 800);
     return () => clearTimeout(timer);
   }, [meterNumber, selectedDisco, meterType]);
@@ -825,7 +899,7 @@ export function ElectricityClient({
     ensureWallet();
   }, [user.hasWallet]);
 
-  // ✅ Handle View QR Code
+  // Handle View QR Code
   const handleViewQR = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
     
@@ -851,25 +925,19 @@ export function ElectricityClient({
     setShowQRModal(true);
   };
 
-  // ✅ Handle Get QR Display Link - Encrypted version
+  // Handle Get QR Display Link
   const handleGetQRDisplayLink = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
-    
-    // ✅ Generate encrypted QR Display link
     const encryptedLink = generateQRDisplayLink(
       baseUrl,
       identifier,
       serviceType.toLowerCase(),
       provider
     );
-    
-    console.log(`🔗 [QR] Encrypted QR Display link: ${encryptedLink}`);
-    
-    // Navigate to the QR display page with the encrypted link
     router.push(encryptedLink.replace(baseUrl, ''));
   };
 
-  // ✅ Handle Quick Order from QR
+  // Handle Quick Order from QR
   const handleQuickOrder = () => {
     if (!qrData) return;
     setShowQRModal(false);
@@ -914,10 +982,63 @@ export function ElectricityClient({
     setPinError("");
   };
 
+  // ✅ When selecting a saved meter, auto-populate ALL data without re-verification
   const handleSelectSavedMeter = (meterNumber: string) => {
-    setMeterNumber(meterNumber);
+    // Find the meter from saved meters
+    const meter = savedMeters.find(m => m.meterNumber === meterNumber);
+    
+    if (!meter) {
+      toast.error("Meter not found");
+      return;
+    }
+
+    // ✅ Auto-populate all meter data
+    setMeterNumber(meter.meterNumber);
+    
+    // ✅ Set the DisCo
+    const disco = discos.find(d => d.code === meter.disco);
+    if (disco) {
+      setSelectedDisco(disco.id);
+    }
+    
+    // ✅ Set meter type
+    setMeterType(meter.meterType || "Prepaid");
+    
+    // ✅ Restore customer data if available (NO re-verification needed!)
+    if (meter.customerName) {
+      setVerifiedMeter({
+        customerName: meter.customerName,
+        meterNumber: meter.meterNumber,
+        meterType: meter.meterType,
+        status: meter.meterStatus || "ACTIVE",
+        customerAddress: meter.customerAddress || undefined,
+        customerPhone: meter.customerPhone || undefined,
+        customerEmail: meter.customerEmail || undefined,
+      });
+      
+      // Log the restored data
+      console.log("📝 [Electricity] Restored customer data from saved meter:", {
+        name: meter.customerName,
+        address: meter.customerAddress,
+        phone: meter.customerPhone,
+        email: meter.customerEmail,
+        status: meter.meterStatus,
+      });
+    } else {
+      // No customer data available - clear verification state
+      setVerifiedMeter(null);
+    }
+    
+    // Clear any errors
     setError("");
     setPinError("");
+    
+    // Optional: Show a success toast
+    if (meter.customerName) {
+      toast.success(`✅ Loaded ${meter.customerName}'s meter`);
+    } else {
+      toast.success(`✅ Loaded meter ${meter.meterNumber}`);
+    }
   };
 
   const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -932,6 +1053,7 @@ export function ElectricityClient({
     return selectedAmount || parseInt(customAmount) || 0;
   };
 
+  // UPDATED: Pass customer data to purchase API
   const handlePurchase = async () => {
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
@@ -972,16 +1094,35 @@ export function ElectricityClient({
     try {
       const disco = discos.find(d => d.id === selectedDisco);
       
+      // Build payload with customer data from verification
+      const payload: any = {
+        meterNumber: meterNumber,
+        amount: amount,
+        discoCode: disco?.code || "",
+        meterType: meterType,
+        pin: pin,
+      };
+
+      // Pass customer data if available (from verification)
+      if (verifiedMeter && verifiedMeter.customerName) {
+        payload.customerName = verifiedMeter.customerName;
+        payload.customerAddress = verifiedMeter.customerAddress || "";
+        payload.customerPhone = verifiedMeter.customerPhone || "";
+        payload.customerEmail = verifiedMeter.customerEmail || "";
+        payload.meterStatus = verifiedMeter.status || "ACTIVE";
+        console.log("📝 [Electricity] Passing customer data to purchase:", {
+          name: verifiedMeter.customerName,
+          address: verifiedMeter.customerAddress,
+          phone: verifiedMeter.customerPhone,
+          email: verifiedMeter.customerEmail,
+          status: verifiedMeter.status,
+        });
+      }
+
       const response = await fetch("/api/vendors/electricity/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          meterNumber: meterNumber,
-          amount: amount,
-          discoCode: disco?.code || "",
-          meterType: meterType,
-          pin: pin,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const result = await response.json();
@@ -1211,7 +1352,7 @@ export function ElectricityClient({
                 </div>
               )}
 
-              {/* Verification Status */}
+              {/* Verification Status - Shows persisted customer data */}
               {verifying && (
                 <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -1223,7 +1364,7 @@ export function ElectricityClient({
                 <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20">
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
-                    <div>
+                    <div className="flex-1">
                       <p className="text-xs font-medium text-green-700 dark:text-green-400">
                         ✅ Verified: {verifiedMeter.customerName}
                       </p>
@@ -1233,6 +1374,16 @@ export function ElectricityClient({
                       {verifiedMeter.customerAddress && (
                         <p className="text-[10px] text-green-600 dark:text-green-300">
                           📍 {verifiedMeter.customerAddress}
+                        </p>
+                      )}
+                      {verifiedMeter.customerPhone && (
+                        <p className="text-[10px] text-green-600 dark:text-green-300">
+                          📞 {verifiedMeter.customerPhone}
+                        </p>
+                      )}
+                      {verifiedMeter.customerEmail && (
+                        <p className="text-[10px] text-green-600 dark:text-green-300">
+                          ✉️ {verifiedMeter.customerEmail}
                         </p>
                       )}
                     </div>
@@ -1315,16 +1466,52 @@ export function ElectricityClient({
                     </span>
                   </div>
 
+                  {/* Display customer data in order summary */}
                   {verifiedMeter && (
-                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-600 dark:text-gray-400">Customer</span>
+                    <>
+                      <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-gray-400" />
+                          <span className="text-gray-600 dark:text-gray-400">Customer</span>
+                        </div>
+                        <span className="font-medium text-gray-900 dark:text-white text-xs">
+                          {verifiedMeter.customerName}
+                        </span>
                       </div>
-                      <span className="font-medium text-gray-900 dark:text-white text-xs">
-                        {verifiedMeter.customerName}
-                      </span>
-                    </div>
+                      {verifiedMeter.customerAddress && (
+                        <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-gray-400" />
+                            <span className="text-gray-600 dark:text-gray-400">Address</span>
+                          </div>
+                          <span className="font-medium text-gray-900 dark:text-white text-xs truncate max-w-[150px]">
+                            {verifiedMeter.customerAddress}
+                          </span>
+                        </div>
+                      )}
+                      {verifiedMeter.customerPhone && (
+                        <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-gray-400" />
+                            <span className="text-gray-600 dark:text-gray-400">Phone</span>
+                          </div>
+                          <span className="font-medium text-gray-900 dark:text-white text-xs">
+                            {verifiedMeter.customerPhone}
+                          </span>
+                        </div>
+                      )}
+                      {verifiedMeter.customerEmail && (
+                        <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-4 w-4 text-gray-400" />
+                            <span className="text-gray-600 dark:text-gray-400">Email</span>
+                          </div>
+                          <span className="font-medium text-gray-900 dark:text-white text-xs truncate max-w-[150px]">
+                            {verifiedMeter.customerEmail}
+                          </span>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
@@ -1460,6 +1647,10 @@ export function ElectricityClient({
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
                   Transaction PIN required for security
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
+                  Customer details are saved with your meter
                 </li>
               </ul>
             </div>

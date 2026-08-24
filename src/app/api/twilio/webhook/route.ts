@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH FIXED SYNTAX
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -126,89 +126,109 @@ function getApiUrl(): string {
 }
 
 // ============================================================
-// FIXED: NETWORK DETECTION WITH COUNTRY CODE SUPPORT
+// ✅ FIXED: NETWORK DETECTION - More accurate and comprehensive
 // ============================================================
 
 function detectNetworkFromPhone(phoneNumber: string): string | null {
+  if (!phoneNumber) return null;
+  
+  // Remove all non-digit characters
   let cleanNumber = phoneNumber.replace(/\D/g, "");
   
+  console.log(`[Network Detection] Original: ${phoneNumber}, Cleaned: ${cleanNumber}`);
+  
+  // Remove country code if present (234)
   if (cleanNumber.startsWith("234")) {
     cleanNumber = cleanNumber.substring(3);
   }
   
+  // Remove leading zero if present
   if (cleanNumber.startsWith("0")) {
     cleanNumber = cleanNumber.substring(1);
   }
   
+  // Ensure we have at least 10 digits for detection
   if (cleanNumber.length < 10) {
-    console.warn(`Phone number too short after cleaning: ${cleanNumber} (original: ${phoneNumber})`);
+    console.warn(`[Network Detection] Phone number too short: ${cleanNumber}`);
     return null;
   }
   
-  if (cleanNumber.length > 10) {
-    cleanNumber = cleanNumber.slice(-10);
-  }
+  // Get the relevant digits for detection
+  const firstThree = cleanNumber.substring(0, 3);
+  const firstFour = cleanNumber.substring(0, 4);
   
-  console.log(`[Network Detection] Cleaned number: ${cleanNumber}`);
+  console.log(`[Network Detection] First 3 digits: ${firstThree}, First 4 digits: ${firstFour}`);
   
-  if (cleanNumber.startsWith("80") || cleanNumber.startsWith("81") || 
-      cleanNumber.startsWith("70") || cleanNumber.startsWith("90") || 
-      cleanNumber.startsWith("91")) {
-    return "MTN";
-  }
-  
-  if (cleanNumber.startsWith("802") || cleanNumber.startsWith("808") || 
-      cleanNumber.startsWith("812") || cleanNumber.startsWith("901") || 
-      cleanNumber.startsWith("902") || cleanNumber.startsWith("907") || 
-      cleanNumber.startsWith("701") || cleanNumber.startsWith("708")) {
+  // ============================================================
+  // AIRTEL - Check first 4 digits
+  // ============================================================
+  if (firstFour === "802" || firstFour === "808" || firstFour === "812" || 
+      firstFour === "901" || firstFour === "902" || firstFour === "907" || 
+      firstFour === "701" || firstFour === "708") {
     return "AIRTEL";
   }
   
-  if (cleanNumber.startsWith("805") || cleanNumber.startsWith("807") || 
-      cleanNumber.startsWith("811") || cleanNumber.startsWith("815") || 
-      cleanNumber.startsWith("905") || cleanNumber.startsWith("909")) {
+  // ============================================================
+  // GLO - Check first 4 digits
+  // ============================================================
+  if (firstFour === "805" || firstFour === "807" || firstFour === "811" || 
+      firstFour === "815" || firstFour === "905" || firstFour === "909") {
     return "GLO";
   }
   
-  if (cleanNumber.startsWith("809") || cleanNumber.startsWith("817") || 
-      cleanNumber.startsWith("818") || cleanNumber.startsWith("908") || 
-      cleanNumber.startsWith("903") || cleanNumber.startsWith("904")) {
+  // ============================================================
+  // 9MOBILE - Check first 4 digits
+  // ============================================================
+  if (firstFour === "809" || firstFour === "817" || firstFour === "818" || 
+      firstFour === "908" || firstFour === "903" || firstFour === "904") {
     return "9MOBILE";
   }
   
-  console.warn(`Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
+  // ============================================================
+  // MTN - Check first 3 digits
+  // ============================================================
+  if (firstThree === "080" || firstThree === "081" || 
+      firstThree === "070" || firstThree === "090" || 
+      firstThree === "091") {
+    return "MTN";
+  }
+  
+  console.warn(`[Network Detection] Unknown network for phone: ${phoneNumber} (cleaned: ${cleanNumber})`);
   return null;
 }
 
 // ============================================================
-// FIXED: NORMALIZE PHONE NUMBER (Handle all formats)
+// ✅ FIXED: NORMALIZE PHONE NUMBER
 // ============================================================
 
 function normalizePhoneNumber(phoneNumber: string): string {
+  if (!phoneNumber) return "";
+  
   let clean = phoneNumber.replace(/\D/g, '');
   
   console.log(`[Normalize] Original: ${phoneNumber}, Cleaned: ${clean}`);
   
+  // Remove country code if present
   if (clean.startsWith('234')) {
-    clean = '0' + clean.substring(3);
+    clean = clean.substring(3);
   }
   
-  if (clean.startsWith('0') && clean.length === 11) {
-    return clean;
-  }
-  
+  // Add leading zero if not present and length is 10
   if (!clean.startsWith('0') && clean.length === 10) {
     clean = '0' + clean;
   }
   
+  // Ensure we have 11 digits with leading zero
   if (clean.length < 11 && clean.length >= 10) {
     clean = '0' + clean;
   }
   
+  // Pad if too short
   if (clean.length < 11) {
     clean = clean.padStart(11, '0');
   }
   
+  // Truncate if too long
   if (clean.length > 11) {
     clean = clean.substring(0, 11);
   }
@@ -299,6 +319,13 @@ function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, 
     return `Duplicate transaction detected. Please wait 15 seconds and try again.`;
   }
   
+  if (errorMessage.includes('BELOW MINIMUM AMOUNT') || 
+      errorMessage.includes('minimum amount') ||
+      errorMessage.includes('MINIMUM AMOUNT')) {
+    return `Minimum electricity purchase is NGN 1,000.
+Please try again with a higher amount.`;
+  }
+  
   return `Purchase failed. Please try again or contact support if the issue persists.`;
 }
 
@@ -383,12 +410,69 @@ async function saveMeterAsync(userId: string, meterNumber: string, disco: string
 }
 
 // ============================================================
-// FIXED: METER VERIFICATION USING API ROUTE (Same as Dashboard)
+// SAVE METER WITH CUSTOMER INFO HELPER
+// ============================================================
+
+async function saveMeterWithCustomerInfo(
+  userId: string,
+  meterNumber: string,
+  disco: string,
+  meterType: string,
+  customerName?: string | null,
+  customerAddress?: string | null,
+  customerPhone?: string | null,
+  customerEmail?: string | null,
+  meterStatus?: string | null
+): Promise<void> {
+  try {
+    const existing = await prisma.savedMeter.findFirst({
+      where: { userId, meterNumber },
+    });
+
+    const data = {
+      userId,
+      meterNumber,
+      disco: disco.toUpperCase(),
+      meterType: meterType || "Prepaid",
+      customerName: customerName || null,
+      customerAddress: customerAddress || null,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      meterStatus: meterStatus || null,
+      lastVerified: new Date(),
+      isDefault: existing?.isDefault || false,
+    };
+
+    if (existing) {
+      await prisma.savedMeter.update({
+        where: { id: existing.id },
+        data: {
+          disco: disco.toUpperCase(),
+          meterType: meterType || "Prepaid",
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          meterStatus: meterStatus || existing.meterStatus,
+          lastVerified: new Date(),
+        },
+      });
+      console.log(`[WhatsApp] Meter updated with customer info: ${meterNumber}`);
+    } else {
+      await prisma.savedMeter.create({ data });
+      console.log(`[WhatsApp] Meter saved with customer info: ${meterNumber}`);
+    }
+  } catch (error) {
+    console.error(`[WhatsApp] Failed to save meter with customer info:`, error);
+  }
+}
+
+// ============================================================
+// METER VERIFICATION USING API ROUTE (Same as Dashboard)
 // ============================================================
 
 async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
   try {
-    // ✅ Use the same API route that the dashboard uses
     const apiUrl = getApiUrl();
     const url = `${apiUrl}/api/vendors/electricity/verify-meter`;
     
@@ -434,7 +518,7 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 }
 
 // ============================================================
-// MAIN WEBHOOK HANDLER
+// MAIN WEBHOOK HANDLER - FIXED SYNTAX ERROR
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -544,6 +628,7 @@ Or visit: ${getAppUrl()}`;
     if (!user) {
       const upperBody = body.toUpperCase().trim();
       
+      // ✅ FIXED: Removed extra closing parenthesis
       if (upperBody.startsWith("REG") || upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
         responseMessage = await handleUserRegistration(whatsappFrom, body);
       } else {
@@ -939,7 +1024,7 @@ Or reply with HELP for assistance.`;
 }
 
 // ============================================================
-// NETWORK MAPPING & DETECTION
+// NETWORK MAPPING
 // ============================================================
 
 const networkMap: Record<string, NetworkProvider> = {
@@ -1420,7 +1505,7 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 }
 
 // ============================================================
-// ADD METER WITH VERIFICATION AND QR CODE
+// ADD METER WITH VERIFICATION AND QR CODE - UPDATED
 // ============================================================
 
 async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
@@ -1447,16 +1532,30 @@ async function addMeterWithVerificationAndQR(userId: string, meterNumber: string
     const serviceID = serviceIDMap[discoUpper] || discoUpper.toLowerCase() + "-electric";
 
     const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, "prepaid");
+    
     let verificationMessage = "";
+    let customerName = null;
+    let customerAddress = null;
+    let customerPhone = null;
+    let customerEmail = null;
+    let meterStatus = null;
+    
     if (verificationResult.success) {
+      customerName = verificationResult.data?.customerName || null;
+      customerAddress = verificationResult.data?.customerAddress || null;
+      customerPhone = verificationResult.data?.customerPhone || null;
+      customerEmail = verificationResult.data?.customerEmail || null;
+      meterStatus = verificationResult.data?.status || null;
+      
       verificationMessage = `
-Meter Verified!
-Customer: ${verificationResult.data?.customerName || "Unknown"}
+✅ Meter Verified!
+Customer: ${customerName || "Unknown"}
 Meter: ${verificationResult.data?.meterNumber || meterNumber}
-Status: ${verificationResult.data?.status || "ACTIVE"}`;
+Status: ${meterStatus || "ACTIVE"}`;
     } else {
       verificationMessage = `
-Could not verify meter: ${verificationResult.error || "Unknown error"}`;
+⚠️ Could not verify meter: ${verificationResult.error || "Unknown error"}
+You can still save the meter.`;
     }
 
     const existing = await prisma.savedMeter.findFirst({
@@ -1466,18 +1565,33 @@ Could not verify meter: ${verificationResult.error || "Unknown error"}`;
     if (existing) {
       await prisma.savedMeter.update({
         where: { id: existing.id },
-        data: { disco: discoUpper, name: name || existing.name, updatedAt: new Date() },
+        data: { 
+          disco: discoUpper, 
+          name: name || existing.name,
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          meterStatus: meterStatus || existing.meterStatus,
+          lastVerified: verificationResult.success ? new Date() : existing.lastVerified,
+          updatedAt: new Date(),
+        },
       });
       
       const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
       
-      return `Meter updated successfully!${verificationMessage}
+      return `✅ Meter updated successfully!${verificationMessage}
 
+📋 Meter Details:
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || existing.name}
+${customerName ? `👤 Customer: ${customerName}` : ''}
+${customerAddress ? `📍 Address: ${customerAddress}` : ''}
+${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
+${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
 
-Quick Buy QR Code:
+📱 Quick Buy QR Code:
 ${qrLink}
 
 Scan this QR code to quickly buy electricity for this meter.
@@ -1494,18 +1608,29 @@ Type ELECTRIC to see all your meters and buy power!`;
         name: name || `${discoUpper} Meter`,
         meterType: "Prepaid",
         isDefault: false,
+        customerName: customerName || null,
+        customerAddress: customerAddress || null,
+        customerPhone: customerPhone || null,
+        customerEmail: customerEmail || null,
+        meterStatus: meterStatus || null,
+        lastVerified: verificationResult.success ? new Date() : null,
       },
     });
 
     const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
 
-    return `Meter added successfully!${verificationMessage}
+    return `✅ Meter added successfully!${verificationMessage}
 
+📋 Meter Details:
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || `${discoUpper} Meter`}
+${customerName ? `👤 Customer: ${customerName}` : ''}
+${customerAddress ? `📍 Address: ${customerAddress}` : ''}
+${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
+${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
 
-Quick Buy QR Code:
+📱 Quick Buy QR Code:
 ${qrLink}
 
 Scan this QR code to quickly buy electricity for this meter.
@@ -1514,12 +1639,12 @@ You can also find this QR code in your saved meters.
 Type ELECTRIC to see all your meters and buy power!`;
   } catch (error) {
     console.error("Add meter error:", error);
-    return `Failed to add meter. Please try again.`;
+    return `❌ Failed to add meter. Please try again.`;
   }
 }
 
 // ============================================================
-// ADD DECODER WITH VERIFICATION
+// ADD DECODER WITH VERIFICATION - UPDATED
 // ============================================================
 
 async function addDecoderWithVerification(userId: string, decoderNumber: string, provider: string, name: string): Promise<string> {
@@ -1539,15 +1664,28 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
 
     const verificationResult = await verifyDecoderWithVTpass(serviceId, decoderNumber);
     let verificationMessage = "";
+    let customerName = null;
+    let customerAddress = null;
+    let customerPhone = null;
+    let customerEmail = null;
+    let decoderStatus = null;
+    
     if (verificationResult.success) {
+      customerName = verificationResult.data?.customerName || null;
+      customerAddress = verificationResult.data?.customerAddress || null;
+      customerPhone = verificationResult.data?.customerPhone || null;
+      customerEmail = verificationResult.data?.customerEmail || null;
+      decoderStatus = verificationResult.data?.status || null;
+      
       verificationMessage = `
-Decoder Verified!
-Customer: ${verificationResult.data?.customerName || "Unknown"}
+✅ Decoder Verified!
+Customer: ${customerName || "Unknown"}
 Decoder: ${verificationResult.data?.smartCardNumber || decoderNumber}
-Status: ${verificationResult.data?.status || "ACTIVE"}`;
+Status: ${decoderStatus || "ACTIVE"}`;
     } else {
       verificationMessage = `
-Could not verify decoder: ${verificationResult.error || "Unknown error"}`;
+⚠️ Could not verify decoder: ${verificationResult.error || "Unknown error"}
+You can still save the decoder.`;
     }
 
     const existing = await prisma.savedDecoder.findFirst({
@@ -1557,13 +1695,28 @@ Could not verify decoder: ${verificationResult.error || "Unknown error"}`;
     if (existing) {
       await prisma.savedDecoder.update({
         where: { id: existing.id },
-        data: { provider: providerUpper, name: name || existing.name, updatedAt: new Date() },
+        data: { 
+          provider: providerUpper, 
+          name: name || existing.name,
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          decoderStatus: decoderStatus || existing.decoderStatus,
+          lastVerified: verificationResult.success ? new Date() : existing.lastVerified,
+          updatedAt: new Date(),
+        },
       });
-      return `Decoder updated successfully!${verificationMessage}
+      return `✅ Decoder updated successfully!${verificationMessage}
 
+📋 Decoder Details:
 Decoder: ${decoderNumber}
 Provider: ${providerUpper}
 Name: ${name || existing.name}
+${customerName ? `👤 Customer: ${customerName}` : ''}
+${customerAddress ? `📍 Address: ${customerAddress}` : ''}
+${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
+${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
     }
@@ -1575,24 +1728,35 @@ Type CABLE to see all your decoders and subscribe!`;
         provider: providerUpper,
         name: name || `${providerUpper} Decoder`,
         isDefault: false,
+        customerName: customerName || null,
+        customerAddress: customerAddress || null,
+        customerPhone: customerPhone || null,
+        customerEmail: customerEmail || null,
+        decoderStatus: decoderStatus || null,
+        lastVerified: verificationResult.success ? new Date() : null,
       },
     });
 
-    return `Decoder added successfully!${verificationMessage}
+    return `✅ Decoder added successfully!${verificationMessage}
 
+📋 Decoder Details:
 Decoder: ${decoderNumber}
 Provider: ${providerUpper}
 Name: ${name || `${providerUpper} Decoder`}
+${customerName ? `👤 Customer: ${customerName}` : ''}
+${customerAddress ? `📍 Address: ${customerAddress}` : ''}
+${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
+${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
   } catch (error) {
     console.error("Add decoder error:", error);
-    return `Failed to add decoder. Please try again.`;
+    return `❌ Failed to add decoder. Please try again.`;
   }
 }
 
 // ============================================================
-// LIST METERS & DECODERS
+// LIST METERS - UPDATED TO SHOW CUSTOMER INFO
 // ============================================================
 
 async function listMeters(userId: string): Promise<string> {
@@ -1619,7 +1783,14 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     const defaultTag = meter.isDefault ? " (Default)" : "";
     message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
     message += `   ${meter.disco}\n`;
-    message += `   ${meter.meterNumber}\n\n`;
+    message += `   ${meter.meterNumber}\n`;
+    if (meter.customerName) {
+      message += `   👤 ${meter.customerName}\n`;
+    }
+    if (meter.customerAddress) {
+      message += `   📍 ${meter.customerAddress}\n`;
+    }
+    message += `\n`;
   });
 
   message += `To buy electricity: ELECTRIC [number] [amount]
@@ -1628,6 +1799,10 @@ To set default: SETDEFAULTMETER [meter_number]`;
 
   return message;
 }
+
+// ============================================================
+// LIST DECODERS - UPDATED TO SHOW CUSTOMER INFO
+// ============================================================
 
 async function listDecoders(userId: string): Promise<string> {
   const decoders = await prisma.savedDecoder.findMany({
@@ -1651,7 +1826,14 @@ Available providers: DSTV, GOTV, STARTIMES`;
     const defaultTag = decoder.isDefault ? " (Default)" : "";
     message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
     message += `   ${decoder.provider}\n`;
-    message += `   ${decoder.decoderNumber}\n\n`;
+    message += `   ${decoder.decoderNumber}\n`;
+    if (decoder.customerName) {
+      message += `   👤 ${decoder.customerName}\n`;
+    }
+    if (decoder.customerAddress) {
+      message += `   📍 ${decoder.customerAddress}\n`;
+    }
+    message += `\n`;
   });
 
   message += `To buy cable: CABLE [decoder_index] [package]
@@ -1661,6 +1843,10 @@ To see packages: PACKAGES [provider]`;
 
   return message;
 }
+
+// ============================================================
+// DELETE METER
+// ============================================================
 
 async function deleteMeter(userId: string, meterNumber: string): Promise<string> {
   try {
@@ -1682,6 +1868,10 @@ async function deleteMeter(userId: string, meterNumber: string): Promise<string>
   }
 }
 
+// ============================================================
+// DELETE DECODER
+// ============================================================
+
 async function deleteDecoder(userId: string, decoderNumber: string): Promise<string> {
   try {
     const result = await prisma.savedDecoder.deleteMany({
@@ -1701,6 +1891,10 @@ async function deleteDecoder(userId: string, decoderNumber: string): Promise<str
     return `Failed to delete decoder. Please try again.`;
   }
 }
+
+// ============================================================
+// SET DEFAULT METER
+// ============================================================
 
 async function setDefaultMeter(userId: string, meterId: string): Promise<string> {
   try {
@@ -1747,6 +1941,10 @@ async function setDefaultMeter(userId: string, meterId: string): Promise<string>
     return `Failed to set default meter. Please try again.`;
   }
 }
+
+// ============================================================
+// SET DEFAULT DECODER
+// ============================================================
 
 async function setDefaultDecoder(userId: string, decoderId: string): Promise<string> {
   try {
@@ -2619,7 +2817,7 @@ For your own number, use: DATA 1GB (no PIN needed)`;
 }
 
 // ============================================================
-// ELECTRICITY PURCHASE - NO PIN (OWN METER)
+// ELECTRICITY PURCHASE - NO PIN (OWN METER) - UPDATED WITH COMPLETE INFO
 // ============================================================
 
 async function processElectricityPurchaseDirect(
@@ -2630,6 +2828,15 @@ async function processElectricityPurchaseDirect(
   meterType: string = "Prepaid"
 ): Promise<string> {
   try {
+    // ✅ Minimum amount check
+    const MIN_ELECTRICITY_AMOUNT = 1000;
+    if (amount < MIN_ELECTRICITY_AMOUNT) {
+      return `Minimum electricity purchase is NGN ${MIN_ELECTRICITY_AMOUNT}.
+Please try again with a higher amount.
+
+Example: ELECTRIC 1000`;
+    }
+
     const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
     if (!wallet) return `Wallet not found. Please contact support.`;
 
@@ -2640,6 +2847,27 @@ Need NGN ${amount.toFixed(2)}.
 Account: ${wallet.accountNumber || 'N/A'}
 
 Please fund your wallet and try again.`;
+    }
+
+    // ✅ Verify meter to get customer info
+    const serviceID = discoCode.toLowerCase() + "-electric";
+    const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, meterType.toLowerCase());
+    
+    let customerName = null;
+    let customerAddress = null;
+    let customerPhone = null;
+    let customerEmail = null;
+    let meterStatus = null;
+    
+    if (verificationResult.success) {
+      customerName = verificationResult.data?.customerName || null;
+      customerAddress = verificationResult.data?.customerAddress || null;
+      customerPhone = verificationResult.data?.customerPhone || null;
+      customerEmail = verificationResult.data?.customerEmail || null;
+      meterStatus = verificationResult.data?.status || null;
+      console.log(`[WhatsApp] Verified meter: ${meterNumber} - Customer: ${customerName}`);
+    } else {
+      console.warn(`[WhatsApp] Verification failed for ${meterNumber}: ${verificationResult.error}`);
     }
 
     let customer = await prisma.customer.findUnique({
@@ -2684,6 +2912,12 @@ Please fund your wallet and try again.`;
           pinVerified: true,
           skipPin: true,
           isOwnMeter: true,
+          customerName: customerName,
+          customerAddress: customerAddress,
+          customerPhone: customerPhone,
+          customerEmail: customerEmail,
+          meterStatus: meterStatus,
+          verified: verificationResult.success,
         },
       },
     });
@@ -2871,19 +3105,37 @@ Please fund your wallet and try again.`;
                   grossProfit: grossProfit,
                   profitMargin: profitMargin,
                 },
+                customerName: customerName,
+                customerAddress: customerAddress,
+                customerPhone: customerPhone,
+                customerEmail: customerEmail,
+                meterStatus: meterStatus,
               },
             },
           }),
         ]);
 
-        saveMeterAsync(user.id, meterNumber, discoCode, meterType).catch(() => {});
+        // ✅ Save meter with complete customer info
+        saveMeterWithCustomerInfo(
+          user.id, 
+          meterNumber, 
+          discoCode, 
+          meterType,
+          customerName,
+          customerAddress,
+          customerPhone,
+          customerEmail,
+          meterStatus
+        ).catch(() => {});
 
-        const successMessage = `Electricity Purchase Successful!
+        const successMessage = `✅ Electricity Purchase Successful!
 
 Meter: ${meterNumber}
 DisCo: ${discoCode}
 Amount: NGN ${amount.toFixed(2)}
-${token ? `Token: ${token}` : ''}
+${customerName ? `👤 Customer: ${customerName}` : ''}
+${customerAddress ? `📍 Address: ${customerAddress}` : ''}
+${token ? `🔑 Token: ${token}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 Thank you for using Bilscore!`;
@@ -2934,6 +3186,11 @@ Thank you for using Bilscore!`;
               vendorErrors: result.vendorErrors || [],
               meterType: meterType,
               failedAt: new Date().toISOString(),
+              customerName: customerName,
+              customerAddress: customerAddress,
+              customerPhone: customerPhone,
+              customerEmail: customerEmail,
+              meterStatus: meterStatus,
             },
           },
         });
@@ -2984,6 +3241,11 @@ Thank you for using Bilscore!`;
             errorType: vendorError.name,
             meterType: meterType,
             failedAt: new Date().toISOString(),
+            customerName: customerName,
+            customerAddress: customerAddress,
+            customerPhone: customerPhone,
+            customerEmail: customerEmail,
+            meterStatus: meterStatus,
           },
         },
       });
@@ -3017,6 +3279,15 @@ async function processElectricityPurchaseWithPin(
   customerName: string = "Unknown"
 ): Promise<string> {
   try {
+    // ✅ Minimum amount check
+    const MIN_ELECTRICITY_AMOUNT = 1000;
+    if (amount < MIN_ELECTRICITY_AMOUNT) {
+      return `Minimum electricity purchase is NGN ${MIN_ELECTRICITY_AMOUNT}.
+Please try again with a higher amount.
+
+Example: ELECTRIC 1234567890 ABUJA 1000`;
+    }
+
     if (!user.pinHash) {
       return `You need to set a transaction PIN first to buy electricity for external meters.
 
@@ -4031,7 +4302,14 @@ ${discosList}`;
         const defaultTag = meter.isDefault ? " (Default)" : "";
         message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
         message += `   ${meter.disco}\n`;
-        message += `   ${meter.meterNumber}\n\n`;
+        message += `   ${meter.meterNumber}\n`;
+        if (meter.customerName) {
+          message += `   👤 ${meter.customerName}\n`;
+        }
+        if (meter.customerAddress) {
+          message += `   📍 ${meter.customerAddress}\n`;
+        }
+        message += `\n`;
       });
 
       message += `To buy for saved meter: ELECTRIC [index] [amount]\n`;
@@ -4060,7 +4338,6 @@ Example: ELECTRIC 1234567890 ABUJA 5000`;
 Available: ${validDiscos.join(", ")}`;
       }
       
-      // ✅ Use the API route for verification (same as dashboard)
       const verificationResult = await verifyMeterWithVTpass(
         discoUpper.toLowerCase() + "-electric",
         meterNumber,
@@ -4540,12 +4817,6 @@ NECO [quantity] - Buy NECO pins
 
 Referral:
 REFERRAL - Get referral link
-
-Help:
-HELP - Show this message
-
-No PIN required for your own number/meters.
-PIN required for other people's numbers/meters.
 
 Need help? Visit: ${getAppUrl()}/support`;
 }

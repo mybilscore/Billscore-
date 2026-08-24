@@ -1,4 +1,4 @@
-// app/dashboard/buy/cable/page.client.tsx - UPDATED WITH DROPDOWN
+// app/dashboard/buy/cable/page.client.tsx - COMPLETE UPDATED VERSION
 
 "use client";
 
@@ -30,6 +30,9 @@ import {
   Clock as ClockIcon,
   RefreshCw,
   ChevronDown as ChevronDownIcon,
+  MapPin,
+  Mail,
+  Phone,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,6 +58,7 @@ interface Provider {
   packages: Package[];
 }
 
+// ✅ Updated SavedDecoder interface with customer fields
 interface SavedDecoder {
   id: string;
   decoderNumber: string;
@@ -63,6 +67,12 @@ interface SavedDecoder {
   package: string | null;
   isDefault: boolean;
   createdAt: string;
+  customerName: string | null;
+  customerAddress: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  decoderStatus: string | null;
+  lastVerified: string | null;
 }
 
 interface CableClientProps {
@@ -99,7 +109,7 @@ const formatDate = (dateString: string) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Recent Decoders Component
+// ✅ Updated RecentDecoders Component - Shows customer info
 const RecentDecoders = ({
   decoders,
   onSelect,
@@ -128,6 +138,8 @@ const RecentDecoders = ({
   }
 
   const displayDecoders = isExpanded ? decoders : decoders.slice(0, 3);
+  const hasCustomerInfo = (decoder: SavedDecoder) => 
+    decoder.customerName || decoder.customerAddress || decoder.customerPhone || decoder.customerEmail;
 
   return (
     <div className="space-y-2">
@@ -160,43 +172,89 @@ const RecentDecoders = ({
       </div>
 
       <div className="space-y-1.5">
-        {displayDecoders.map((decoder) => (
-          <button
-            key={decoder.id}
-            onClick={() => onSelect(decoder.decoderNumber, decoder.provider)}
-            className="w-full flex items-center justify-between rounded-lg border border-gray-100 p-2 text-left transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 group"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
-                  {decoder.name || `${decoder.provider} Decoder`}
+        {displayDecoders.map((decoder) => {
+          const hasInfo = hasCustomerInfo(decoder);
+          
+          return (
+            <button
+              key={decoder.id}
+              onClick={() => onSelect(decoder.decoderNumber, decoder.provider)}
+              className={`w-full flex items-center justify-between rounded-lg border p-2 text-left transition-all hover:bg-gray-50 hover:border-gray-200 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:border-gray-600 group ${
+                hasInfo ? 'border-green-200 dark:border-green-800/30' : 'border-gray-100'
+              }`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
+                    {decoder.name || `${decoder.provider} Decoder`}
+                  </p>
+                  {decoder.isDefault && (
+                    <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
+                  )}
+                  <span className="text-[8px] bg-gray-100 text-gray-700 px-1 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
+                    {decoder.provider}
+                  </span>
+                  {decoder.decoderStatus && (
+                    <span className={`text-[8px] px-1 py-0.5 rounded ${
+                      decoder.decoderStatus.toLowerCase() === 'active' 
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                    }`}>
+                      {decoder.decoderStatus}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {decoder.decoderNumber}
                 </p>
-                {decoder.isDefault && (
-                  <Star className="h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
+                {/* ✅ Show customer info */}
+                {decoder.customerName && (
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
+                    <User className="h-2.5 w-2.5" />
+                    {decoder.customerName}
+                  </p>
                 )}
-                <span className="text-[8px] bg-gray-100 text-gray-700 px-1 py-0.5 rounded dark:bg-gray-700 dark:text-gray-300">
-                  {decoder.provider}
+                {decoder.customerAddress && (
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                    <MapPin className="h-2.5 w-2.5" />
+                    <span className="truncate">{decoder.customerAddress}</span>
+                  </p>
+                )}
+                {decoder.customerPhone && (
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                    <Phone className="h-2.5 w-2.5" />
+                    {decoder.customerPhone}
+                  </p>
+                )}
+                {decoder.customerEmail && (
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 flex items-center gap-1 truncate">
+                    <Mail className="h-2.5 w-2.5 flex-shrink-0" />
+                    <span className="truncate max-w-[100px]">{decoder.customerEmail}</span>
+                  </p>
+                )}
+                {decoder.lastVerified && (
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                    <Check className="h-2.5 w-2.5 text-green-500" />
+                    Verified: {new Date(decoder.lastVerified).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0 ml-2">
+                {decoder.package && (
+                  <p className="text-[10px] font-medium text-gray-900 dark:text-white">
+                    {decoder.package}
+                  </p>
+                )}
+                <p className="text-[9px] text-gray-400">
+                  {formatDate(decoder.createdAt)}
+                </p>
+                <span className="text-[8px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  Click to select →
                 </span>
               </div>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {decoder.decoderNumber}
-              </p>
-            </div>
-            <div className="text-right flex-shrink-0 ml-2">
-              {decoder.package && (
-                <p className="text-[10px] font-medium text-gray-900 dark:text-white">
-                  {decoder.package}
-                </p>
-              )}
-              <p className="text-[9px] text-gray-400">
-                {formatDate(decoder.createdAt)}
-              </p>
-              <span className="text-[8px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                Click to select →
-              </span>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -446,6 +504,9 @@ export function CableClient({
   const [smartCardNumber, setSmartCardNumber] = useState<string>("");
   const [customerName, setCustomerName] = useState<string>("");
   const [customerAddress, setCustomerAddress] = useState<string>("");
+  const [customerPhone, setCustomerPhone] = useState<string>("");
+  const [customerEmail, setCustomerEmail] = useState<string>("");
+  const [decoderStatus, setDecoderStatus] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState(false);
@@ -612,6 +673,26 @@ export function CableClient({
     setPinError("");
     setShowCustomerLookup(true);
     
+    // Find the decoder in saved list to get customer info
+    const decoder = savedDecoders.find(d => d.decoderNumber === decoderNumber);
+    if (decoder) {
+      if (decoder.customerName) {
+        setCustomerName(decoder.customerName);
+      }
+      if (decoder.customerAddress) {
+        setCustomerAddress(decoder.customerAddress);
+      }
+      if (decoder.customerPhone) {
+        setCustomerPhone(decoder.customerPhone);
+      }
+      if (decoder.customerEmail) {
+        setCustomerEmail(decoder.customerEmail);
+      }
+      if (decoder.decoderStatus) {
+        setDecoderStatus(decoder.decoderStatus);
+      }
+    }
+    
     if (provider) {
       const matchedProvider = providers.find(p => 
         p.name.toLowerCase() === provider.toLowerCase() ||
@@ -689,12 +770,15 @@ export function CableClient({
       setShowCustomerLookup(false);
       setCustomerName("");
       setCustomerAddress("");
+      setCustomerPhone("");
+      setCustomerEmail("");
+      setDecoderStatus("");
     }
     setError("");
     setPinError("");
   };
 
-  // ✅ Verify Decoder Function
+  // ✅ Verify Decoder Function - Stores complete customer info
   const handleVerifyDecoder = async () => {
     if (!smartCardNumber || smartCardNumber.length < 10) {
       setError("Please enter a valid smart card number (minimum 10 digits)");
@@ -712,6 +796,9 @@ export function CableClient({
     setError("");
     setCustomerName("");
     setCustomerAddress("");
+    setCustomerPhone("");
+    setCustomerEmail("");
+    setDecoderStatus("");
 
     try {
       const serviceMap: Record<string, string> = {
@@ -735,8 +822,12 @@ export function CableClient({
       const result = await response.json();
 
       if (result.success && result.data) {
+        // ✅ Store ALL customer info
         setCustomerName(result.data.customerName || "Customer Found");
         setCustomerAddress(result.data.customerAddress || "");
+        setCustomerPhone(result.data.customerPhone || "");
+        setCustomerEmail(result.data.customerEmail || "");
+        setDecoderStatus(result.data.status || "Active");
         setShowCustomerLookup(true);
         
         if (result.data.provider) {
@@ -843,6 +934,9 @@ export function CableClient({
       setShowCustomerLookup(false);
       setCustomerName("");
       setCustomerAddress("");
+      setCustomerPhone("");
+      setCustomerEmail("");
+      setDecoderStatus("");
 
       const balanceResponse = await fetch("/api/user/balance");
       const balanceData = await balanceResponse.json();
@@ -947,7 +1041,7 @@ export function CableClient({
               </div>
             )}
 
-            {/* ✅ Combined Smart Card Number & Provider Selection - SAME CARD */}
+            {/* ✅ Combined Smart Card Number & Provider Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Decoder Details
@@ -1094,12 +1188,12 @@ export function CableClient({
                 </button>
               )}
 
-              {/* ✅ Customer Lookup Result */}
+              {/* ✅ Customer Lookup Result - Complete Info */}
               {showCustomerLookup && (
                 <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20">
                   <div className="flex items-start gap-2">
                     <Users className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                    <div>
+                    <div className="flex-1">
                       <p className="text-xs font-medium text-green-700 dark:text-green-400">
                         Customer Found
                       </p>
@@ -1107,12 +1201,25 @@ export function CableClient({
                         {customerName || "Unknown Customer"}
                       </p>
                       {customerAddress && (
-                        <p className="text-xs text-green-600 dark:text-green-300 mt-0.5">
-                          📍 {customerAddress}
+                        <p className="text-xs text-green-600 dark:text-green-300 flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {customerAddress}
+                        </p>
+                      )}
+                      {customerPhone && (
+                        <p className="text-xs text-green-600 dark:text-green-300 flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          {customerPhone}
+                        </p>
+                      )}
+                      {customerEmail && (
+                        <p className="text-xs text-green-600 dark:text-green-300 flex items-center gap-1">
+                          <Mail className="h-3 w-3" />
+                          {customerEmail}
                         </p>
                       )}
                       <p className="text-[10px] text-green-500 dark:text-green-400 mt-0.5">
-                        Smart Card: {smartCardNumber}
+                        Smart Card: {smartCardNumber} • Status: {decoderStatus || "Active"}
                       </p>
                     </div>
                   </div>
@@ -1244,6 +1351,7 @@ export function CableClient({
                     </span>
                   </div>
 
+                  {/* ✅ Show customer info in order summary */}
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4 text-gray-400" />
@@ -1253,6 +1361,18 @@ export function CableClient({
                       {showCustomerLookup ? customerName || "Verified" : "Not verified"}
                     </span>
                   </div>
+                  
+                  {showCustomerLookup && customerAddress && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <span className="text-gray-600 dark:text-gray-400">Address</span>
+                      </div>
+                      <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px] truncate">
+                        {customerAddress}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
@@ -1386,6 +1506,10 @@ export function CableClient({
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
                   Transaction PIN required for security
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
+                  Customer details are saved with your decoder
                 </li>
               </ul>
             </div>

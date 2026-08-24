@@ -14,45 +14,47 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Determine environment
-    const isProduction = process.env.NODE_ENV === "production";
-    const baseUrl = isProduction 
-      ? "https://vtpass.com/api/merchant-verify"
-      : "https://sandbox.vtpass.com/api/merchant-verify";
+    // ✅ FORCE USE SANDBOX FOR NOW
+    // In production, you can make this configurable via environment variable
+    const USE_SANDBOX = process.env.USE_SANDBOX_FOR_VERIFY !== 'false';
     
-    // ✅ Get ALL THREE API keys
-    const apiKey = isProduction 
-      ? process.env.VTPASS_LIVE_API_KEY 
-      : process.env.VTPASS_SANDBOX_API_KEY;
+    const baseUrl = USE_SANDBOX 
+      ? "https://sandbox.vtpass.com/api/merchant-verify"
+      : "https://vtpass.com/api/merchant-verify";
     
-    const secretKey = isProduction
-      ? process.env.VTPASS_LIVE_SECRET_KEY
-      : process.env.VTPASS_SANDBOX_SECRET_KEY;
+    const apiKey = USE_SANDBOX 
+      ? process.env.VTPASS_SANDBOX_API_KEY 
+      : process.env.VTPASS_LIVE_API_KEY;
     
-    const publicKey = isProduction
-      ? process.env.VTPASS_LIVE_PUBLIC_KEY
-      : process.env.VTPASS_SANDBOX_PUBLIC_KEY;
+    const secretKey = USE_SANDBOX
+      ? process.env.VTPASS_SANDBOX_SECRET_KEY
+      : process.env.VTPASS_LIVE_SECRET_KEY;
+    
+    const publicKey = USE_SANDBOX
+      ? process.env.VTPASS_SANDBOX_PUBLIC_KEY
+      : process.env.VTPASS_LIVE_PUBLIC_KEY;
 
-    // ✅ Log which keys are available (for debugging)
-    console.log(`[Verify Meter] Environment: ${isProduction ? 'Production' : 'Sandbox'}`);
+    console.log(`[Verify Meter] Environment: ${USE_SANDBOX ? 'Sandbox' : 'Production'}`);
     console.log(`[Verify Meter] API Key: ${apiKey ? '✅ Set' : '❌ Missing'}`);
     console.log(`[Verify Meter] Secret Key: ${secretKey ? '✅ Set' : '❌ Missing'}`);
     console.log(`[Verify Meter] Public Key: ${publicKey ? '✅ Set' : '❌ Missing'}`);
 
-    // ✅ Build headers with ALL keys
+    // ✅ Check for missing credentials
+    if (!apiKey || !secretKey || !publicKey) {
+      console.error('[Verify Meter] Missing credentials!');
+      return NextResponse.json({
+        success: false,
+        error: "VTpass credentials are not configured. Please check your environment variables.",
+      }, { status: 500 });
+    }
+
+    // ✅ Build headers with ALL three keys
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'api-key': apiKey,
+      'secret-key': secretKey,
+      'public-key': publicKey,
     };
-    
-    if (apiKey) {
-      headers['api-key'] = apiKey;
-    }
-    if (secretKey) {
-      headers['secret-key'] = secretKey;
-    }
-    if (publicKey) {
-      headers['public-key'] = publicKey;
-    }
 
     console.log(`[Verify Meter] Headers:`, Object.keys(headers));
 
@@ -64,7 +66,10 @@ export async function POST(request: NextRequest) {
         billersCode: meterNumber,
         type: meterType || "prepaid",
       }),
+      signal: AbortSignal.timeout(15000),
     });
+
+    console.log(`[Verify Meter] Response status: ${response.status}`);
 
     if (!response.ok) {
       console.error(`[Verify Meter] HTTP ${response.status}: ${response.statusText}`);

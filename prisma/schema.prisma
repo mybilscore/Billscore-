@@ -3597,6 +3597,12 @@ model SavedMeter {
   disco         String
   name          String?
   meterType     String    @default("Prepaid")
+  customerName  String?   // ✅ Customer name from verification
+  customerAddress String? // ✅ Customer address from verification
+  customerPhone String?   // ✅ Customer phone from verification
+  customerEmail String?   // ✅ Customer email from verification
+  meterStatus   String?   // ✅ Meter status (active/inactive)
+  lastVerified  DateTime? // ✅ Last verification timestamp
   isDefault     Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -3618,6 +3624,12 @@ model SavedDecoder {
   name          String?
   package       String?
   isDefault     Boolean   @default(false)
+  customerName  String?   // Customer name from verification
+  customerAddress String? // Customer address from verification
+  customerPhone String?   // Customer phone from verification
+  customerEmail String?   // Customer email from verification
+  decoderStatus String?   // Decoder status (active/inactive)
+  lastVerified  DateTime? // Last verification timestamp
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

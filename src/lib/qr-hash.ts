@@ -1,4 +1,4 @@
-// lib/qr-hash.ts - Web version
+// lib/qr-hash.ts - Web version (NO EXPIRY)
 
 const SECRET_KEY = process.env.QR_SECRET_KEY || "your-super-secret-qr-key-change-this";
 const HASH_LENGTH = 16;
@@ -19,21 +19,19 @@ function simpleHash(payload: string): string {
 }
 
 /**
- * Generate a secure hash for QR data
+ * Generate a secure hash for QR data (NO EXPIRY)
  */
 export function generateQRHash(data: {
   identifier: string;
   type: string;
   provider: string;
-  expiresAt?: string;
 }): string {
-  const timestamp = data.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const payload = `${data.identifier}|${data.type}|${data.provider}|${timestamp}`;
+  const payload = `${data.identifier}|${data.type}|${data.provider}|${SECRET_KEY}`;
   return simpleHash(payload);
 }
 
 /**
- * Generate QR URL with hash
+ * Generate QR URL with hash (NO EXPIRY)
  */
 export function generateQRUrl(
   baseUrl: string,
@@ -43,41 +41,30 @@ export function generateQRUrl(
     provider: string;
   }
 ): string {
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const hash = generateQRHash({ ...data, expiresAt });
+  const hash = generateQRHash(data);
   
   const params = new URLSearchParams({
     id: data.identifier,
     t: data.type,
     p: data.provider,
     h: hash,
-    e: expiresAt,
   });
   
   return `${baseUrl}/buy-now?${params.toString()}`;
 }
 
 /**
- * Verify QR hash
+ * Verify QR hash (NO EXPIRY CHECK)
  */
 export function verifyQRHash(params: {
   identifier: string;
   type: string;
   provider: string;
   hash: string;
-  expiresAt?: string;
 }): boolean {
-  const { identifier, type, provider, hash, expiresAt } = params;
+  const { identifier, type, provider, hash } = params;
   
-  if (expiresAt) {
-    const expiryDate = new Date(expiresAt);
-    if (isNaN(expiryDate.getTime()) || expiryDate < new Date()) {
-      return false;
-    }
-  }
-  
-  const timestamp = expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const payload = `${identifier}|${type}|${provider}|${timestamp}`;
+  const payload = `${identifier}|${type}|${provider}|${SECRET_KEY}`;
   const expectedHash = simpleHash(payload);
   
   // Constant time comparison
@@ -106,14 +93,13 @@ export function generateQRSecret(): string {
 }
 
 /**
- * Parse QR URL and extract data
+ * Parse QR URL and extract data (NO EXPIRY)
  */
 export function parseQRUrl(url: string): {
   identifier: string;
   type: string;
   provider: string;
   hash: string;
-  expiresAt: string;
 } | null {
   try {
     const urlObj = new URL(url);
@@ -123,14 +109,49 @@ export function parseQRUrl(url: string): {
     const type = params.get('t');
     const provider = params.get('p');
     const hash = params.get('h');
-    const expiresAt = params.get('e');
     
-    if (!identifier || !type || !provider || !hash || !expiresAt) {
+    if (!identifier || !type || !provider || !hash) {
       return null;
     }
     
-    return { identifier, type, provider, hash, expiresAt };
+    return { identifier, type, provider, hash };
   } catch {
     return null;
   }
+}
+
+/**
+ * Generate QR Display Link (NO EXPIRY)
+ */
+export function generateQRDisplayLink(
+  baseUrl: string,
+  identifier: string,
+  type: string,
+  provider: string
+): string {
+  const buyNowLink = generateQRUrl(baseUrl, {
+    identifier: identifier,
+    type: type,
+    provider: provider,
+  });
+
+  const url = new URL(buyNowLink);
+  const hash = url.searchParams.get('h');
+
+  let displayPath = `/qr/display/${identifier}`;
+  const queryParams = new URLSearchParams();
+
+  if (hash) {
+    queryParams.set('h', hash);
+  }
+
+  queryParams.set('t', type);
+  queryParams.set('p', encodeURIComponent(provider));
+
+  const queryString = queryParams.toString();
+  if (queryString) {
+    displayPath += `?${queryString}`;
+  }
+
+  return `${baseUrl}${displayPath}`;
 }

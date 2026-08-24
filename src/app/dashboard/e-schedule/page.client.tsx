@@ -1,4 +1,5 @@
-// app/dashboard/subscriptions/page.client.tsx - UPDATED WITH COMBINED AMOUNT & DELIVERY DATE CARD
+// app/dashboard/subscriptions/page.client.tsx
+// COMPLETE UPDATED VERSION - With auto-population and customer info display
 
 "use client";
 
@@ -44,9 +45,11 @@ import {
   Users,
   Calendar as CalendarIcon,
   Clock,
+  Mail,
+  User,
 } from "lucide-react";
 
-// ✅ Import QR hash utilities
+// Import QR hash utilities
 import { generateQRUrl } from "~/lib/qr-hash";
 
 // Types
@@ -57,6 +60,12 @@ interface SavedMeter {
   name: string | null;
   meterType: string;
   isDefault: boolean;
+  customerName?: string | null;
+  customerAddress?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  meterStatus?: string | null;
+  lastVerified?: string | null;
 }
 
 interface PreOrder {
@@ -111,7 +120,7 @@ const formatDate = (dateString: string) => {
   return date.toLocaleDateString("en-NG", { month: "short", day: "numeric", year: "numeric" });
 };
 
-// Saved Item Component - Electricity Only
+// ✅ Saved Item Component - With customer info display
 const SavedItem = ({
   item,
   isSelected,
@@ -127,32 +136,85 @@ const SavedItem = ({
   onGenerateQR: () => void;
   onSetDefault: () => void;
 }) => {
+  const hasCustomerInfo = item.customerName || item.customerAddress || item.customerPhone || item.customerEmail;
+
   return (
     <div
       className={`flex items-center justify-between rounded-lg border-2 p-3 transition-all cursor-pointer ${
         isSelected
           ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-950/40"
-          : "border-gray-200 hover:border-[#1e293b]/50 dark:border-gray-700"
+          : `border-gray-200 hover:border-[#1e293b]/50 dark:border-gray-700 ${hasCustomerInfo ? 'border-green-200 dark:border-green-800/30' : ''}`
       }`}
       onClick={onSelect}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 flex-shrink-0">
           <Lightbulb className="h-5 w-5 text-gray-700 dark:text-gray-300" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name || "Meter"}</p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
+              {item.name || "Meter"}
+            </p>
             {item.isDefault && (
-              <Star className="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
+              <Star className="h-3.5 w-3.5 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+            )}
+            {item.meterStatus && (
+              <span className={`text-[8px] px-1.5 py-0.5 rounded ${
+                item.meterStatus.toLowerCase() === 'active' 
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+              }`}>
+                {item.meterStatus}
+              </span>
             )}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {item.meterNumber} • {item.disco} • {item.meterType}
           </p>
+          {/* ✅ Show customer info if available */}
+          {hasCustomerInfo && (
+            <div className="mt-1 space-y-0.5">
+              {item.customerName && (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                  <User className="h-2.5 w-2.5" />
+                  {item.customerName}
+                </p>
+              )}
+              {item.customerAddress && (
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1 truncate">
+                  <MapPin className="h-2.5 w-2.5 flex-shrink-0" />
+                  <span className="truncate">{item.customerAddress}</span>
+                </p>
+              )}
+              {item.customerPhone && (
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                  <Phone className="h-2.5 w-2.5" />
+                  {item.customerPhone}
+                </p>
+              )}
+              {item.customerEmail && (
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1 truncate">
+                  <Mail className="h-2.5 w-2.5 flex-shrink-0" />
+                  <span className="truncate">{item.customerEmail}</span>
+                </p>
+              )}
+              {item.lastVerified && (
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                  <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />
+                  Verified: {new Date(item.lastVerified).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+          )}
+          {!hasCustomerInfo && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+              No customer details available
+            </p>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -192,7 +254,7 @@ const SavedItem = ({
   );
 };
 
-// QR Code List View Component - Electricity Only
+// QR Code List View Component
 const QRCodeListView = ({
   items,
   onGenerateQR,
@@ -237,13 +299,18 @@ const QRCodeListView = ({
           <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
             {item.disco}
           </p>
+          {item.customerName && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center truncate w-full">
+              {item.customerName}
+            </p>
+          )}
         </button>
       ))}
     </div>
   );
 };
 
-// QR Code Modal (unchanged)
+// QR Code Modal
 const QRCodeModal = ({
   isOpen,
   onClose,
@@ -461,7 +528,7 @@ const QRCodeModal = ({
   );
 };
 
-// ✅ Add Meter Modal - WITH VERIFICATION
+// Add Meter Modal - WITH FULL VERIFICATION
 const AddMeterModal = ({
   isOpen,
   onClose,
@@ -481,11 +548,14 @@ const AddMeterModal = ({
   const [meterType, setMeterType] = useState("Prepaid");
   const [isDefault, setIsDefault] = useState(false);
   
-  // ✅ Verification states
+  // Verification states
   const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [customerName, setCustomerName] = useState<string>("");
   const [customerAddress, setCustomerAddress] = useState<string>("");
+  const [customerPhone, setCustomerPhone] = useState<string>("");
+  const [customerEmail, setCustomerEmail] = useState<string>("");
+  const [meterStatus, setMeterStatus] = useState<string>("");
   const [verificationError, setVerificationError] = useState<string>("");
 
   useEffect(() => {
@@ -498,7 +568,11 @@ const AddMeterModal = ({
       // If editing, mark as verified if meter number exists
       if (editingItem.meterNumber) {
         setIsVerified(true);
-        setCustomerName(editingItem.name || "Saved Meter");
+        setCustomerName(editingItem.customerName || "Saved Meter");
+        setCustomerAddress(editingItem.customerAddress || "");
+        setCustomerPhone(editingItem.customerPhone || "");
+        setCustomerEmail(editingItem.customerEmail || "");
+        setMeterStatus(editingItem.meterStatus || "");
       }
     }
   }, [editingItem]);
@@ -514,6 +588,9 @@ const AddMeterModal = ({
       setIsVerified(false);
       setCustomerName("");
       setCustomerAddress("");
+      setCustomerPhone("");
+      setCustomerEmail("");
+      setMeterStatus("");
       setVerificationError("");
     }
     onClose();
@@ -521,7 +598,7 @@ const AddMeterModal = ({
 
   if (!isOpen) return null;
 
-  // ✅ Handle meter verification
+  // Handle meter verification
   const handleVerifyMeter = async () => {
     if (!meterNumber || meterNumber.length < 7) {
       setVerificationError("Please enter a valid meter number (minimum 7 digits)");
@@ -539,9 +616,11 @@ const AddMeterModal = ({
     setVerificationError("");
     setCustomerName("");
     setCustomerAddress("");
+    setCustomerPhone("");
+    setCustomerEmail("");
+    setMeterStatus("");
 
     try {
-      // Find the disco service ID
       const selectedDisco = discos.find(d => d.code === disco);
       if (!selectedDisco) {
         throw new Error("DisCo not found");
@@ -563,6 +642,9 @@ const AddMeterModal = ({
         setIsVerified(true);
         setCustomerName(result.data.customerName || "Customer Found");
         setCustomerAddress(result.data.customerAddress || "");
+        setCustomerPhone(result.data.customerPhone || "");
+        setCustomerEmail(result.data.customerEmail || "");
+        setMeterStatus(result.data.status || "Active");
         // Auto-populate name if not set
         if (!name) {
           setName(result.data.customerName || `${disco} Meter`);
@@ -605,6 +687,10 @@ const AddMeterModal = ({
       isDefault,
       customerName: customerName || name || undefined,
       customerAddress: customerAddress || undefined,
+      customerPhone: customerPhone || undefined,
+      customerEmail: customerEmail || undefined,
+      meterStatus: meterStatus || undefined,
+      lastVerified: isVerified ? new Date().toISOString() : undefined,
     });
     handleClose();
   };
@@ -651,6 +737,9 @@ const AddMeterModal = ({
                   setIsVerified(false);
                   setCustomerName("");
                   setCustomerAddress("");
+                  setCustomerPhone("");
+                  setCustomerEmail("");
+                  setMeterStatus("");
                   setVerificationError("");
                 }}
                 placeholder="12345678901"
@@ -679,6 +768,9 @@ const AddMeterModal = ({
                   setIsVerified(false);
                   setCustomerName("");
                   setCustomerAddress("");
+                  setCustomerPhone("");
+                  setCustomerEmail("");
+                  setMeterStatus("");
                   setVerificationError("");
                 }}
                 className="w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
@@ -722,7 +814,7 @@ const AddMeterModal = ({
               </select>
             </div>
 
-            {/* ✅ Verify Meter Button */}
+            {/* Verify Meter Button */}
             {!editingItem && (
               <div>
                 <button
@@ -752,22 +844,33 @@ const AddMeterModal = ({
                   )}
                 </button>
                 
-                {/* Verification Result */}
+                {/* Verification Result - FULL INFO */}
                 {isVerified && customerName && (
                   <div className="mt-2 rounded-lg border border-green-200 bg-green-50 p-2.5 dark:border-green-900/30 dark:bg-green-900/20">
                     <div className="flex items-start gap-2">
                       <Users className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-xs font-medium text-green-700 dark:text-green-400">
                           Customer: {customerName}
                         </p>
                         {customerAddress && (
+                          <p className="text-xs text-green-600 dark:text-green-300 flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {customerAddress}
+                          </p>
+                        )}
+                        {customerPhone && (
                           <p className="text-xs text-green-600 dark:text-green-300">
-                            📍 {customerAddress}
+                            📞 {customerPhone}
+                          </p>
+                        )}
+                        {customerEmail && (
+                          <p className="text-xs text-green-600 dark:text-green-300">
+                            ✉️ {customerEmail}
                           </p>
                         )}
                         <p className="text-[10px] text-green-500 dark:text-green-400 mt-0.5">
-                          Meter: {meterNumber} • {meterType}
+                          Meter: {meterNumber} • {meterType} • Status: {meterStatus || "Active"}
                         </p>
                       </div>
                     </div>
@@ -872,7 +975,7 @@ const StatusMessage = ({
   return null;
 };
 
-// Active Schedules Component - Electricity Only
+// Active Schedules Component
 const ActiveSchedules = ({
   preOrders,
   isLoading,
@@ -996,7 +1099,7 @@ const AmountButton = ({
   );
 };
 
-// ✅ Combined Amount & Delivery Date Component
+// Combined Amount & Delivery Date Component
 const AmountAndDeliveryCard = ({
   recommendedAmounts,
   selectedAmount,
@@ -1200,6 +1303,25 @@ export function SubscriptionClient({
     }
   };
 
+  // Update meter in database
+  const updateMeter = async (id: string, data: any) => {
+    try {
+      const response = await fetch(`/api/saved-meters/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const result = await response.json();
+      if (result.success) {
+        return result.data;
+      }
+      throw new Error(result.error);
+    } catch (error) {
+      console.error("Failed to update meter:", error);
+      throw error;
+    }
+  };
+
   const handleAddMeter = async (data: any) => {
     try {
       const saved = await saveMeter(data);
@@ -1216,18 +1338,11 @@ export function SubscriptionClient({
   const handleUpdateMeter = async (data: any) => {
     try {
       if (!editingMeter) return;
-      const response = await fetch(`/api/saved-meters/${editingMeter.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      const result = await response.json();
-      if (result.success) {
-        setMeters(meters.map(m => m.id === editingMeter.id ? result.data : m));
-        toast.success("Meter updated successfully!");
-        setShowAddMeterModal(false);
-        setEditingMeter(null);
-      }
+      const updated = await updateMeter(editingMeter.id, data);
+      setMeters(meters.map(m => m.id === editingMeter.id ? updated : m));
+      toast.success("Meter updated successfully!");
+      setShowAddMeterModal(false);
+      setEditingMeter(null);
     } catch (error) {
       toast.error("Failed to update meter");
     }
@@ -1270,10 +1385,22 @@ export function SubscriptionClient({
     }
   };
 
+  // ✅ Updated: Auto-populate meter data when selected
   const handleMeterSelect = (meterId: string) => {
-    setSelectedMeter(meterId);
-    setError("");
-    setPinError("");
+    const meter = meters.find(m => m.id === meterId);
+    if (meter) {
+      setSelectedMeter(meterId);
+      // Auto-populate the meter data (no re-verification needed)
+      // The form will use the selected meter data
+      setError("");
+      setPinError("");
+      
+      if (meter.customerName) {
+        toast.success(`✅ Selected ${meter.customerName}'s meter`);
+      } else {
+        toast.success(`✅ Selected meter ${meter.meterNumber}`);
+      }
+    }
   };
 
   const handleAmountSelect = (value: number) => {
@@ -1375,6 +1502,12 @@ export function SubscriptionClient({
         deliveryDate,
         paymentOption: "schedule_only",
         pin: pin,
+        // ✅ Pass customer data if available
+        customerName: currentMeter?.customerName || null,
+        customerAddress: currentMeter?.customerAddress || null,
+        customerPhone: currentMeter?.customerPhone || null,
+        customerEmail: currentMeter?.customerEmail || null,
+        meterStatus: currentMeter?.meterStatus || null,
       };
 
       const response = await fetch("/api/vendors/subscription/create", {
@@ -1618,7 +1751,7 @@ export function SubscriptionClient({
               )}
             </div>
 
-            {/* ✅ Amount & Delivery Date - COMBINED CARD */}
+            {/* Amount & Delivery Date - COMBINED CARD */}
             <AmountAndDeliveryCard
               recommendedAmounts={recommendedAmounts}
               selectedAmount={selectedAmount}
@@ -1675,6 +1808,52 @@ export function SubscriptionClient({
                       {currentMeter?.meterNumber || "—"}
                     </span>
                   </div>
+
+                  {/* Show customer info if available */}
+                  {currentMeter?.customerName && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Customer</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[150px]">
+                        {currentMeter.customerName}
+                      </span>
+                    </div>
+                  )}
+                  {currentMeter?.customerAddress && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Address</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[150px]">
+                        {currentMeter.customerAddress}
+                      </span>
+                    </div>
+                  )}
+                  {currentMeter?.customerPhone && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Phone</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {currentMeter.customerPhone}
+                      </span>
+                    </div>
+                  )}
+                  {currentMeter?.customerEmail && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Email</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[150px]">
+                        {currentMeter.customerEmail}
+                      </span>
+                    </div>
+                  )}
+                  {currentMeter?.meterStatus && (
+                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Status</span>
+                      <span className={`text-sm font-medium ${
+                        currentMeter.meterStatus.toLowerCase() === 'active' 
+                          ? 'text-green-600 dark:text-green-400' 
+                          : 'text-yellow-600 dark:text-yellow-400'
+                      }`}>
+                        {currentMeter.meterStatus}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Delivery Date</span>

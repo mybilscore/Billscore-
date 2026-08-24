@@ -1,10 +1,9 @@
-// app/buy-now/page.client.tsx - UPDATED with Close button
-
 "use client";
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import Image from "next/image";
 import {
   Zap,
   Tv,
@@ -28,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 
-// ✅ Import QR verification - using the new simple hash
+// Import QR verification - NO EXPIRY
 import { verifyQRHash } from "~/lib/qr-hash";
 
 // Types
@@ -121,7 +120,7 @@ const AmountButton = ({
   );
 };
 
-// ✅ Scheduled Bill Modal Component
+// Scheduled Bill Modal Component
 const ScheduledBillModal = ({
   isOpen,
   onClose,
@@ -286,12 +285,11 @@ export default function BuyNowPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // ✅ Hashed params: id, t, p, h, e
+  // QR params - NO EXPIRY
   const id = searchParams.get("id");
   const type = searchParams.get("t");
   const provider = searchParams.get("p");
   const hash = searchParams.get("h");
-  const expiresAt = searchParams.get("e");
   
   const [loading, setLoading] = useState(true);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -370,11 +368,9 @@ export default function BuyNowPage() {
         setHasFetchedBills(true);
       } else {
         console.error("❌ [BUY NOW] Failed to fetch bills:", result.error);
-        toast.error("Failed to load scheduled bills");
       }
     } catch (error) {
       console.error("❌ [BUY NOW] Error fetching bills:", error);
-      toast.error("Error loading scheduled bills");
     } finally {
       setIsFetchingBills(false);
     }
@@ -382,7 +378,6 @@ export default function BuyNowPage() {
 
   useEffect(() => {
     const verifyAndFetchData = async () => {
-      // ✅ Verify QR hash using the new simple hash
       if (!id || !type || !provider || !hash) {
         setQrError("Invalid QR code. Missing required parameters.");
         setVerificationStatus("failed");
@@ -390,17 +385,15 @@ export default function BuyNowPage() {
         return;
       }
 
-      // ✅ Verify the hash with the new simple hash algorithm
       const isValid = verifyQRHash({
         identifier: id,
         type: type,
         provider: provider,
         hash: hash,
-        expiresAt: expiresAt || undefined,
       });
 
       if (!isValid) {
-        setQrError("This QR code is invalid or has expired. Please generate a new one.");
+        setQrError("This QR code is invalid. Please generate a new one.");
         setVerificationStatus("failed");
         setLoading(false);
         return;
@@ -408,7 +401,6 @@ export default function BuyNowPage() {
 
       setVerificationStatus("verified");
       
-      // ✅ Store verified data
       setVerifiedData({
         identifier: id,
         type: type,
@@ -420,7 +412,6 @@ export default function BuyNowPage() {
       setPurchaseError(null);
 
       try {
-        // Auth check
         const authRes = await fetch("/api/auth/session");
         const session = await authRes.json();
         const loggedIn = !!session?.user;
@@ -429,7 +420,6 @@ export default function BuyNowPage() {
         console.log(`🔐 [BUY NOW] Logged in: ${loggedIn}`);
         
         if (loggedIn && session?.user) {
-          // Get user info
           const balanceRes = await fetch("/api/user/balance");
           const balanceData = await balanceRes.json();
           
@@ -442,14 +432,13 @@ export default function BuyNowPage() {
             walletBalance: balanceData.balance || 0,
           });
 
-          // ✅ Fetch scheduled bills immediately after login
           console.log("📋 [BUY NOW] User is logged in, fetching bills...");
           await fetchScheduledBills();
         } else {
-          console.log("📋 [BUY NOW] User is NOT logged in, skipping bills fetch");
+          console.log("📋 [BUY NOW] User is NOT logged in - purchase with PIN only");
+          setUser(null);
         }
 
-        // Fetch item data using verified data
         let itemRes;
         if (type === "electricity") {
           itemRes = await fetch(`/api/saved-meters/lookup?meterNumber=${encodeURIComponent(id)}`);
@@ -466,7 +455,6 @@ export default function BuyNowPage() {
         const itemResult = await itemRes.json();
         setItemData(itemResult.data);
 
-        // Get recommended amounts
         const amountsRes = await fetch("/api/recommended-amounts");
         const amountsResult = await amountsRes.json();
         setRecommendedAmounts(amountsResult.data || [
@@ -486,9 +474,8 @@ export default function BuyNowPage() {
     };
 
     verifyAndFetchData();
-  }, [id, type, provider, hash, expiresAt]);
+  }, [id, type, provider, hash]);
 
-  // ✅ Also try fetching when isLoggedIn changes
   useEffect(() => {
     if (isLoggedIn && !hasFetchedBills && !isFetchingBills) {
       console.log("📋 [BUY NOW] isLoggedIn changed, fetching bills...");
@@ -534,20 +521,14 @@ export default function BuyNowPage() {
     setShowBillModal(true);
   };
 
-  // ✅ Handle close - redirect to the QR code link that was shared
   const handleClose = () => {
-    // Construct the QR code URL that was used to access this page
-    // This is the link that was shared with the QR code
-    const qrLink = `https://app.bilscore.com/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
-    
-    // Redirect to the QR link
+    const qrLink = `https://app.bilscore.com/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}`;
     window.location.href = qrLink;
   };
 
   const handleSubmit = async () => {
     const amount = getTotalAmount();
     
-    // Clear previous purchase errors
     setPurchaseError(null);
     setPinError(null);
     
@@ -561,24 +542,21 @@ export default function BuyNowPage() {
       return;
     }
 
-    if (!isLoggedIn) {
-      router.push(`/auth/sign-in?callbackUrl=/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}&e=${expiresAt}`);
-      return;
-    }
-
-    if (!user?.hasWallet) {
-      setPurchaseError("You need a wallet to make payments.");
-      return;
-    }
-
-    if (user.walletBalance < amount) {
-      setPurchaseError(`Insufficient balance. Your balance is ${formatCurrency(user.walletBalance)}`);
-      return;
-    }
-
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
       return;
+    }
+
+    if (isLoggedIn && user) {
+      if (!user.hasWallet) {
+        setPurchaseError("You need a wallet to make payments. Please sign in with a valid wallet.");
+        return;
+      }
+
+      if (user.walletBalance < amount) {
+        setPurchaseError(`Insufficient balance. Your balance is ${formatCurrency(user.walletBalance)}`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -591,6 +569,8 @@ export default function BuyNowPage() {
         pin: pin,
         provider: verifiedData.provider,
         qrHash: hash,
+        userId: user?.id || null,
+        isGuest: !isLoggedIn,
       };
 
       if (verifiedData.type === "electricity") {
@@ -622,10 +602,11 @@ export default function BuyNowPage() {
       setPin("");
       setSelectedAmount(null);
       setCustomAmount("");
-      await fetchBalance();
       
-      // ✅ Refresh scheduled bills after purchase
-      await fetchScheduledBills();
+      if (isLoggedIn) {
+        await fetchBalance();
+        await fetchScheduledBills();
+      }
       
       toast.success(`${verifiedData.type === "electricity" ? "Electricity" : "Cable TV"} purchase successful!`);
 
@@ -649,7 +630,6 @@ export default function BuyNowPage() {
     setCopied(false);
   };
 
-  // ✅ QR ERROR - Show invalid QR page
   if (qrError) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
@@ -744,7 +724,6 @@ export default function BuyNowPage() {
             </div>
           </div>
 
-          {/* ✅ Buy Again and Close buttons */}
           <div className="flex gap-3">
             <button
               onClick={handleNewPurchase}
@@ -769,7 +748,6 @@ export default function BuyNowPage() {
   const itemName = itemData?.name || (verifiedData?.type === "electricity" ? "Meter" : "Decoder");
   const providerName = verifiedData?.provider || "";
 
-  // Filter scheduled bills for display
   const displayBills = scheduledBills
     .filter(b => b.isActive && b.status !== "DELIVERED")
     .sort((a, b) => new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime());
@@ -779,14 +757,17 @@ export default function BuyNowPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Header */}
+        {/* Header - Using Logo Image */}
         <div className="text-center mb-4">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-[#1e293b] rounded-2xl shadow-lg mb-2">
-            {verifiedData?.type === "electricity" ? (
-              <Zap className="h-7 w-7 text-white" />
-            ) : (
-              <Tv className="h-7 w-7 text-white" />
-            )}
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl shadow-lg mb-2 overflow-hidden bg-white">
+            <Image
+              src="/uploads/log-icon.jpeg"
+              alt="Bilscore Logo"
+              width={56}
+              height={56}
+              className="object-contain"
+              priority
+            />
           </div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Quick Purchase</h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">{serviceLabel} QR Code Payment</p>
@@ -822,7 +803,7 @@ export default function BuyNowPage() {
             </span>
           </div>
 
-          {/* ✅ Scheduled Bills Section */}
+          {/* Scheduled Bills Section - Only shown if logged in */}
           {isLoggedIn && (
             <div className="mt-3 pb-3 border-b border-gray-100 dark:border-gray-700">
               <div className="flex items-center justify-between mb-2">
@@ -959,11 +940,18 @@ export default function BuyNowPage() {
               <p className="text-lg font-bold text-[#1e293b] dark:text-white">
                 {totalAmount > 0 ? formatCurrency(totalAmount) : "—"}
               </p>
-              <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-                Balance: <span className={user && user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                  {user ? formatCurrency(user.walletBalance) : "—"}
-                </span>
-              </div>
+              {isLoggedIn && user && (
+                <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                  Balance: <span className={user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                    {formatCurrency(user.walletBalance)}
+                  </span>
+                </div>
+              )}
+              {!isLoggedIn && (
+                <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                  Guest • PIN required
+                </div>
+              )}
             </div>
 
             <div>
@@ -994,7 +982,7 @@ export default function BuyNowPage() {
             </div>
           </div>
 
-          {/* ✅ Purchase Error - Show on page */}
+          {/* Purchase Error */}
           {purchaseError && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-900/20 p-2">
               <div className="flex items-start gap-1.5">
@@ -1004,31 +992,30 @@ export default function BuyNowPage() {
             </div>
           )}
 
-          {/* Login Status */}
+          {/* Login Status - Informational only, not blocking */}
           {!isLoggedIn && (
-            <div className="mt-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-2 text-center">
-              <p className="text-xs text-yellow-700 dark:text-yellow-400">
-                🔐 <button
-                  onClick={() => router.push(`/auth/sign-in?callbackUrl=/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}&e=${expiresAt}`)}
-                  className="underline hover:no-underline font-medium"
+            <div className="mt-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/30 rounded-lg p-2 text-center">
+              <p className="text-xs text-blue-700 dark:text-blue-400">
+                🔑 Pay with PIN • 
+                <button
+                  onClick={() => router.push(`/auth/sign-in?callbackUrl=/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}`)}
+                  className="underline hover:no-underline font-medium ml-1"
                 >
                   Sign in
-                </button> to purchase
+                </button> for wallet balance
               </p>
             </div>
           )}
 
-          {/* Submit Button */}
+          {/* Submit Button - No login required, PIN only */}
           <button
             onClick={handleSubmit}
             disabled={
               isSubmitting ||
-              !isLoggedIn ||
               totalAmount === 0 ||
-              !user?.hasWallet ||
-              (user?.walletBalance || 0) < totalAmount ||
               !pin ||
-              pin.length < 4
+              pin.length < 4 ||
+              (isLoggedIn && user && user.walletBalance < totalAmount)
             }
             className="w-full mt-3 rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#1e293b]/20"
           >
@@ -1039,8 +1026,8 @@ export default function BuyNowPage() {
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2">
-                <ShoppingBag className="h-4 w-4" />
-                {isLoggedIn ? "Confirm & Pay" : "Sign in to Purchase"}
+                <Lock className="h-4 w-4" />
+                Pay with PIN
                 <ArrowRight className="h-4 w-4" />
               </div>
             )}
@@ -1071,7 +1058,7 @@ export default function BuyNowPage() {
         </div>
       </div>
 
-      {/* ✅ Scheduled Bill Modal */}
+      {/* Scheduled Bill Modal */}
       <ScheduledBillModal
         isOpen={showBillModal}
         onClose={() => setShowBillModal(false)}
