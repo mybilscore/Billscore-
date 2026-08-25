@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH SESSION TRACKING
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH SESSION TRACKING AND INDEX SUPPORT
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -4294,6 +4294,91 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   const command = body.toUpperCase().trim();
   const parts = body.split(" ").filter(p => p.length > 0);
 
+  // ============================================================
+  // SPECIAL CASE: Just an index number (e.g., "1", "2", "3")
+  // ============================================================
+  if (/^\d+$/.test(command) && !command.startsWith("0")) {
+    // Check if user has a recent DATA session
+    const session = userSessions.get(user.id);
+    
+    if (session && session.command === 'DATA' && (Date.now() - session.timestamp) < SESSION_TIMEOUT) {
+      // Use the stored context
+      const targetPhone = session.phoneNumber;
+      const isOwnNumber = session.isOwnNumber;
+      const network = session.network;
+      const indexNum = parseInt(command);
+      
+      console.log(`[INDEX] Using session context for ${command}: ${targetPhone}, network: ${network}`);
+      
+      // Get plan from cached mapping for this specific network
+      const planInfo = await getPlanByIndexForNetwork(network, indexNum);
+      
+      if (planInfo) {
+        // Use the plan data directly from the mapping
+        const planData = planInfo.planData;
+        const provider = planInfo.provider;
+        
+        console.log(`[INDEX] Found plan: ${planData.data} (${provider}) for ${network}`);
+        
+        // Clear session after purchase
+        userSessions.delete(user.id);
+        
+        // Normalize the target phone number
+        const normalizedTarget = normalizePhoneNumber(targetPhone);
+        
+        // Use the plan data directly - no need to search again
+        if (isOwnNumber) {
+          return await processDataPurchaseDirectWithPlan(user, normalizedTarget, planData, provider, network);
+        } else {
+          return await processDataPurchaseWithPinWithPlan(user, normalizedTarget, planData, provider, network);
+        }
+      } else {
+        // Index not found in mapping
+        const plans = await getAvailablePlansForNetwork(network, targetPhone);
+        return `Invalid Plan Index
+
+No plan found with index ${indexNum} for ${network}.
+
+${plans}`;
+      }
+    } else {
+      // No session, show help for DATA command
+      const normalizedUserPhone = normalizePhoneNumber(user.phone);
+      const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
+      
+      if (!detectedNetwork) {
+        return `Could Not Detect Your Network
+
+Please type DATA to see available plans for your number.
+Or specify: DATA [phone] to see plans for another number.
+
+Example: DATA 08012345678`;
+      }
+      
+      // Store session context for the user's own number
+      userSessions.set(user.id, {
+        command: 'DATA',
+        phoneNumber: user.phone,
+        network: detectedNetwork,
+        isOwnNumber: true,
+        timestamp: Date.now()
+      });
+      
+      const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
+      return `Buy Data
+
+DATA [index] - For YOUR number (no PIN required)
+DATA [phone] - Show plans for another number
+DATA [phone] [index] - For another number (PIN required)
+
+Example: DATA 1
+Example: DATA 08012345678
+Example: DATA 08012345678 1
+
+${plans}`;
+    }
+  }
+
   // ========== HELP ==========
   if (command === "HELP" || command === "?") {
     // Clear any stored session
@@ -4364,49 +4449,6 @@ Type DATA to see available plans for your network.`;
     let targetPhone: string;
     let planQuery: string;
     let isOwnNumber = false;
-    
-    // ============================================================
-    // CASE 0: Just an index number (e.g., "1")
-    // ============================================================
-    if (parts.length === 1 && /^\d+$/.test(command)) {
-      // Check if user has a recent DATA context
-      const session = userSessions.get(user.id);
-      
-      if (session && session.command === 'DATA' && (Date.now() - session.timestamp) < SESSION_TIMEOUT) {
-        // Use the stored context
-        targetPhone = session.phoneNumber;
-        planQuery = command;
-        isOwnNumber = session.isOwnNumber;
-        
-        console.log(`[DATA] Using session context: ${targetPhone}, network: ${session.network}`);
-      } else {
-        // No session, treat as "DATA" command
-        const normalizedUserPhone = normalizePhoneNumber(user.phone);
-        const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-        
-        if (!detectedNetwork) {
-          return `Could Not Detect Your Network
-
-Please ensure your phone number is correct.
-You can also specify: DATA [phone] [index]
-
-Example: DATA 08012345678 1`;
-        }
-        
-        const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
-        return `Buy Data
-
-DATA [index] - For YOUR number (no PIN required)
-DATA [phone] - Show plans for another number
-DATA [phone] [index] - For another number (PIN required)
-
-Example: DATA 1
-Example: DATA 08012345678
-Example: DATA 08012345678 1
-
-${plans}`;
-      }
-    }
     
     // ============================================================
     // CASE 1: Only "DATA" - Show plans for user's network
@@ -4488,8 +4530,7 @@ Supported formats:
         const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone);
         return `Buy Data for ${targetPhone}
 
-DATA [index] - Buy for this number (${isOwnNumber ? 'no PIN' : 'PIN required'})
-Just type the index number to buy
+Just type the index number to buy (${isOwnNumber ? 'no PIN' : 'PIN required'})
 
 Example: 1
 
@@ -4502,10 +4543,11 @@ ${plans}`;
       isOwnNumber = true;
       
       // Store session context
+      const detectedNetwork = detectNetworkFromPhone(normalizePhoneNumber(targetPhone)) || 'Unknown';
       userSessions.set(user.id, {
         command: 'DATA',
         phoneNumber: targetPhone,
-        network: detectNetworkFromPhone(normalizePhoneNumber(targetPhone)) || 'Unknown',
+        network: detectedNetwork,
         isOwnNumber: isOwnNumber,
         timestamp: Date.now()
       });
@@ -4564,8 +4606,7 @@ Supported formats:
       if (isOwnNumber) {
         return `Buy Data for YOUR number (${targetPhone})
 
-DATA [index] - Buy for your number (no PIN required)
-Just type the index number to buy
+Just type the index number to buy (no PIN required)
 
 Example: 1
 
@@ -4573,8 +4614,7 @@ ${plans}`;
       } else {
         return `Buy Data for ${targetPhone}
 
-DATA [index] - Buy for this number (PIN required)
-Just type the index number to buy
+Just type the index number to buy (PIN required)
 
 Example: 1
 
