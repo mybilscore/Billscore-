@@ -1230,34 +1230,35 @@ function getFallbackPlans(): string {
   return `Available Data Plans:
 
 MTN:
-  1GB - NGN 300 (30 days)
-  2GB - NGN 500 (30 days)
-  5GB - NGN 1,200 (30 days)
+  1. 1GB - NGN 300 (30 days)
+  2. 2GB - NGN 500 (30 days)
+  3. 5GB - NGN 1,200 (30 days)
   
 GLO:
-  1GB - NGN 250 (30 days)
-  2GB - NGN 450 (30 days)
-  3GB - NGN 600 (30 days)
+  4. 1GB - NGN 250 (30 days)
+  5. 2GB - NGN 450 (30 days)
+  6. 3GB - NGN 600 (30 days)
 
 AIRTEL:
-  1GB - NGN 300 (30 days)
-  2GB - NGN 500 (30 days)
-  3GB - NGN 700 (30 days)
+  7. 1GB - NGN 300 (30 days)
+  8. 2GB - NGN 500 (30 days)
+  9. 3GB - NGN 700 (30 days)
 
 9MOBILE:
-  1GB - NGN 280 (30 days)
-  2GB - NGN 480 (30 days)
-  5GB - NGN 1,000 (30 days)
-  10GB - NGN 1,800 (30 days)
+  10. 1GB - NGN 280 (30 days)
+  11. 2GB - NGN 480 (30 days)
+  12. 5GB - NGN 1,000 (30 days)
+  13. 10GB - NGN 1,800 (30 days)
 
-To buy: DATA [plan]
-Example: DATA 1GB
-For another number: DATA 08012345678 1GB`;
+To buy: DATA [index] or DATA [plan name]
+Example: DATA 1 or DATA 1GB
+For another number: DATA 08012345678 1`;
 }
 
 // ============================================================
 // GET AVAILABLE PLANS FOR WHATSAPP
 // ============================================================
+
 
 async function getAvailablePlansForWhatsApp(): Promise<string> {
   try {
@@ -1285,26 +1286,37 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
     if (result.success && result.data?.plans) {
       const { plans } = result.data;
       let message = "Available Data Plans:\n\n";
+      let globalIndex = 1;
       
       for (const provider of plans) {
         const networkName = provider.name;
         message += `${networkName}:\n`;
         
-        const allPlans: string[] = [];
+        const allPlans: any[] = [];
         for (const category of provider.categories || []) {
           for (const plan of category.plans || []) {
             if (plan.price && plan.price > 0) {
               const priceDisplay = `NGN ${Number(plan.price).toFixed(0)}`;
               const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
-              allPlans.push(`${plan.data} - ${priceDisplay}${validityDisplay}`);
+              allPlans.push({
+                data: plan.data,
+                price: priceDisplay,
+                validity: validityDisplay,
+                planCode: plan.planCode || plan.data,
+                index: globalIndex,
+                id: plan.id,
+              });
+              globalIndex++;
             }
           }
         }
         
+        // Take first 8 plans for WhatsApp (to keep message readable)
         const displayPlans = allPlans.slice(0, 8);
         if (displayPlans.length > 0) {
           displayPlans.forEach(p => {
-            message += `  ${p}\n`;
+            // ✅ Display with index number
+            message += `  ${p.index}. ${p.data} - ${p.price}${p.validity}\n`;
           });
         } else {
           message += `  No plans available\n`;
@@ -1316,9 +1328,9 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
         message += '\n';
       }
       
-      message += `To buy: DATA [plan]\n`;
-      message += `Example: DATA 1GB\n`;
-      message += `For another number: DATA 08012345678 1GB`;
+      message += `To buy: DATA [index] or DATA [plan name]\n`;
+      message += `Example: DATA 1 or DATA 1GB\n`;
+      message += `For another number: DATA 08012345678 1`;
       
       return message;
     }
