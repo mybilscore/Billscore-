@@ -576,6 +576,10 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 // GET AVAILABLE PLANS FOR A SPECIFIC NETWORK WITH INDEXING
 // ============================================================
 
+// ============================================================
+// GET AVAILABLE PLANS FOR A SPECIFIC NETWORK WITH INDEXING
+// ============================================================
+
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
   try {
     const cacheKey = network.toUpperCase();
@@ -587,9 +591,10 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     }
     
     const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(network)}`;
+    // ✅ RESTORE whatsapp=true - this was the working version
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&whatsapp=true`;
     
-    console.log(`[WhatsApp] Fetching plans for ${network} from: ${url}`);
+    console.log(`[WhatsApp] Fetching WhatsApp plans for ${network} from: ${url}`);
     
     const response = await fetch(url, {
       headers: { 
@@ -601,7 +606,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     });
 
     if (!response.ok) {
-      console.warn(`[WhatsApp] Failed to fetch plans for ${network}: ${response.status}`);
+      console.warn(`[WhatsApp] Failed to fetch WhatsApp plans: ${response.status}`);
       return getFallbackPlansForNetwork(network);
     }
 
@@ -614,6 +619,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
       let message = `Available Data Plans for ${network}:\n\n`;
       let index = 1;
       
+      // Find the specific network provider from the WhatsApp plans
       const networkProvider = plans.find((p: any) => p.name.toLowerCase() === network.toLowerCase());
       
       if (!networkProvider) {
@@ -647,33 +653,30 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
         }
       }
       
-      const displayPlans = allPlans.slice(0, 10);
-      if (displayPlans.length > 0) {
-        displayPlans.forEach(p => {
+      // Display WhatsApp-enabled plans (usually limited to 8-10)
+      if (allPlans.length > 0) {
+        allPlans.forEach(p => {
           message += `  ${p.index}. ${p.data} - ${p.price}${p.validity}\n`;
         });
       } else {
-        message += `  No plans available for ${network}\n`;
-      }
-      
-      if (allPlans.length > 10) {
-        message += `  +${allPlans.length - 10} more plans\n`;
+        message += `  No WhatsApp plans available for ${network}\n`;
+        message += `  Reply DATA ALL to see all plans on our website\n`;
       }
       
       cachedNetworkPlans.set(cacheKey, planMap);
       cachedNetworkMessages.set(cacheKey, message + `\nTo buy: DATA [index]\nExample: DATA 1\nFor another number: DATA [phone] [index]`);
       networkPlanCacheTime.set(cacheKey, Date.now());
       
-      console.log(`[WhatsApp] Cached ${planMap.size} plans for ${network}`);
+      console.log(`[WhatsApp] Cached ${planMap.size} WhatsApp plans for ${network}`);
       
       return cachedNetworkMessages.get(cacheKey)!;
     }
 
-    console.warn(`[WhatsApp] No plans found for ${network}, using fallback`);
+    console.warn(`[WhatsApp] No WhatsApp plans found for ${network}, using fallback`);
     return getFallbackPlansForNetwork(network);
 
   } catch (error) {
-    console.error(`[WhatsApp] Error fetching plans for ${network}:`, error);
+    console.error(`[WhatsApp] Error fetching WhatsApp plans for ${network}:`, error);
     return getFallbackPlansForNetwork(network);
   }
 }
