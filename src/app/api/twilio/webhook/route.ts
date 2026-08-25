@@ -71,6 +71,12 @@ async function generateMeterQRCode(userId: string, meterNumber: string, disco: s
   }
 }
 
+function generateRandomPin(): string {
+  // Generate a random 4-digit number (1000-9999)
+  const pin = Math.floor(1000 + Math.random() * 9000);
+  return pin.toString();
+}
+
 // ============================================================
 // XML RESPONSE BUILDER
 // ============================================================
@@ -1319,6 +1325,9 @@ Reply with REG and your details to create your account!`;
 // ============================================================
 // USER REGISTRATION HANDLER
 // ============================================================
+// ============================================================
+// FIXED: USER REGISTRATION HANDLER WITH PROPER ERROR HANDLING
+// ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
   try {
@@ -1428,8 +1437,73 @@ Example: REG John Doe - johndoe (skip email)`;
         email = `${username}@whatsapp.bilscore.com`;
       }
 
+      // ============================================================
+      // ✅ FIXED: Pre-check for duplicates with clear error messages
+      // ============================================================
+      
+      // Check for duplicate email
+      if (email) {
+        const existingEmail = await prisma.user.findUnique({
+          where: { email: email },
+          select: { email: true },
+        });
+        if (existingEmail) {
+          return `❌ Email Already Registered
+
+The email "${email}" is already registered with Bilscore.
+
+If this is your email, please login at:
+${getAppUrl()}/auth
+
+Or try registering with a different email.
+Example: REG ${fullName} ${fullName.toLowerCase().replace(/\s/g, '')}@email.com ${username}
+
+Type HELP for more options.`;
+        }
+      }
+
+      // Check for duplicate phone
+      if (phone) {
+        const existingPhone = await prisma.user.findFirst({
+          where: { phone: phone },
+          select: { phone: true },
+        });
+        if (existingPhone) {
+          return `❌ Phone Number Already Registered
+
+The phone number ${phone} is already registered with Bilscore.
+
+If this is your phone, please login at:
+${getAppUrl()}/auth
+
+Or contact support if you need assistance.
+Type HELP for more options.`;
+        }
+      }
+
+      // Check for duplicate username
+      if (username) {
+        const existingUsername = await prisma.user.findUnique({
+          where: { username: username },
+          select: { username: true },
+        });
+        if (existingUsername) {
+          return `❌ Username Already Taken
+
+The username "${username}" is already taken.
+Please choose another username.
+
+Example: REG ${fullName} ${email} ${username}123
+Or: REG ${fullName} ${email} ${username}_${Math.random().toString(36).substring(2, 5)}`;
+        }
+      }
+
+      // ============================================================
+      // PROCEED WITH REGISTRATION
+      // ============================================================
+
       const defaultPassword = `BIL${Math.random().toString(36).substring(2, 10).toUpperCase()}!`;
-      const defaultPin = "1234";
+      const defaultPin = generateRandomPin();
       const changeToken = generateValidationToken();
       const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
@@ -1615,8 +1689,71 @@ REG John Doe - johndoe
 Or visit our website:
 ${getAppUrl()}/auth`;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[WhatsApp] Registration error:", error);
+    
+    // ============================================================
+    // ✅ FIXED: Properly handle Prisma P2002 error
+    // ============================================================
+    if (error.code === "P2002") {
+      const target = error.meta?.target || [];
+      let field = "";
+      let value = "";
+      
+      if (target.includes("email")) {
+        field = "Email";
+        value = error.meta?.target_value || "";
+        return `❌ Email Already Registered
+
+The email "${value}" is already registered with Bilscore.
+
+If this is your email, please login at:
+${getAppUrl()}/auth
+
+Or try registering with a different email.
+Type HELP for more options.`;
+      }
+      
+      if (target.includes("phone")) {
+        field = "Phone number";
+        value = phone;
+        return `❌ Phone Number Already Registered
+
+The phone number ${value} is already registered with Bilscore.
+
+If this is your phone, please login at:
+${getAppUrl()}/auth
+
+Or contact support if you need assistance.
+Type HELP for more options.`;
+      }
+      
+      if (target.includes("username")) {
+        field = "Username";
+        value = error.meta?.target_value || "";
+        return `❌ Username Already Taken
+
+The username "${value}" is already taken.
+Please choose another username.
+
+Example: REG ${fullName} ${email} ${value}123
+Or: REG ${fullName} ${email} ${value}_${Math.random().toString(36).substring(2, 5)}
+
+Type HELP for more options.`;
+      }
+      
+      return `❌ Registration Failed
+
+This account information is already registered.
+Please check your details and try again.
+
+If you already have an account, please login at:
+${getAppUrl()}/auth
+
+Type HELP for more options.`;
+    }
+    
+    // Handle other errors
     return formatErrorMessage(error);
   }
 }
@@ -1671,26 +1808,51 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 // FALLBACK FUNCTIONS
 // ============================================================
 
-function getFallbackPlans(): string {
-  return `Available plans:
-MTN: 1GB, 2GB, 5GB, 10GB
-GLO: 1GB, 3GB, 5GB
-AIRTEL: 1GB, 3GB, 8GB
-9MOBILE: 1GB, 2GB, 5GB
+// ============================================================
+// FALLBACK PLANS - WITH PRICE AND VALIDITY
+// ============================================================
 
-Example: DATA 08012345678 1GB`;
+function getFallbackPlans(): string {
+  return `📱 *Available Data Plans:*
+
+*MTN:*
+  • 1GB - ₦300 (30 days)
+  • 2GB - ₦500 (30 days)
+  • 5GB - ₦1,200 (30 days)
+  
+*GLO:*
+  • 1GB - ₦250 (30 days)
+  • 2GB - ₦450 (30 days)
+  • 3GB - ₦600 (30 days)
+  
+
+*AIRTEL:*
+  • 1GB - ₦300 (30 days)
+  • 2GB - ₦500 (30 days)
+  • 3GB - ₦700 (30 days)
+ 
+
+*9MOBILE:*
+  • 1GB - ₦280 (30 days)
+  • 2GB - ₦480 (30 days)
+  • 5GB - ₦1,000 (30 days)
+  • 10GB - ₦1,800 (30 days)
+
+_To buy: DATA [plan]_
+_Example: DATA 1GB_
+_For another number: DATA 08012345678 1GB_`;
 }
 
 // ============================================================
-// GET AVAILABLE PLANS FOR WHATSAPP
+// GET AVAILABLE PLANS FOR WHATSAPP - WITH PRICE AND VALIDITY
 // ============================================================
-
 async function getAvailablePlansForWhatsApp(): Promise<string> {
   try {
+    // ✅ Use the plans API with whatsapp=true parameter
     const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&whatsapp=true`;
     
-    console.log(`[WhatsApp] Fetching plans from: ${url}`);
+    console.log(`[WhatsApp] Fetching WhatsApp-enabled plans from: ${url}`);
     
     const response = await fetch(url, {
       headers: { 
@@ -1710,42 +1872,65 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
     
     if (result.success && result.data?.plans) {
       const { plans } = result.data;
-      let message = "Available plans:\n";
-      const groupedPlans: Record<string, string[]> = {};
+      let message = "📱 *Available Data Plans:*\n\n";
       
       for (const provider of plans) {
         const networkName = provider.name;
-        if (!groupedPlans[networkName]) {
-          groupedPlans[networkName] = [];
-        }
+        message += `*${networkName}:*\n`;
+        
+        // Get all plans across categories
+        const allPlans: string[] = [];
         for (const category of provider.categories || []) {
           for (const plan of category.plans || []) {
             if (plan.price && plan.price > 0) {
-              groupedPlans[networkName].push(plan.data);
+              // ✅ Include price and validity in display
+              const priceDisplay = `₦${Number(plan.price).toFixed(0)}`;
+              const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
+              allPlans.push(`${plan.data} - ${priceDisplay}${validityDisplay}`);
             }
           }
         }
+        
+        // Take first 8 plans for WhatsApp (to keep message readable)
+        const displayPlans = allPlans.slice(0, 8);
+        if (displayPlans.length > 0) {
+          // Display as bullet points for better readability
+          displayPlans.forEach(p => {
+            message += `  • ${p}\n`;
+          });
+        } else {
+          message += `  No plans available\n`;
+        }
+        
+        // Show count of additional plans if any
+        if (allPlans.length > 8) {
+          message += `  *+${allPlans.length - 8} more plans*\n`;
+        }
+        message += '\n';
       }
       
-      for (const [network, planSizes] of Object.entries(groupedPlans)) {
-        const uniquePlans = [...new Set(planSizes)];
-        message += `${network}: ${uniquePlans.join(', ')}\n`;
-      }
+      // ✅ Add usage instructions
+      message += `_To buy: DATA [plan]_\n`;
+      message += `_Example: DATA 1GB_\n`;
+      message += `_For another number: DATA 08012345678 1GB_`;
       
       return message;
     }
 
-    console.warn(`[WhatsApp] No plans data from API, using fallback`);
+    console.warn(`[WhatsApp] No WhatsApp plans from API, using fallback`);
     return getFallbackPlans();
 
   } catch (error) {
-    console.error('[WhatsApp] Error fetching plans:', error);
+    console.error('[WhatsApp] Error fetching WhatsApp plans:', error);
     return getFallbackPlans();
   }
 }
 
 // ============================================================
 // FIND DATA PLAN FROM VENDOR API
+// ============================================================
+// ============================================================
+// FIND DATA PLAN FROM VENDOR API - WITH BETTER ERROR MESSAGE
 // ============================================================
 
 async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
@@ -1795,17 +1980,29 @@ async function findDataPlanFromVendor(network: string, planQuery: string): Promi
         for (const plan of category.plans || []) {
           const planData = plan.data?.toLowerCase() || '';
           
-          if (planData === normalizedQuery || 
-              planData === `${mbValue}mb` || 
-              planData === `${mbValue/1024}gb`) {
+          // ✅ Check for exact match including price or validity
+          if (planData === normalizedQuery) {
             return { ...plan, provider: provider.name };
           }
+          
+          // ✅ Check for MB/GB match with price and validity
+          if (mbValue > 0 && plan.amountMB) {
+            // Check if the plan size matches
+            if (Math.abs(plan.amountMB - mbValue) < 10) {
+              // Prefer exact match over closest
+              if (!foundPlan || Math.abs(plan.amountMB - mbValue) < Math.abs(foundPlan.amountMB - mbValue)) {
+                foundPlan = { ...plan, provider: provider.name };
+              }
+            }
+          }
 
+          // ✅ Check if the plan query contains the plan data or vice versa
           if (!foundPlan && (planData.includes(normalizedQuery) || 
               normalizedQuery.includes(planData))) {
             foundPlan = { ...plan, provider: provider.name };
           }
 
+          // ✅ Track closest plan by MB for fuzzy matching
           if (mbValue > 0 && plan.amountMB) {
             const diff = Math.abs(plan.amountMB - mbValue);
             if (diff < closestDiff) {
@@ -1817,7 +2014,10 @@ async function findDataPlanFromVendor(network: string, planQuery: string): Promi
       }
     }
 
-    return foundPlan || closestPlan || null;
+    // Return found plan, or closest plan if within reasonable difference
+    if (foundPlan) return foundPlan;
+    if (closestPlan && closestDiff < 1024) return closestPlan; // Within 1GB
+    return null;
 
   } catch (error) {
     console.error('[WhatsApp] Error finding data plan:', error);

@@ -1883,6 +1883,7 @@ model VtuTransaction {
   isBulkPurchase        Boolean               @default(false)
   bulkQuantity          Int?
   channel               ChannelType?
+  channelDisplay        String?               @default("Unknown")
   apiKeyId              String?
   qrPaymentId           String?               @unique
   
@@ -1949,6 +1950,7 @@ model VtuTransaction {
   @@index([vendor])
   @@index([transactionType])
   @@index([createdAt, status])
+   @@index([channelDisplay]) 
   @@index([vendor, createdAt])
   @@index([transactionType, createdAt])
   @@index([status, vendorCommission])
@@ -3676,6 +3678,8 @@ model DataPlan {
   vendorPlanType        String?
   vendorMetadata        Json?
   
+  isActiveForWhatsApp   Boolean         @default(false)  // WhatsApp activation
+  whatsappPriority      Int             @default(0)      // Order in WhatsApp display
   // Import tracking
   importBatch           String?
   lastSyncedAt          DateTime?

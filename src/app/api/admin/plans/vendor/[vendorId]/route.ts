@@ -22,9 +22,10 @@ function validateApiKey(request: NextRequest): { valid: boolean; error?: string 
   return { valid: true };
 }
 
+// ✅ FIXED: Add async and await for params (Next.js 15)
 export async function GET(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     const auth = validateApiKey(request);
@@ -32,17 +33,19 @@ export async function GET(
       return NextResponse.json({ error: auth.error }, { status: 401 });
     }
 
-    const { vendorId } = params;
+    // ✅ Await params for Next.js 15 compatibility
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     const searchParams = new URL(request.url).searchParams;
     const network = searchParams.get("network");
     const isActiveParam = searchParams.get("isActive");
     
-    // ✅ Build where clause - only filter by isActive if explicitly provided
+    // Build where clause
     const where: any = {
       vendorId,
     };
 
-    // ✅ Only add isActive filter if the param is provided
     if (isActiveParam !== null) {
       where.isActive = isActiveParam !== "false";
     }
@@ -55,6 +58,8 @@ export async function GET(
       where,
       orderBy: [
         { network: 'asc' },
+        { isActiveForWhatsApp: 'desc' },
+        { whatsappPriority: 'asc' },
         { planType: 'asc' },
         { amountMB: 'asc' },
       ],
@@ -74,6 +79,20 @@ export async function GET(
       },
     });
 
+    // Calculate margin and include WhatsApp fields
+    const plansWithMargin = plans.map(plan => ({
+      ...plan,
+      margin: Number(plan.ourPrice) - Number(plan.vendorPrice),
+      marginPercentage: Number(plan.vendorPrice) > 0 
+        ? ((Number(plan.ourPrice) - Number(plan.vendorPrice)) / Number(plan.vendorPrice)) * 100 
+        : 0,
+      ourPrice: Number(plan.ourPrice),
+      vendorPrice: Number(plan.vendorPrice),
+      isActiveForWhatsApp: plan.isActiveForWhatsApp ?? false,
+      whatsappPriority: plan.whatsappPriority ?? 0,
+    }));
+
+    // Calculate stats
     const stats = await prisma.dataPlan.groupBy({
       by: ['network'],
       where: {
@@ -89,7 +108,7 @@ export async function GET(
     const response = NextResponse.json({
       success: true,
       data: {
-        plans,
+        plans: plansWithMargin,
         stats: stats.map(s => ({
           network: s.network,
           count: s._count,

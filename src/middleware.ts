@@ -18,9 +18,21 @@ const PUBLIC_ROUTES = [
   '/',
 ];
 
+// ✅ API routes that use API key authentication (no session required)
+const API_KEY_ROUTES = [
+  '/api/admin',
+  '/api/vendors',
+  '/api/public',
+];
+
 // ✅ Check if a path is public
 const isPublicRoute = (path: string) => {
   return PUBLIC_ROUTES.some(route => path.startsWith(route));
+};
+
+// ✅ Check if a path uses API key authentication
+const isApiKeyRoute = (path: string) => {
+  return API_KEY_ROUTES.some(route => path.startsWith(route));
 };
 
 export default withAuth(
@@ -28,17 +40,19 @@ export default withAuth(
     const token = req.nextauth?.token;
     const path = req.nextUrl.pathname;
     const origin = req.headers.get('origin') || '';
+    const method = req.method;
 
     console.log("========== BILSCORE MIDDLEWARE ==========");
     console.log(" Path:", path);
+    console.log(" Method:", method);
     console.log(" Token exists:", !!token);
     if (token) {
       console.log(" Token role:", token.role);
     }
 
     // ========== HANDLE OPTIONS PREFLIGHT ==========
-    if (req.method === "OPTIONS") {
-      console.log(" Handling OPTIONS preflight request");
+    if (method === "OPTIONS") {
+      console.log(" 🔄 Handling OPTIONS preflight request");
       const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
       return new NextResponse(null, {
         status: 204,
@@ -52,15 +66,60 @@ export default withAuth(
       });
     }
 
+    // ========== API KEY ROUTES - Skip authentication check ==========
+    if (isApiKeyRoute(path)) {
+      console.log(`🔑 API Key route: ${path} - allowing access (authentication handled by route)`);
+      const response = NextResponse.next();
+      const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+      response.headers.set('Access-Control-Allow-Origin', allowedOrigin);
+      response.headers.set('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
+      response.headers.set('Access-Control-Allow-Headers', ALLOWED_HEADERS.join(', '));
+      response.headers.set('Access-Control-Allow-Credentials', 'true');
+      return response;
+    }
+
     // ========== PUBLIC ROUTES - Allow without authentication ==========
     if (isPublicRoute(path)) {
       console.log(`✅ Public route: ${path} - allowing access`);
       return NextResponse.next();
     }
 
-    // ========== API ROUTES ==========
+    // ========== API ROUTES (non-API-key routes) ==========
     if (path.startsWith("/api")) {
-      console.log(" API route - adding CORS headers");
+      console.log(" 🔌 API route - checking authentication");
+      
+      // Check if there's a valid token or API key
+      const apiKey = req.headers.get('x-api-key');
+      
+      // If there's an API key, allow access (the route will validate it)
+      if (apiKey) {
+        console.log(" 🔑 API key present in request, allowing access");
+        const response = NextResponse.next();
+        const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+        response.headers.set('Access-Control-Allow-Origin', allowedOrigin);
+        response.headers.set('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
+        response.headers.set('Access-Control-Allow-Headers', ALLOWED_HEADERS.join(', '));
+        response.headers.set('Access-Control-Allow-Credentials', 'true');
+        return response;
+      }
+      
+      // If no token and no API key, return 401
+      if (!token) {
+        console.log(" ❌ No token and no API key, returning 401");
+        return new NextResponse(
+          JSON.stringify({ error: "Authentication required" }),
+          {
+            status: 401,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+              'Access-Control-Allow-Credentials': 'true',
+            },
+          }
+        );
+      }
+      
+      console.log(" ✅ Token present, allowing API access");
       const response = NextResponse.next();
       const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
       response.headers.set('Access-Control-Allow-Origin', allowedOrigin);
@@ -72,24 +131,24 @@ export default withAuth(
 
     // ========== STATIC ASSETS ==========
     if (path.match(/\.(svg|png|jpg|jpeg|gif|webp|ico)$/)) {
-      console.log(" Static asset - allowing");
+      console.log(" 📁 Static asset - allowing");
       return NextResponse.next();
     }
 
     // ========== ROOT REDIRECT ==========
     if (path === "/") {
       if (token) {
-        console.log(" User at root, redirecting to /dashboard");
+        console.log(" 👤 User at root, redirecting to /dashboard");
         return NextResponse.redirect(new URL("/dashboard", req.url));
       }
-      console.log(" No token at root, allowing to landing page");
+      console.log(" 🌐 No token at root, allowing to landing page");
       return NextResponse.next();
     }
 
     // ========== PROTECTED ROUTES ==========
     // If no token, redirect to sign-in
     if (!token) {
-      console.log(" No token, redirecting to sign-in");
+      console.log(" 🔒 No token, redirecting to sign-in");
       const signInUrl = new URL("/auth/sign-in", req.url);
       signInUrl.searchParams.set("callbackUrl", req.nextUrl.pathname);
       return NextResponse.redirect(signInUrl);
@@ -98,22 +157,21 @@ export default withAuth(
     // ========== ROLE-BASED ACCESS ==========
     if (path.startsWith("/admin")) {
       if (token.role !== "ADMIN" && token.role !== "SUPER_ADMIN") {
-        console.log(" User not authorized for admin, redirecting to /dashboard");
+        console.log(" ⛔ User not authorized for admin, redirecting to /dashboard");
         return NextResponse.redirect(new URL("/dashboard", req.url));
       }
-      console.log(" Admin access granted");
+      console.log(" ✅ Admin access granted");
       return NextResponse.next();
     }
 
     // ========== DASHBOARD AND OTHER PROTECTED ROUTES ==========
-    console.log(" Allowing access to protected route");
+    console.log(" ✅ Allowing access to protected route");
     return NextResponse.next();
   },
   {
     callbacks: {
       authorized: ({ token }) => {
         // ✅ Always return true to let the middleware logic handle authorization
-        // The actual authorization is handled in the middleware function above
         return true;
       },
     },

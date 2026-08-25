@@ -33,9 +33,10 @@ function addCorsHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
+// ✅ FIXED: Await params for Next.js 15
 export async function GET(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     console.log(`📊 [ADMIN VENDOR DETAIL] GET request received`);
@@ -47,7 +48,10 @@ export async function GET(
       );
     }
 
-    const { vendorId } = params;
+    // ✅ Await params
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     console.log(`📊 [ADMIN VENDOR DETAIL] Fetching vendor: ${vendorId}`);
 
     // Get vendor with services and plans
@@ -57,7 +61,6 @@ export async function GET(
         services: {
           orderBy: { priority: 'asc' },
         },
-        // Include plans count
         _count: {
           select: {
             dataPlans: true,
@@ -152,9 +155,10 @@ export async function GET(
   }
 }
 
+// ✅ FIXED: Await params for Next.js 15
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     console.log(`📊 [ADMIN VENDOR DETAIL] PUT request received`);
@@ -166,7 +170,10 @@ export async function PUT(
       );
     }
 
-    const { vendorId } = params;
+    // ✅ Await params
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     const body = await request.json();
     
     console.log(`📊 [ADMIN VENDOR DETAIL] Updating vendor: ${vendorId}`);
@@ -251,9 +258,10 @@ export async function PUT(
   }
 }
 
+// ✅ FIXED: Await params for Next.js 15
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     console.log(`📊 [ADMIN VENDOR DETAIL] DELETE request received`);
@@ -265,7 +273,10 @@ export async function DELETE(
       );
     }
 
-    const { vendorId } = params;
+    // ✅ Await params
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     console.log(`📊 [ADMIN VENDOR DETAIL] Deleting vendor: ${vendorId}`);
 
     // Check if vendor exists

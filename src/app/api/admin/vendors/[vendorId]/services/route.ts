@@ -34,9 +34,10 @@ function addCorsHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
+// ✅ FIXED: Await params for Next.js 15
 export async function GET(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     console.log(`📊 [ADMIN VENDOR SERVICES] GET request received`);
@@ -48,7 +49,10 @@ export async function GET(
       );
     }
 
-    const { vendorId } = params;
+    // ✅ Await params
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     console.log(`📊 [ADMIN VENDOR SERVICES] Fetching services for vendor: ${vendorId}`);
 
     // Get vendor with services
@@ -141,9 +145,10 @@ export async function GET(
   }
 }
 
+// ✅ FIXED: Await params for Next.js 15
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { vendorId: string } }
+  { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
     console.log(`📊 [ADMIN VENDOR SERVICES] PUT request received`);
@@ -155,7 +160,10 @@ export async function PUT(
       );
     }
 
-    const { vendorId } = params;
+    // ✅ Await params
+    const resolvedParams = await params;
+    const { vendorId } = resolvedParams;
+    
     const body = await request.json();
     const { serviceId, isActive, priority, basePrice, markup, minAmount, maxAmount } = body;
 
@@ -190,15 +198,24 @@ export async function PUT(
       });
 
       if (existingActive) {
+        console.log(`⚠️ [ADMIN VENDOR SERVICES] Service ${vendorService.serviceType} already active for ${existingActive.vendor.name}`);
+        
+        // ✅ Return a properly structured 409 response with all data
         return addCorsHeaders(
           NextResponse.json({
             success: false,
             error: `Service ${vendorService.serviceType} is already active for ${existingActive.vendor.name}. You can only have one active vendor per service.`,
             data: {
+              serviceType: vendorService.serviceType,
               existingVendor: {
                 id: existingActive.vendor.id,
                 name: existingActive.vendor.name,
                 code: existingActive.vendor.code,
+              },
+              existingService: {
+                id: existingActive.id,
+                serviceType: existingActive.serviceType,
+                isActive: existingActive.isActive,
               },
             },
           }, { status: 409 })

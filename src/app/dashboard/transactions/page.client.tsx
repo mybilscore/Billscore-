@@ -1,5 +1,3 @@
-// app/dashboard/transactions/page.client.tsx - UPDATED with Brand Colors
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -16,17 +14,11 @@ import {
   AlertCircle,
   Search,
   Filter,
-  Calendar,
-  Download,
-  Eye,
   ChevronDown,
   Loader2,
   ChevronUp,
   CreditCard,
-  User,
-  Smartphone,
   Activity,
-  BarChart3,
   List,
   Grid,
   RefreshCw,
@@ -34,11 +26,15 @@ import {
   Copy,
   TrendingUp,
   Hash,
-  MapPin,
   Globe,
-  Tag,
   Calendar as CalendarIcon,
   Check,
+  MessageSquare,
+  Monitor,
+  Smartphone,
+  Send,
+  Radio,
+  Code,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -80,6 +76,9 @@ interface Transaction {
   deliveredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  channel: string | null;
+  isBulkPurchase: boolean;
+  bulkQuantity: number | null;
   user: {
     fullName: string;
     phone: string;
@@ -209,7 +208,59 @@ const getTypeLabel = (type: string) => {
   return labels[type] || type;
 };
 
-// ✅ Stats Card Component with Brand Colors
+// ✅ UPDATED: Channel helper functions with correct mapping
+const getChannelIcon = (channel: string | null) => {
+  if (!channel) return <Globe className="h-3.5 w-3.5 text-gray-400" />;
+  
+  const channelMap: Record<string, any> = {
+    WHATSAPP: <MessageSquare className="h-3.5 w-3.5 text-green-500" />,
+    MOBILE_APP: <Smartphone className="h-3.5 w-3.5 text-blue-500" />,
+    WEB_APP: <Monitor className="h-3.5 w-3.5 text-purple-500" />,
+    USSD: <Radio className="h-3.5 w-3.5 text-orange-500" />,
+    SMS: <Send className="h-3.5 w-3.5 text-gray-500" />,
+    TELEGRAM: <Send className="h-3.5 w-3.5 text-blue-400" />,
+    MESSENGER: <MessageSquare className="h-3.5 w-3.5 text-blue-600" />,
+    API: <Code className="h-3.5 w-3.5 text-purple-600" />,
+  };
+  
+  return channelMap[channel] || <Globe className="h-3.5 w-3.5 text-gray-400" />;
+};
+
+const getChannelLabel = (channel: string | null) => {
+  if (!channel) return "Unknown";
+  
+  const labels: Record<string, string> = {
+    WHATSAPP: "WhatsApp",
+    MOBILE_APP: "Mobile App",
+    WEB_APP: "Web App",
+    USSD: "USSD",
+    SMS: "SMS",
+    TELEGRAM: "Telegram",
+    MESSENGER: "Messenger",
+    API: "API",
+  };
+  
+  return labels[channel] || channel;
+};
+
+const getChannelColor = (channel: string | null) => {
+  if (!channel) return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
+  
+  const colors: Record<string, string> = {
+    WHATSAPP: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    MOBILE_APP: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    WEB_APP: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+    USSD: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+    SMS: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
+    TELEGRAM: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    MESSENGER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    API: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  };
+  
+  return colors[channel] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
+};
+
+// Stats Card Component
 const StatsCard = ({
   title,
   value,
@@ -272,7 +323,7 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   return (
     <div className="border-b border-gray-100 dark:border-gray-800 last:border-0">
       <div
-        className="grid grid-cols-12 gap-3 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+        className="grid grid-cols-13 gap-3 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {/* Type */}
@@ -337,8 +388,21 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
           </span>
         </div>
 
-        {/* Delivery/Schedule Info */}
-        <div className="col-span-2 flex flex-col text-xs">
+        {/* Channel - UPDATED with proper display */}
+        <div className="col-span-2 flex items-center">
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
+            {getChannelIcon(transaction.channel)}
+            {getChannelLabel(transaction.channel)}
+          </span>
+          {transaction.isBulkPurchase && (
+            <span className="ml-1 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              x{transaction.bulkQuantity || 2}
+            </span>
+          )}
+        </div>
+
+        {/* Date */}
+        <div className="col-span-1 flex flex-col text-xs">
           <span className="text-gray-500 dark:text-gray-400">
             {formatDateShort(transaction.createdAt)}
           </span>
@@ -396,6 +460,27 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
                 {formatCurrency(transaction.totalDebited)}
               </span>
             </div>
+            
+            {/* Channel in expanded view - UPDATED */}
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                <MessageSquare className="h-3.5 w-3.5" />
+                Channel
+              </span>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
+                {getChannelIcon(transaction.channel)}
+                {getChannelLabel(transaction.channel)}
+              </span>
+            </div>
+            
+            {transaction.isBulkPurchase && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Bulk Purchase</span>
+                <span className="text-gray-900 dark:text-white">
+                  Yes ({transaction.bulkQuantity || 2} items)
+                </span>
+              </div>
+            )}
             
             {transaction.meterNumber && (
               <div className="flex justify-between text-sm">
@@ -568,6 +653,7 @@ export function TransactionsClient({
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterChannel, setFilterChannel] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -582,6 +668,7 @@ export function TransactionsClient({
         ...(searchTerm && { search: searchTerm }),
         ...(filterType !== "all" && { type: filterType }),
         ...(filterStatus !== "all" && { status: filterStatus }),
+        ...(filterChannel !== "all" && { channel: filterChannel }),
       });
 
       const response = await fetch(`/api/transactions?${params}`);
@@ -595,7 +682,7 @@ export function TransactionsClient({
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, searchTerm, filterType, filterStatus]);
+  }, [currentPage, pageSize, searchTerm, filterType, filterStatus, filterChannel]);
 
   useEffect(() => {
     fetchTransactions();
@@ -615,6 +702,8 @@ export function TransactionsClient({
       setFilterType(value);
     } else if (type === "status") {
       setFilterStatus(value);
+    } else if (type === "channel") {
+      setFilterChannel(value);
     }
     setCurrentPage(1);
   };
@@ -625,8 +714,8 @@ export function TransactionsClient({
 
   const transactionTypes = Array.from(new Set(transactions.map((t) => t.type)));
   const statuses = ["SUCCESS", "FAILED", "PENDING", "PROCESSING"];
+  const channels = Array.from(new Set(transactions.map((t) => t.channel).filter(Boolean)));
 
-  // ✅ Brand color for stats
   const brandColor = '#1e293b';
 
   return (
@@ -646,6 +735,7 @@ export function TransactionsClient({
             <button
               onClick={handleRefresh}
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+              disabled={loading}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -659,7 +749,7 @@ export function TransactionsClient({
           </div>
         </div>
 
-        {/* ✅ Stats Cards with Brand Colors */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatsCard
             title="Total Transactions"
@@ -733,7 +823,7 @@ export function TransactionsClient({
           </div>
 
           {showFilters && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Transaction Type
@@ -768,6 +858,24 @@ export function TransactionsClient({
                   ))}
                 </select>
               </div>
+              {/* Channel Filter - UPDATED */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Channel
+                </label>
+                <select
+                  value={filterChannel}
+                  onChange={(e) => handleFilterChange("channel", e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                >
+                  <option value="all">All Channels</option>
+                  {channels.map((channel) => (
+                    <option key={channel} value={channel}>
+                      {getChannelLabel(channel)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -786,7 +894,7 @@ export function TransactionsClient({
               No transactions found
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {searchTerm || filterType !== "all" || filterStatus !== "all" 
+              {searchTerm || filterType !== "all" || filterStatus !== "all" || filterChannel !== "all"
                 ? "Try adjusting your filters" 
                 : "Start making purchases to see your transactions here"}
             </p>
@@ -794,19 +902,22 @@ export function TransactionsClient({
         ) : (
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             {viewMode === "list" ? (
-              <div>
-                <div className="grid grid-cols-12 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                  <div className="col-span-2">Type</div>
-                  <div className="col-span-3">Product / Details</div>
-                  <div className="col-span-2">Amount</div>
-                  <div className="col-span-2">Status</div>
-                  <div className="col-span-2">Date</div>
-                  <div className="col-span-1"></div>
-                </div>
+              <div className="overflow-x-auto">
+                <div className="min-w-[900px]">
+                  <div className="grid grid-cols-13 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                    <div className="col-span-2">Type</div>
+                    <div className="col-span-3">Product / Details</div>
+                    <div className="col-span-2">Amount</div>
+                    <div className="col-span-2">Status</div>
+                    <div className="col-span-2">Channel</div>
+                    <div className="col-span-1">Date</div>
+                    <div className="col-span-1"></div>
+                  </div>
 
-                {transactions.map((transaction) => (
-                  <TransactionRow key={transaction.id} transaction={transaction} />
-                ))}
+                  {transactions.map((transaction) => (
+                    <TransactionRow key={transaction.id} transaction={transaction} />
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
@@ -840,6 +951,15 @@ export function TransactionsClient({
                         <span className="text-gray-500 dark:text-gray-400">Amount</span>
                         <span className="font-medium text-gray-900 dark:text-white">
                           {formatCurrency(transaction.amount)}
+                        </span>
+                      </div>
+                      
+                      {/* Channel in grid view - UPDATED */}
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Channel</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
+                          {getChannelIcon(transaction.channel)}
+                          {getChannelLabel(transaction.channel)}
                         </span>
                       </div>
                       

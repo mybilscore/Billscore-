@@ -1,9 +1,9 @@
-// app/dashboard/transactions/page.tsx - COMPLETE UPDATED
+// app/dashboard/transactions/page.tsx
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { TransactionsClient } from "./page.client";
-import { TransactionStatus, VtuType } from "@prisma/client";
+import { TransactionStatus, VtuType, ChannelType } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
 export default async function TransactionsPage() {
@@ -44,7 +44,29 @@ export default async function TransactionsPage() {
       orderBy: { createdAt: "desc" },
       take: pageSize,
       skip: skip,
-      include: {
+      select: {
+        id: true,
+        transactionType: true,
+        product: true,
+        amount: true,
+        totalDebited: true,
+        status: true,
+        phoneNumber: true,
+        network: true,
+        networkPlan: true,
+        meterNumber: true,
+        meterType: true,
+        token: true,
+        vendor: true,
+        vendorReference: true,
+        vendorCommission: true,
+        scheduledFor: true,
+        deliveredAt: true,
+        createdAt: true,
+        updatedAt: true,
+        channel: true,
+        isBulkPurchase: true,
+        bulkQuantity: true,
         user: {
           select: {
             fullName: true,
@@ -94,7 +116,7 @@ export default async function TransactionsPage() {
     }),
   ]);
 
-  // ✅ Helper function to safely convert Decimal to number
+  // Helper function to safely convert Decimal to number
   const toNumber = (value: any): number | null => {
     if (value === null || value === undefined) return null;
     
@@ -112,7 +134,51 @@ export default async function TransactionsPage() {
     return isNaN(num) ? null : num;
   };
 
-  // ✅ Format transactions with all useful fields
+  // ✅ UPDATED: Proper channel conversion matching Prisma enum exactly
+  const getChannelString = (channel: any): string | null => {
+    if (!channel) return null;
+    
+    // If it's already a string
+    if (typeof channel === 'string') {
+      const validChannels = ['WHATSAPP', 'MOBILE_APP', 'WEB_APP', 'USSD', 'SMS', 'TELEGRAM', 'MESSENGER', 'API'];
+      if (validChannels.includes(channel)) {
+        return channel;
+      }
+      return null;
+    }
+    
+    // If it's a number (Prisma enum stored as number)
+    if (typeof channel === 'number') {
+      // ✅ EXACT ORDER MATCHING YOUR PRISMA ENUM
+      const channelMap: Record<number, string> = {
+        0: 'WHATSAPP',
+        1: 'MOBILE_APP',
+        2: 'USSD',
+        3: 'SMS',
+        4: 'TELEGRAM',
+        5: 'MESSENGER',
+        6: 'API',
+        7: 'WEB_APP',
+      };
+      return channelMap[channel] || null;
+    }
+    
+    // If it's an object with toString
+    if (channel && typeof channel.toString === 'function') {
+      const str = channel.toString();
+      const validChannels = ['WHATSAPP', 'MOBILE_APP', 'WEB_APP', 'USSD', 'SMS', 'TELEGRAM', 'MESSENGER', 'API'];
+      if (validChannels.includes(str)) {
+        return str;
+      }
+    }
+    
+    // Log for debugging
+    console.log('🔍 [TRANSACTIONS] Unhandled channel value:', channel, 'type:', typeof channel);
+    
+    return null;
+  };
+
+  // Format transactions with all useful fields
   const formattedTransactions = transactions.map((tx) => {
     const hasWalletTx = tx.walletTransaction !== null;
     
@@ -123,6 +189,14 @@ export default async function TransactionsPage() {
       const wt = tx.walletTransaction!;
       balanceBefore = toNumber(wt.balanceBefore);
       balanceAfter = toNumber(wt.balanceAfter);
+    }
+    
+    // Get channel string with proper conversion
+    const channelStr = getChannelString(tx.channel);
+    
+    // Debug log for channel
+    if (tx.channel !== undefined && tx.channel !== null) {
+      console.log(`🔍 [TRANSACTIONS] Channel raw: ${tx.channel}, converted: ${channelStr}, type: ${typeof tx.channel}`);
     }
     
     return {
@@ -145,8 +219,10 @@ export default async function TransactionsPage() {
       deliveredAt: tx.deliveredAt?.toISOString() || null,
       createdAt: tx.createdAt.toISOString(),
       updatedAt: tx.updatedAt.toISOString(),
+      channel: channelStr,
+      isBulkPurchase: tx.isBulkPurchase || false,
+      bulkQuantity: tx.bulkQuantity || null,
       user: tx.user,
-      // ✅ Balance fields (hidden from list, shown in expanded view)
       balanceBefore: balanceBefore,
       balanceAfter: balanceAfter,
       walletReference: tx.walletTransaction?.reference || null,
@@ -181,6 +257,7 @@ export default async function TransactionsPage() {
   };
 
   console.log(`📊 [TRANSACTIONS] Found ${transactions.length} transactions, total: ${totalTransactions}`);
+  console.log(`📊 [TRANSACTIONS] Channels found: ${formattedTransactions.map(t => t.channel).filter(Boolean).join(', ')}`);
 
   return (
     <TransactionsClient
