@@ -1256,6 +1256,69 @@ For another number: DATA 08012345678 1`;
 }
 
 // ============================================================
+// RESOLVE DATA PLAN INDEX TO ACTUAL PLAN NAME
+// ============================================================
+
+async function resolveDataPlanIndex(network: string, indexQuery: string): Promise<string | null> {
+  try {
+    const indexNum = parseInt(indexQuery);
+    if (isNaN(indexNum) || indexNum < 1) return null;
+    
+    const apiUrl = getApiUrl();
+    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(network)}`;
+    
+    console.log(`[WhatsApp] Resolving index ${indexNum} from: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'User-Agent': 'Bilscore-WhatsApp/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`[WhatsApp] Failed to fetch plans for index resolution`);
+      return null;
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.data?.plans) {
+      return null;
+    }
+
+    const { plans } = result.data;
+    let globalIndex = 1;
+    
+    for (const provider of plans) {
+      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
+      
+      for (const category of provider.categories || []) {
+        for (const plan of category.plans || []) {
+          if (plan.price && plan.price > 0) {
+            if (globalIndex === indexNum) {
+              // Found the plan - return its data/name
+              console.log(`[WhatsApp] Resolved index ${indexNum} to plan: ${plan.data}`);
+              return plan.data || plan.planCode || null;
+            }
+            globalIndex++;
+          }
+        }
+      }
+    }
+    
+    console.log(`[WhatsApp] Index ${indexNum} not found in plans`);
+    return null;
+    
+  } catch (error) {
+    console.error('[WhatsApp] Error resolving data plan index:', error);
+    return null;
+  }
+}
+
+// ============================================================
 // GET AVAILABLE PLANS FOR WHATSAPP
 // ============================================================
 
@@ -1305,17 +1368,18 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
                 planCode: plan.planCode || plan.data,
                 index: globalIndex,
                 id: plan.id,
+                provider: provider.name,
+                amountMB: plan.amountMB,
               });
               globalIndex++;
             }
           }
         }
         
-        // Take first 8 plans for WhatsApp (to keep message readable)
+        // Take first 8 plans for WhatsApp
         const displayPlans = allPlans.slice(0, 8);
         if (displayPlans.length > 0) {
           displayPlans.forEach(p => {
-            // ✅ Display with index number
             message += `  ${p.index}. ${p.data} - ${p.price}${p.validity}\n`;
           });
         } else {
@@ -4439,57 +4503,60 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
   // ============================================================
   // DATA - WITH CORRECT NETWORK DETECTION
   // ============================================================
-  if (command.startsWith("DATA") || command.startsWith("DATA ")) {
-    let targetPhone: string;
-    let planQuery: string;
-    let isOwnNumber = false;
-    
-    if (parts.length === 2) {
-      targetPhone = user.phone;
-      planQuery = parts[1];
-      isOwnNumber = true;
-    } else if (parts.length >= 3) {
-      targetPhone = parts[1];
-      planQuery = parts.slice(2).join(' ');
-      const normalizedTarget = normalizePhoneNumber(targetPhone);
-      const normalizedUser = normalizePhoneNumber(user.phone);
-      isOwnNumber = normalizedTarget === normalizedUser;
-    } else {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `Buy Data
+// In processWhatsAppCommand function - Updated DATA section
 
-DATA [plan] - For YOUR number (no PIN required)
-DATA [phone] [plan] - For another number (PIN required)
-
-Example: DATA 1GB
-Example: DATA 08012345678 1GB
-Example: DATA +2348012345678 1GB
-
-${availablePlans}`;
-    }
-    
-    if (!planQuery) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `Missing Plan
-
-Please specify a data plan.
-Example: DATA 1GB
-
-${availablePlans}`;
-    }
-    
-    if (!targetPhone || targetPhone.length < 10) {
-      targetPhone = user.phone;
-      isOwnNumber = true;
-    }
-    
+if (command.startsWith("DATA") || command.startsWith("DATA ")) {
+  let targetPhone: string;
+  let planQuery: string;
+  let isOwnNumber = false;
+  
+  if (parts.length === 2) {
+    targetPhone = user.phone;
+    planQuery = parts[1];
+    isOwnNumber = true;
+  } else if (parts.length >= 3) {
+    targetPhone = parts[1];
+    planQuery = parts.slice(2).join(' ');
     const normalizedTarget = normalizePhoneNumber(targetPhone);
-    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
-    
-    console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
-    
-    if (!detectedNetwork) {
-      return `Could Not Detect Network
+    const normalizedUser = normalizePhoneNumber(user.phone);
+    isOwnNumber = normalizedTarget === normalizedUser;
+  } else {
+    const availablePlans = await getAvailablePlansForWhatsApp();
+    return `Buy Data
+
+DATA [index] or DATA [plan] - For YOUR number (no PIN required)
+DATA [phone] [index] or DATA [phone] [plan] - For another number (PIN required)
+
+Example: DATA 1
+Example: DATA 1GB
+Example: DATA 08012345678 1
+
+${availablePlans}`;
+  }
+  
+  if (!planQuery) {
+    const availablePlans = await getAvailablePlansForWhatsApp();
+    return `Missing Plan
+
+Please specify a data plan or index.
+Example: DATA 1
+Example: DATA 1GB
+
+${availablePlans}`;
+  }
+  
+  if (!targetPhone || targetPhone.length < 10) {
+    targetPhone = user.phone;
+    isOwnNumber = true;
+  }
+  
+  const normalizedTarget = normalizePhoneNumber(targetPhone);
+  const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+  
+  console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}, Query: ${planQuery}`);
+  
+  if (!detectedNetwork) {
+    return `Could Not Detect Network
 
 We couldn't detect the network for ${targetPhone}.
 Please ensure the phone number is correct.
@@ -4500,14 +4567,31 @@ Supported formats:
 - 2348012345678 (without leading zero)
 
 ${await getAvailablePlansForWhatsApp()}`;
-    }
+  }
 
-    if (isOwnNumber) {
-      return await processDataPurchaseDirect(user, normalizedTarget, planQuery, detectedNetwork);
+  // ✅ Check if planQuery is an index number
+  const isIndex = /^\d+$/.test(planQuery);
+  let actualPlanQuery = planQuery;
+  
+  if (isIndex) {
+    console.log(`[DATA] Detected index: ${planQuery}, resolving to plan name...`);
+    const resolvedPlan = await resolveDataPlanIndex(detectedNetwork, planQuery);
+    if (resolvedPlan) {
+      actualPlanQuery = resolvedPlan;
+      console.log(`[DATA] Resolved index ${planQuery} to plan: ${actualPlanQuery}`);
     } else {
-      return await processDataPurchaseWithPin(user, normalizedTarget, planQuery, detectedNetwork);
+      // If index not found, try to use it as a plan name (fallback)
+      console.log(`[DATA] Index ${planQuery} not resolved, using as plan name`);
+      actualPlanQuery = planQuery;
     }
   }
+
+  if (isOwnNumber) {
+    return await processDataPurchaseDirect(user, normalizedTarget, actualPlanQuery, detectedNetwork);
+  } else {
+    return await processDataPurchaseWithPin(user, normalizedTarget, actualPlanQuery, detectedNetwork);
+  }
+}
 
   // ============================================================
   // METER MANAGEMENT
