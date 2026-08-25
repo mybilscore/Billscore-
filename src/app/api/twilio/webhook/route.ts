@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH ALL EMOJIS REMOVED
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH DATA PLAN INDEX MAPPING
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -28,6 +28,15 @@ import {
 } from "~/lib/palmpay/palmpay-wallet.service";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { generateQRUrl } from "~/lib/qr-hash";
+
+// ============================================================
+// CACHE FOR DATA PLAN MAPPING
+// ============================================================
+
+let cachedPlanMapping: Map<number, { planData: any, provider: string, network: string }> = new Map();
+let cachedPlansMessage: string = "";
+let planMappingCacheTime: number = 0;
+const CACHE_TTL = 300000; // 5 minutes
 
 // ============================================================
 // HELPER: Generate Short Validation Token (for link)
@@ -1227,104 +1236,73 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 // ============================================================
 
 function getFallbackPlans(): string {
-  return `Available Data Plans:
-
-MTN:
-  1. 1GB - NGN 300 (30 days)
-  2. 2GB - NGN 500 (30 days)
-  3. 5GB - NGN 1,200 (30 days)
+  // Clear mapping for fallback
+  cachedPlanMapping = new Map();
   
-GLO:
-  4. 1GB - NGN 250 (30 days)
-  5. 2GB - NGN 450 (30 days)
-  6. 3GB - NGN 600 (30 days)
-
-AIRTEL:
-  7. 1GB - NGN 300 (30 days)
-  8. 2GB - NGN 500 (30 days)
-  9. 3GB - NGN 700 (30 days)
-
-9MOBILE:
-  10. 1GB - NGN 280 (30 days)
-  11. 2GB - NGN 480 (30 days)
-  12. 5GB - NGN 1,000 (30 days)
-  13. 10GB - NGN 1,800 (30 days)
-
-To buy: DATA [index] or DATA [plan name]
-Example: DATA 1 or DATA 1GB
-For another number: DATA 08012345678 1`;
-}
-
-// ============================================================
-// RESOLVE DATA PLAN INDEX TO ACTUAL PLAN NAME
-// ============================================================
-
-async function resolveDataPlanIndex(network: string, indexQuery: string): Promise<string | null> {
-  try {
-    const indexNum = parseInt(indexQuery);
-    if (isNaN(indexNum) || indexNum < 1) return null;
-    
-    const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&network=${mapNetwork(network)}`;
-    
-    console.log(`[WhatsApp] Resolving index ${indexNum} from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
+  // Build fallback mapping
+  const fallbackPlans = [
+    { index: 1, data: "1GB", price: 300, validity: "30 days", provider: "MTN" },
+    { index: 2, data: "2GB", price: 500, validity: "30 days", provider: "MTN" },
+    { index: 3, data: "5GB", price: 1200, validity: "30 days", provider: "MTN" },
+    { index: 4, data: "1GB", price: 250, validity: "30 days", provider: "GLO" },
+    { index: 5, data: "2GB", price: 450, validity: "30 days", provider: "GLO" },
+    { index: 6, data: "3GB", price: 600, validity: "30 days", provider: "GLO" },
+    { index: 7, data: "1GB", price: 300, validity: "30 days", provider: "AIRTEL" },
+    { index: 8, data: "2GB", price: 500, validity: "30 days", provider: "AIRTEL" },
+    { index: 9, data: "3GB", price: 700, validity: "30 days", provider: "AIRTEL" },
+    { index: 10, data: "1GB", price: 280, validity: "30 days", provider: "9MOBILE" },
+    { index: 11, data: "2GB", price: 480, validity: "30 days", provider: "9MOBILE" },
+    { index: 12, data: "5GB", price: 1000, validity: "30 days", provider: "9MOBILE" },
+    { index: 13, data: "10GB", price: 1800, validity: "30 days", provider: "9MOBILE" },
+  ];
+  
+  // Store in mapping
+  fallbackPlans.forEach(plan => {
+    cachedPlanMapping.set(plan.index, {
+      planData: {
+        data: plan.data,
+        price: plan.price,
+        validity: plan.validity,
+        planCode: plan.data,
+        amountMB: plan.data.includes('GB') ? parseInt(plan.data) * 1024 : parseInt(plan.data),
       },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
+      provider: plan.provider,
+      network: plan.provider,
     });
-
-    if (!response.ok) {
-      console.warn(`[WhatsApp] Failed to fetch plans for index resolution`);
-      return null;
+  });
+  
+  cachedPlansMessage = `Available Data Plans:\n\n`;
+  let currentProvider = "";
+  
+  fallbackPlans.forEach(plan => {
+    if (plan.provider !== currentProvider) {
+      currentProvider = plan.provider;
+      cachedPlansMessage += `\n${plan.provider}:\n`;
     }
-
-    const result = await response.json();
-    
-    if (!result.success || !result.data?.plans) {
-      return null;
-    }
-
-    const { plans } = result.data;
-    let globalIndex = 1;
-    
-    for (const provider of plans) {
-      if (provider.name.toLowerCase() !== network.toLowerCase()) continue;
-      
-      for (const category of provider.categories || []) {
-        for (const plan of category.plans || []) {
-          if (plan.price && plan.price > 0) {
-            if (globalIndex === indexNum) {
-              // Found the plan - return its data/name
-              console.log(`[WhatsApp] Resolved index ${indexNum} to plan: ${plan.data}`);
-              return plan.data || plan.planCode || null;
-            }
-            globalIndex++;
-          }
-        }
-      }
-    }
-    
-    console.log(`[WhatsApp] Index ${indexNum} not found in plans`);
-    return null;
-    
-  } catch (error) {
-    console.error('[WhatsApp] Error resolving data plan index:', error);
-    return null;
-  }
+    cachedPlansMessage += `  ${plan.index}. ${plan.data} - NGN ${plan.price} (${plan.validity})\n`;
+  });
+  
+  cachedPlansMessage += `\nTo buy: DATA [index]\n`;
+  cachedPlansMessage += `Example: DATA 1\n`;
+  cachedPlansMessage += `For another number: DATA 08012345678 1`;
+  
+  planMappingCacheTime = Date.now();
+  
+  return cachedPlansMessage;
 }
 
 // ============================================================
-// GET AVAILABLE PLANS FOR WHATSAPP
+// GET AVAILABLE PLANS FOR WHATSAPP WITH INDEX MAPPING
 // ============================================================
-
 
 async function getAvailablePlansForWhatsApp(): Promise<string> {
   try {
+    // Check cache
+    if (Date.now() - planMappingCacheTime < CACHE_TTL && cachedPlanMapping.size > 0) {
+      console.log(`[WhatsApp] Using cached plans (${cachedPlanMapping.size} plans)`);
+      return cachedPlansMessage;
+    }
+    
     const apiUrl = getApiUrl();
     const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&whatsapp=true`;
     
@@ -1351,6 +1329,9 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
       let message = "Available Data Plans:\n\n";
       let globalIndex = 1;
       
+      // Clear and rebuild the plan mapping
+      cachedPlanMapping = new Map();
+      
       for (const provider of plans) {
         const networkName = provider.name;
         message += `${networkName}:\n`;
@@ -1361,6 +1342,14 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
             if (plan.price && plan.price > 0) {
               const priceDisplay = `NGN ${Number(plan.price).toFixed(0)}`;
               const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
+              
+              // Store the plan with its index
+              cachedPlanMapping.set(globalIndex, {
+                planData: plan,
+                provider: provider.name,
+                network: networkName,
+              });
+              
               allPlans.push({
                 data: plan.data,
                 price: priceDisplay,
@@ -1392,11 +1381,15 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
         message += '\n';
       }
       
-      message += `To buy: DATA [index] or DATA [plan name]\n`;
-      message += `Example: DATA 1 or DATA 1GB\n`;
-      message += `For another number: DATA 08012345678 1`;
+      // Store the message for reuse
+      cachedPlansMessage = message + `\nTo buy: DATA [index]\n`;
+      cachedPlansMessage += `Example: DATA 1\n`;
+      cachedPlansMessage += `For another number: DATA 08012345678 1`;
       
-      return message;
+      planMappingCacheTime = Date.now();
+      console.log(`[WhatsApp] Cached ${cachedPlanMapping.size} plans`);
+      
+      return cachedPlansMessage;
     }
 
     console.warn(`[WhatsApp] No WhatsApp plans from API, using fallback`);
@@ -1409,7 +1402,29 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
 }
 
 // ============================================================
-// FIND DATA PLAN FROM VENDOR API
+// GET PLAN BY INDEX FROM CACHED MAPPING
+// ============================================================
+
+async function getPlanByIndex(indexNumber: number): Promise<{ planData: any, provider: string, network: string } | null> {
+  // If mapping is empty or expired, fetch plans first
+  if (cachedPlanMapping.size === 0 || Date.now() - planMappingCacheTime >= CACHE_TTL) {
+    console.log('[WhatsApp] No cached plans or cache expired, fetching...');
+    await getAvailablePlansForWhatsApp();
+  }
+  
+  // Get plan from mapping
+  const plan = cachedPlanMapping.get(indexNumber);
+  if (plan) {
+    console.log(`[WhatsApp] Found plan at index ${indexNumber}: ${plan.planData.data} (${plan.provider})`);
+    return plan;
+  }
+  
+  console.log(`[WhatsApp] No plan found at index ${indexNumber}`);
+  return null;
+}
+
+// ============================================================
+// FIND DATA PLAN FROM VENDOR API (Fallback for name-based search)
 // ============================================================
 
 async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
@@ -2777,33 +2792,20 @@ For your own number, use: AIRTIME 500 (no PIN needed)`;
 }
 
 // ============================================================
-// DATA PURCHASE - NO PIN (OWN NUMBER)
+// DATA PURCHASE - NO PIN (OWN NUMBER) - USING PLAN DATA DIRECTLY
 // ============================================================
 
-async function processDataPurchaseDirect(
+async function processDataPurchaseDirectWithPlan(
   user: any, 
   phoneNumber: string, 
-  planQuery: string,
+  planData: any,
+  provider: string,
   detectedNetwork: string
 ): Promise<string> {
   try {
     const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
     if (!wallet) {
       return formatErrorMessage({ message: "Wallet not found. Please contact support." });
-    }
-
-    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
-    
-    if (!planData) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `Data Plan Not Found
-
-No data plan found for ${detectedNetwork} with "${planQuery}".
-
-${availablePlans}
-
-Example: DATA 1GB
-Example: DATA 08012345678 1GB`;
     }
 
     const amount = Number(planData.price);
@@ -2850,7 +2852,7 @@ Please fund your wallet and try again.`;
         totalDebited: 0,
         phoneNumber: phoneNumber,
         network: networkEnum,
-        networkPlan: planData.planCode || planQuery,
+        networkPlan: planData.planCode || planData.data,
         status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
         metadata: {
@@ -2859,9 +2861,8 @@ Please fund your wallet and try again.`;
           timestamp: new Date().toISOString(),
           network: detectedNetwork,
           networkEnum: networkEnum,
-          planQuery: planQuery,
-          planName: planData.name,
-          dataAmount: planData.amountMB,
+          planData: planData,
+          provider: provider,
           customerId: customer.id,
           pinVerified: true,
           skipPin: true,
@@ -2875,7 +2876,7 @@ Please fund your wallet and try again.`;
       const result = await vendorService.buyData(
         {
           phoneNumber: phoneNumber,
-          planCode: planData.planCode || planQuery,
+          planCode: planData.planCode || planData.data,
           network: detectedNetwork,
           amount: amount,
         },
@@ -2889,7 +2890,7 @@ Please fund your wallet and try again.`;
           amount: amount,
           phoneNumber: phoneNumber,
           network: detectedNetwork,
-          planQuery: planQuery,
+          planQuery: planData.data,
           vendorResponse: result,
           vendorErrors: result?.vendorErrors || [],
           allVendorsFailed: result?.allVendorsFailed || false,
@@ -2967,7 +2968,7 @@ Please fund your wallet and try again.`;
       const successMessage = `Data Purchase Successful!
 
 Phone: ${phoneNumber}
-Plan: ${dataDisplay} (${planData.name || detectedNetwork})
+Plan: ${dataDisplay} (${provider})
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 ${token ? `Token: ${token}` : ''}
@@ -2985,7 +2986,7 @@ Thank you for using Bilscore!`;
         amount: amount,
         phoneNumber: phoneNumber,
         network: detectedNetwork,
-        planQuery: planQuery,
+        planQuery: planData.data,
       };
       
       await prisma.vtuTransaction.update({
@@ -3013,13 +3014,14 @@ Thank you for using Bilscore!`;
 }
 
 // ============================================================
-// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER)
+// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER) - USING PLAN DATA DIRECTLY
 // ============================================================
 
-async function processDataPurchaseWithPin(
+async function processDataPurchaseWithPinWithPlan(
   user: any, 
   phoneNumber: string, 
-  planQuery: string,
+  planData: any,
+  provider: string,
   detectedNetwork: string
 ): Promise<string> {
   try {
@@ -3033,25 +3035,12 @@ PIN [4-6 digit PIN]
 
 Example: PIN 1234
 
-For your own number, just use: DATA 1GB (no PIN needed)`;
+For your own number, just use: DATA 1 (no PIN needed)`;
     }
 
     const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
     if (!wallet) {
       return formatErrorMessage({ message: "Wallet not found. Please contact support." });
-    }
-
-    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
-    
-    if (!planData) {
-      const availablePlans = await getAvailablePlansForWhatsApp();
-      return `Data Plan Not Found
-
-No data plan found for ${detectedNetwork} with "${planQuery}".
-
-${availablePlans}
-
-Example: DATA 08012345678 1GB`;
     }
 
     const amount = Number(planData.price);
@@ -3098,7 +3087,7 @@ Please fund your wallet and try again.`;
         totalDebited: 0,
         phoneNumber: phoneNumber,
         network: networkEnum,
-        networkPlan: planData.planCode || planQuery,
+        networkPlan: planData.planCode || planData.data,
         status: TransactionStatus.PENDING,
         channel: ChannelType.WHATSAPP,
         metadata: {
@@ -3107,9 +3096,8 @@ Please fund your wallet and try again.`;
           timestamp: new Date().toISOString(),
           network: detectedNetwork,
           networkEnum: networkEnum,
-          planQuery: planQuery,
-          planName: planData.name,
-          dataAmount: planData.amountMB,
+          planData: planData,
+          provider: provider,
           customerId: customer.id,
           pinVerified: false,
           isOwnNumber: false,
@@ -3149,7 +3137,7 @@ Please fund your wallet and try again.`;
           expiresAt: validationExpiry.toISOString(),
           phoneNumber: phoneNumber,
           network: detectedNetwork,
-          planQuery: planQuery,
+          planData: planData,
         },
       },
     });
@@ -3162,7 +3150,7 @@ Please fund your wallet and try again.`;
     return `Data Purchase Requires PIN Confirmation!
 
 Phone: ${phoneNumber}
-Plan: ${dataDisplay} (${planData.name || detectedNetwork})
+Plan: ${dataDisplay} (${provider})
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
@@ -3174,7 +3162,93 @@ ${validationLink}
 This link expires in 5 minutes.
 Your PIN is secure and will not be shared via WhatsApp.
 
-For your own number, use: DATA 1GB (no PIN needed)`;
+For your own number, use: DATA 1 (no PIN needed)`;
+  } catch (error: any) {
+    console.error("[DATA] Purchase with PIN error:", error);
+    return formatErrorMessage(error);
+  }
+}
+
+// ============================================================
+// DATA PURCHASE - NO PIN (OWN NUMBER) - FALLBACK FOR NAME SEARCH
+// ============================================================
+
+async function processDataPurchaseDirect(
+  user: any, 
+  phoneNumber: string, 
+  planQuery: string,
+  detectedNetwork: string
+): Promise<string> {
+  try {
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) {
+      return formatErrorMessage({ message: "Wallet not found. Please contact support." });
+    }
+
+    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
+    
+    if (!planData) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `Data Plan Not Found
+
+No data plan found for ${detectedNetwork} with "${planQuery}".
+
+${availablePlans}
+
+Example: DATA 1
+Example: DATA 08012345678 1`;
+    }
+
+    return await processDataPurchaseDirectWithPlan(user, phoneNumber, planData, planData.provider || detectedNetwork, detectedNetwork);
+  } catch (error: any) {
+    console.error("[DATA] Purchase error:", error);
+    return formatErrorMessage(error);
+  }
+}
+
+// ============================================================
+// DATA PURCHASE - WITH PIN (EXTERNAL NUMBER) - FALLBACK FOR NAME SEARCH
+// ============================================================
+
+async function processDataPurchaseWithPin(
+  user: any, 
+  phoneNumber: string, 
+  planQuery: string,
+  detectedNetwork: string
+): Promise<string> {
+  try {
+    if (!user.pinHash) {
+      return `PIN Not Set
+
+You need to set a transaction PIN first to buy data for other numbers.
+
+To set your PIN, reply with:
+PIN [4-6 digit PIN]
+
+Example: PIN 1234
+
+For your own number, just use: DATA 1 (no PIN needed)`;
+    }
+
+    const wallet = await prisma.wallet.findUnique({ where: { userId: user.id } });
+    if (!wallet) {
+      return formatErrorMessage({ message: "Wallet not found. Please contact support." });
+    }
+
+    const planData = await findDataPlanFromVendor(detectedNetwork, planQuery);
+    
+    if (!planData) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `Data Plan Not Found
+
+No data plan found for ${detectedNetwork} with "${planQuery}".
+
+${availablePlans}
+
+Example: DATA 08012345678 1`;
+    }
+
+    return await processDataPurchaseWithPinWithPlan(user, phoneNumber, planData, planData.provider || detectedNetwork, detectedNetwork);
   } catch (error: any) {
     console.error("[DATA] Purchase with PIN error:", error);
     return formatErrorMessage(error);
@@ -4501,62 +4575,58 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
   }
 
   // ============================================================
-  // DATA - WITH CORRECT NETWORK DETECTION
+  // DATA - WITH CORRECT NETWORK DETECTION AND INDEX SUPPORT
   // ============================================================
-// In processWhatsAppCommand function - Updated DATA section
+  if (command.startsWith("DATA") || command.startsWith("DATA ")) {
+    let targetPhone: string;
+    let planQuery: string;
+    let isOwnNumber = false;
+    
+    if (parts.length === 2) {
+      targetPhone = user.phone;
+      planQuery = parts[1];
+      isOwnNumber = true;
+    } else if (parts.length >= 3) {
+      targetPhone = parts[1];
+      planQuery = parts.slice(2).join(' ');
+      const normalizedTarget = normalizePhoneNumber(targetPhone);
+      const normalizedUser = normalizePhoneNumber(user.phone);
+      isOwnNumber = normalizedTarget === normalizedUser;
+    } else {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `Buy Data
 
-if (command.startsWith("DATA") || command.startsWith("DATA ")) {
-  let targetPhone: string;
-  let planQuery: string;
-  let isOwnNumber = false;
-  
-  if (parts.length === 2) {
-    targetPhone = user.phone;
-    planQuery = parts[1];
-    isOwnNumber = true;
-  } else if (parts.length >= 3) {
-    targetPhone = parts[1];
-    planQuery = parts.slice(2).join(' ');
-    const normalizedTarget = normalizePhoneNumber(targetPhone);
-    const normalizedUser = normalizePhoneNumber(user.phone);
-    isOwnNumber = normalizedTarget === normalizedUser;
-  } else {
-    const availablePlans = await getAvailablePlansForWhatsApp();
-    return `Buy Data
-
-DATA [index] or DATA [plan] - For YOUR number (no PIN required)
-DATA [phone] [index] or DATA [phone] [plan] - For another number (PIN required)
+DATA [index] - For YOUR number (no PIN required)
+DATA [phone] [index] - For another number (PIN required)
 
 Example: DATA 1
-Example: DATA 1GB
 Example: DATA 08012345678 1
 
 ${availablePlans}`;
-  }
-  
-  if (!planQuery) {
-    const availablePlans = await getAvailablePlansForWhatsApp();
-    return `Missing Plan
+    }
+    
+    if (!planQuery) {
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `Missing Plan Index
 
-Please specify a data plan or index.
+Please specify a data plan index.
 Example: DATA 1
-Example: DATA 1GB
 
 ${availablePlans}`;
-  }
-  
-  if (!targetPhone || targetPhone.length < 10) {
-    targetPhone = user.phone;
-    isOwnNumber = true;
-  }
-  
-  const normalizedTarget = normalizePhoneNumber(targetPhone);
-  const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
-  
-  console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}, Query: ${planQuery}`);
-  
-  if (!detectedNetwork) {
-    return `Could Not Detect Network
+    }
+    
+    if (!targetPhone || targetPhone.length < 10) {
+      targetPhone = user.phone;
+      isOwnNumber = true;
+    }
+    
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+    
+    console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}, Query: ${planQuery}`);
+    
+    if (!detectedNetwork) {
+      return `Could Not Detect Network
 
 We couldn't detect the network for ${targetPhone}.
 Please ensure the phone number is correct.
@@ -4567,31 +4637,50 @@ Supported formats:
 - 2348012345678 (without leading zero)
 
 ${await getAvailablePlansForWhatsApp()}`;
-  }
+    }
 
-  // ✅ Check if planQuery is an index number
-  const isIndex = /^\d+$/.test(planQuery);
-  let actualPlanQuery = planQuery;
-  
-  if (isIndex) {
-    console.log(`[DATA] Detected index: ${planQuery}, resolving to plan name...`);
-    const resolvedPlan = await resolveDataPlanIndex(detectedNetwork, planQuery);
-    if (resolvedPlan) {
-      actualPlanQuery = resolvedPlan;
-      console.log(`[DATA] Resolved index ${planQuery} to plan: ${actualPlanQuery}`);
+    // Check if planQuery is an index number
+    const isIndex = /^\d+$/.test(planQuery);
+    
+    if (isIndex) {
+      const indexNum = parseInt(planQuery);
+      console.log(`[DATA] Looking up index ${indexNum} from cached mapping...`);
+      
+      // Get plan from cached mapping
+      const planInfo = await getPlanByIndex(indexNum);
+      
+      if (planInfo) {
+        // Use the plan data directly from the mapping
+        const planData = planInfo.planData;
+        const provider = planInfo.provider;
+        
+        console.log(`[DATA] Found plan: ${planData.data} (${provider})`);
+        
+        // Use the plan data directly - no need to search again
+        if (isOwnNumber) {
+          return await processDataPurchaseDirectWithPlan(user, normalizedTarget, planData, provider, detectedNetwork);
+        } else {
+          return await processDataPurchaseWithPinWithPlan(user, normalizedTarget, planData, provider, detectedNetwork);
+        }
+      } else {
+        // Index not found in mapping
+        return `Invalid Plan Index
+
+No plan found with index ${indexNum}.
+
+${await getAvailablePlansForWhatsApp()}`;
+      }
     } else {
-      // If index not found, try to use it as a plan name (fallback)
-      console.log(`[DATA] Index ${planQuery} not resolved, using as plan name`);
-      actualPlanQuery = planQuery;
+      // If not an index, try to find by plan name (fallback for backward compatibility)
+      const availablePlans = await getAvailablePlansForWhatsApp();
+      return `Invalid Input
+
+Please use a plan index number.
+Example: DATA 1
+
+${availablePlans}`;
     }
   }
-
-  if (isOwnNumber) {
-    return await processDataPurchaseDirect(user, normalizedTarget, actualPlanQuery, detectedNetwork);
-  } else {
-    return await processDataPurchaseWithPin(user, normalizedTarget, actualPlanQuery, detectedNetwork);
-  }
-}
 
   // ============================================================
   // METER MANAGEMENT
@@ -5219,8 +5308,8 @@ Or try:
 BALANCE - Check your wallet
 AIRTIME [amount] - Buy airtime for YOUR number (no PIN)
 AIRTIME [phone] [amount] - Buy airtime for others (PIN required)
-DATA [plan] - Buy data for YOUR number (no PIN)
-DATA [phone] [plan] - Buy data for others (PIN required)
+DATA [index] - Buy data for YOUR number (no PIN)
+DATA [phone] [index] - Buy data for others (PIN required)
 ELECTRIC - See saved meters
 ELECTRIC [amount] - Buy electricity (your saved meter - no PIN)
 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
@@ -5251,8 +5340,8 @@ PIN [code] - Set transaction PIN
 Airtime & Data:
 AIRTIME [amount] - For YOUR number (no PIN)
 AIRTIME [phone] [amount] - For others (PIN required)
-DATA [plan] - For YOUR number (no PIN)
-DATA [phone] [plan] - For others (PIN required)
+DATA [index] - For YOUR number (no PIN)
+DATA [phone] [index] - For others (PIN required)
 
 Electricity:
 ELECTRIC - Show saved meters
