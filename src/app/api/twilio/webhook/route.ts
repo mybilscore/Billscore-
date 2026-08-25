@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH ALL IMPROVEMENTS
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH SESSION TRACKING
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -28,6 +28,21 @@ import {
 } from "~/lib/palmpay/palmpay-wallet.service";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { generateQRUrl } from "~/lib/qr-hash";
+
+// ============================================================
+// SESSION STORAGE FOR COMMAND CONTEXT
+// ============================================================
+
+// Store user's last command context
+const userSessions: Map<string, { 
+  command: string, 
+  phoneNumber: string, 
+  network: string,
+  isOwnNumber: boolean,
+  timestamp: number 
+}> = new Map();
+
+const SESSION_TIMEOUT = 300000; // 5 minutes
 
 // ============================================================
 // CACHE FOR NETWORK-SPECIFIC DATA PLANS
@@ -576,10 +591,6 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 // GET AVAILABLE PLANS FOR A SPECIFIC NETWORK WITH INDEXING
 // ============================================================
 
-// ============================================================
-// GET AVAILABLE PLANS FOR A SPECIFIC NETWORK WITH INDEXING
-// ============================================================
-
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
   try {
     const cacheKey = network.toUpperCase();
@@ -591,7 +602,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     }
     
     const apiUrl = getApiUrl();
-    // ✅ RESTORE whatsapp=true - this was the working version
+    // Use whatsapp=true to get only WhatsApp-enabled plans
     const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&whatsapp=true`;
     
     console.log(`[WhatsApp] Fetching WhatsApp plans for ${network} from: ${url}`);
@@ -653,7 +664,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
         }
       }
       
-      // Display WhatsApp-enabled plans (usually limited to 8-10)
+      // Display WhatsApp-enabled plans
       if (allPlans.length > 0) {
         allPlans.forEach(p => {
           message += `  ${p.index}. ${p.data} - ${p.price}${p.validity}\n`;
@@ -4285,11 +4296,14 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
 
   // ========== HELP ==========
   if (command === "HELP" || command === "?") {
+    // Clear any stored session
+    userSessions.delete(user.id);
     return getHelpMessage(user);
   }
 
   // ========== REGISTER ==========
   if (command.startsWith("REG") || command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
+    userSessions.delete(user.id);
     return `You are already registered with Bilscore!
 
 Registered name: ${user.fullName}
@@ -4300,6 +4314,7 @@ Type HELP to see available commands.`;
 
   // ========== BALANCE ==========
   if (command === "BALANCE" || command === "BAL" || command === "WALLET") {
+    userSessions.delete(user.id);
     const wallet = await prisma.wallet.findUnique({
       where: { userId: user.id },
     });
@@ -4325,6 +4340,7 @@ Reply with HELP for available commands.`;
 
   // ========== DATA ALL - Show pricing link ==========
   if (command === "DATA ALL") {
+    userSessions.delete(user.id);
     const pricingUrl = "https://bilscore.com/pricing";
     return `All Data Plans & Pricing
 
@@ -4342,7 +4358,7 @@ Type DATA to see available plans for your network.`;
   }
 
   // ============================================================
-  // DATA - WITH CORRECT NETWORK DETECTION AND INDEX SUPPORT
+  // DATA - WITH CORRECT NETWORK DETECTION, INDEX SUPPORT, AND SESSIONS
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -4350,9 +4366,52 @@ Type DATA to see available plans for your network.`;
     let isOwnNumber = false;
     
     // ============================================================
+    // CASE 0: Just an index number (e.g., "1")
+    // ============================================================
+    if (parts.length === 1 && /^\d+$/.test(command)) {
+      // Check if user has a recent DATA context
+      const session = userSessions.get(user.id);
+      
+      if (session && session.command === 'DATA' && (Date.now() - session.timestamp) < SESSION_TIMEOUT) {
+        // Use the stored context
+        targetPhone = session.phoneNumber;
+        planQuery = command;
+        isOwnNumber = session.isOwnNumber;
+        
+        console.log(`[DATA] Using session context: ${targetPhone}, network: ${session.network}`);
+      } else {
+        // No session, treat as "DATA" command
+        const normalizedUserPhone = normalizePhoneNumber(user.phone);
+        const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
+        
+        if (!detectedNetwork) {
+          return `Could Not Detect Your Network
+
+Please ensure your phone number is correct.
+You can also specify: DATA [phone] [index]
+
+Example: DATA 08012345678 1`;
+        }
+        
+        const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
+        return `Buy Data
+
+DATA [index] - For YOUR number (no PIN required)
+DATA [phone] - Show plans for another number
+DATA [phone] [index] - For another number (PIN required)
+
+Example: DATA 1
+Example: DATA 08012345678
+Example: DATA 08012345678 1
+
+${plans}`;
+      }
+    }
+    
+    // ============================================================
     // CASE 1: Only "DATA" - Show plans for user's network
     // ============================================================
-    if (parts.length === 1) {
+    if (parts.length === 1 && command === "DATA") {
       const normalizedUserPhone = normalizePhoneNumber(user.phone);
       const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
       
@@ -4364,6 +4423,15 @@ You can also specify: DATA [phone] [index]
 
 Example: DATA 08012345678 1`;
       }
+      
+      // Store session context
+      userSessions.set(user.id, {
+        command: 'DATA',
+        phoneNumber: user.phone,
+        network: detectedNetwork,
+        isOwnNumber: true,
+        timestamp: Date.now()
+      });
       
       const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
       return `Buy Data
@@ -4405,12 +4473,25 @@ Supported formats:
 - 2348012345678 (without leading zero)`;
         }
         
+        // Store session context
+        const normalizedUser = normalizePhoneNumber(user.phone);
+        const isOwnNumber = normalizedTarget === normalizedUser;
+        
+        userSessions.set(user.id, {
+          command: 'DATA',
+          phoneNumber: targetPhone,
+          network: detectedNetwork,
+          isOwnNumber: isOwnNumber,
+          timestamp: Date.now()
+        });
+        
         const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone);
         return `Buy Data for ${targetPhone}
 
-DATA [index] - Buy for this number (PIN required)
+DATA [index] - Buy for this number (${isOwnNumber ? 'no PIN' : 'PIN required'})
+Just type the index number to buy
 
-Example: DATA 1
+Example: 1
 
 ${plans}`;
       }
@@ -4419,6 +4500,15 @@ ${plans}`;
       targetPhone = user.phone;
       planQuery = firstParam;
       isOwnNumber = true;
+      
+      // Store session context
+      userSessions.set(user.id, {
+        command: 'DATA',
+        phoneNumber: targetPhone,
+        network: detectNetworkFromPhone(normalizePhoneNumber(targetPhone)) || 'Unknown',
+        isOwnNumber: isOwnNumber,
+        timestamp: Date.now()
+      });
     }
     
     // ============================================================
@@ -4461,20 +4551,32 @@ Supported formats:
     // If no plan query, show plans for the target network
     if (!planQuery) {
       const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone);
+      
+      // Store session context
+      userSessions.set(user.id, {
+        command: 'DATA',
+        phoneNumber: targetPhone,
+        network: detectedNetwork,
+        isOwnNumber: isOwnNumber,
+        timestamp: Date.now()
+      });
+      
       if (isOwnNumber) {
         return `Buy Data for YOUR number (${targetPhone})
 
 DATA [index] - Buy for your number (no PIN required)
+Just type the index number to buy
 
-Example: DATA 1
+Example: 1
 
 ${plans}`;
       } else {
         return `Buy Data for ${targetPhone}
 
 DATA [index] - Buy for this number (PIN required)
+Just type the index number to buy
 
-Example: DATA 1
+Example: 1
 
 ${plans}`;
       }
@@ -4497,6 +4599,9 @@ ${plans}`;
         
         console.log(`[DATA] Found plan: ${planData.data} (${provider}) for ${detectedNetwork}`);
         
+        // Clear session after purchase
+        userSessions.delete(user.id);
+        
         // Use the plan data directly - no need to search again
         if (isOwnNumber) {
           return await processDataPurchaseDirectWithPlan(user, normalizedTarget, planData, provider, detectedNetwork);
@@ -4518,7 +4623,7 @@ ${plans}`;
       return `Invalid Input
 
 Please use a plan index number.
-Example: DATA 1
+Example: 1
 
 ${plans}`;
     }
@@ -4529,6 +4634,7 @@ ${plans}`;
   // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
+    userSessions.delete(user.id);
     const addParts = body.split(" ").filter(p => p.length > 0);
     if (addParts.length < 4) {
       const discosList = await getAvailableDiscosForWhatsApp();
@@ -4551,10 +4657,12 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
   }
 
   if (command === "METERS" || command === "LIST METERS") {
+    userSessions.delete(user.id);
     return await listMeters(user.id);
   }
 
   if (command.startsWith("DELETEMETER") || command.startsWith("DELETE METER")) {
+    userSessions.delete(user.id);
     const deleteParts = body.split(" ").filter(p => p.length > 0);
     if (deleteParts.length < 2) {
       return `Missing Meter Number
@@ -4567,6 +4675,7 @@ Example: DELETEMETER 1234567890`;
   }
 
   if (command.startsWith("SETDEFAULTMETER") || command.startsWith("SET DEFAULT METER")) {
+    userSessions.delete(user.id);
     const defaultParts = body.split(" ").filter(p => p.length > 0);
     if (defaultParts.length < 2) {
       return `Missing Selection
@@ -4582,6 +4691,7 @@ Or: SETDEFAULTMETER 1234567890`;
   // ========== DECODER MANAGEMENT ==========
   
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
+    userSessions.delete(user.id);
     const addParts = body.split(" ").filter(p => p.length > 0);
     if (addParts.length < 4) {
       return `Add Decoder
@@ -4601,10 +4711,12 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
   }
 
   if (command === "DECODERS" || command === "LIST DECODERS") {
+    userSessions.delete(user.id);
     return await listDecoders(user.id);
   }
 
   if (command.startsWith("DELETEDECODER") || command.startsWith("DELETE DECODER")) {
+    userSessions.delete(user.id);
     const deleteParts = body.split(" ").filter(p => p.length > 0);
     if (deleteParts.length < 2) {
       return `Missing Decoder Number
@@ -4617,6 +4729,7 @@ Example: DELETEDECODER 1234567890`;
   }
 
   if (command.startsWith("SETDEFAULTDECODER") || command.startsWith("SET DEFAULT DECODER")) {
+    userSessions.delete(user.id);
     const defaultParts = body.split(" ").filter(p => p.length > 0);
     if (defaultParts.length < 2) {
       return `Missing Selection
@@ -4635,6 +4748,7 @@ Or: SETDEFAULTDECODER 1234567890`;
   
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
       command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
+    userSessions.delete(user.id);
     
     if (parts.length === 1) {
       const meters = await prisma.savedMeter.findMany({
@@ -4854,6 +4968,7 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
 
   // ========== DISCOS ==========
   if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
+    userSessions.delete(user.id);
     const discosList = await getAvailableDiscosForWhatsApp();
     return `Available DisCos:
 
@@ -4867,6 +4982,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
   // CABLE - NO PIN FOR OWN DECODERS
   // ============================================================
   if (command === "CABLE" || command === "TV") {
+    userSessions.delete(user.id);
     const decoders = await prisma.savedDecoder.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -4905,6 +5021,7 @@ After adding, you can buy cable by just typing CABLE!`;
   }
 
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
+    userSessions.delete(user.id);
     const cableParts = body.split(" ").filter(p => p.length > 0);
     
     if (cableParts.length >= 3) {
@@ -4952,6 +5069,7 @@ Example: PACKAGES DSTV`;
 
   // ========== PACKAGES ==========
   if (command.startsWith("PACKAGES") || command === "PACKAGE") {
+    userSessions.delete(user.id);
     const packageParts = body.split(" ").filter(p => p.length > 0);
     const provider = packageParts.length > 1 ? packageParts[1] : "DSTV";
     const packagesList = await getAvailablePackagesForWhatsApp(provider);
@@ -4960,6 +5078,7 @@ Example: PACKAGES DSTV`;
 
   // ========== SUBSCRIPTIONS ==========
   if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
+    userSessions.delete(user.id);
     const scheduleParts = body.split(" ").filter(p => p.length > 0);
     
     if (scheduleParts.length < 4) {
@@ -5024,10 +5143,12 @@ Please choose a number from the list.`;
   }
 
   if (command === "SUBSCRIPTIONS" || command === "SCHEDULES") {
+    userSessions.delete(user.id);
     return await getActiveSubscriptions(user.id);
   }
 
   if (command.startsWith("CANCEL") || command.startsWith("UNSUBSCRIBE")) {
+    userSessions.delete(user.id);
     const cancelParts = body.split(" ").filter(p => p.length > 0);
     if (cancelParts.length < 2) {
       return `Missing Subscription ID
@@ -5047,6 +5168,7 @@ To see your active subscriptions: SUBSCRIPTIONS`;
   if (command.startsWith("EDU") || command === "EDUCATION" || 
       command.startsWith("WAEC") || command.startsWith("JAMB") || 
       command.startsWith("NECO") || command === "WAEC-RESULT") {
+    userSessions.delete(user.id);
     
     const eduParts = body.split(" ").filter(p => p.length > 0);
     const cmd = eduParts[0].toUpperCase();
@@ -5111,11 +5233,13 @@ Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
 
   // ========== TRANSACTIONS ==========
   if (command === "TRANSACTIONS" || command === "TXNS" || command === "HISTORY") {
+    userSessions.delete(user.id);
     return await getTransactionHistory(user.id);
   }
 
   // ========== REFERRAL ==========
   if (command === "REFERRAL" || command === "REF") {
+    userSessions.delete(user.id);
     const referralCode = user.referralCode || "N/A";
     const link = `${getAppUrl()}/auth?ref=${referralCode}`;
     const count = await prisma.referral.count({
@@ -5136,6 +5260,7 @@ Copy this link and share with friends to earn rewards!`;
 
   // ========== PIN ==========
   if (command === "PIN" || command.startsWith("PIN ")) {
+    userSessions.delete(user.id);
     return await handlePinCommand(user, parts);
   }
 
