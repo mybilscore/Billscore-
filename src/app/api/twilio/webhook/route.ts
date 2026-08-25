@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH COMPREHENSIVE ERROR HANDLING
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED VERSION WITH ALL EMOJIS REMOVED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -72,7 +72,6 @@ async function generateMeterQRCode(userId: string, meterNumber: string, disco: s
 }
 
 function generateRandomPin(): string {
-  // Generate a random 4-digit number (1000-9999)
   const pin = Math.floor(1000 + Math.random() * 9000);
   return pin.toString();
 }
@@ -132,53 +131,42 @@ function getApiUrl(): string {
 }
 
 // ============================================================
-// ✅ FIXED: NETWORK DETECTION - Complete Nigerian prefixes
+// NETWORK DETECTION - Complete Nigerian prefixes
 // ============================================================
 
 function detectNetworkFromPhone(phoneNumber: string): string | null {
   if (!phoneNumber) return null;
   
-  // Remove all non-digit characters
   let cleanNumber = phoneNumber.replace(/\D/g, "");
   
   console.log(`[Network Detection] Original: ${phoneNumber}, Cleaned: ${cleanNumber}`);
   
-  // Remove country code if present (234)
   if (cleanNumber.startsWith("234")) {
     cleanNumber = cleanNumber.substring(3);
   }
   
-  // ✅ IMPORTANT: Keep the leading zero for prefix detection
   if (!cleanNumber.startsWith("0")) {
     if (cleanNumber.length >= 10) {
       cleanNumber = '0' + cleanNumber;
     }
   }
   
-  // Ensure we have at least 11 digits for detection (with leading zero)
   if (cleanNumber.length < 11) {
     console.warn(`[Network Detection] Phone number too short: ${cleanNumber}`);
     return null;
   }
   
-  // Get the relevant digits for detection (with leading zero preserved)
   const firstFour = cleanNumber.substring(0, 4);
   const firstFive = cleanNumber.substring(0, 5);
   const firstThree = cleanNumber.substring(0, 3);
   
   console.log(`[Network Detection] First 3: ${firstThree}, First 4: ${firstFour}, First 5: ${firstFive}`);
   
-  // ============================================================
-  // Special: Check first 5 digits for Visafone legacy prefixes
-  // ============================================================
   if (firstFive === "07025" || firstFive === "07026") {
     console.log(`[Network Detection] Detected MTN (Visafone) from prefix: ${firstFive}`);
     return "MTN";
   }
   
-  // ============================================================
-  // MTN - Complete list of prefixes
-  // ============================================================
   const mtnPrefixes = [
     '0701', '0703', '0704', '0706', '0801', '0803', '0804', '0806',
     '0810', '0813', '0814', '0816', '0903', '0906', '0913', '0916'
@@ -188,9 +176,6 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return "MTN";
   }
   
-  // ============================================================
-  // AIRTEL - Check first 4 digits
-  // ============================================================
   const airtelPrefixes = [
     '0701', '0708', '0802', '0808', '0812', '0901', '0902', '0904',
     '0907', '0911', '0912'
@@ -200,9 +185,6 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return "AIRTEL";
   }
   
-  // ============================================================
-  // GLO - Check first 4 digits
-  // ============================================================
   const gloPrefixes = [
     '0705', '0805', '0807', '0811', '0815', '0905', '0915'
   ];
@@ -211,9 +193,6 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return "GLO";
   }
   
-  // ============================================================
-  // 9MOBILE (T2) - Check first 4 digits
-  // ============================================================
   const nineMobilePrefixes = [
     '0809', '0817', '0818', '0908', '0909'
   ];
@@ -222,9 +201,6 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
     return "9MOBILE";
   }
   
-  // ============================================================
-  // Fallback: Check first 3 digits for older/ambiguous prefixes
-  // ============================================================
   if (firstThree === "070" || firstThree === "080" || firstThree === "081" ||
       firstThree === "090" || firstThree === "091") {
     console.log(`[Network Detection] Defaulting to MTN from prefix: ${firstThree}`);
@@ -236,23 +212,20 @@ function detectNetworkFromPhone(phoneNumber: string): string | null {
 }
 
 // ============================================================
-// ✅ FIXED: NORMALIZE PHONE NUMBER - Keep leading zero
+// NORMALIZE PHONE NUMBER - Keep leading zero
 // ============================================================
 
 function normalizePhoneNumber(phoneNumber: string): string {
   if (!phoneNumber) return "";
   
-  // Remove all non-digit characters
   let clean = phoneNumber.replace(/\D/g, '');
   
   console.log(`[Normalize] Original: ${phoneNumber}, Cleaned: ${clean}`);
   
-  // Remove country code if present (234)
   if (clean.startsWith('234')) {
     clean = clean.substring(3);
   }
   
-  // ✅ Ensure we have a leading zero (for 11-digit format)
   if (!clean.startsWith('0')) {
     if (clean.length === 10) {
       clean = '0' + clean;
@@ -263,7 +236,6 @@ function normalizePhoneNumber(phoneNumber: string): string {
     }
   }
   
-  // Ensure we have exactly 11 digits with leading zero
   if (clean.length > 11) {
     clean = clean.substring(0, 11);
   }
@@ -273,28 +245,21 @@ function normalizePhoneNumber(phoneNumber: string): string {
 }
 
 // ============================================================
-// ✅ COMPLETE ERROR FORMATTING - All possible errors
+// ERROR FORMATTING
 // ============================================================
 
 function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, accountName?: string }): string {
-  // ============================================================
-  // STEP 1: Extract all possible error details
-  // ============================================================
-  
   let errorMessage = '';
   let errorCode = '';
   let errorDetails: any = {};
   
-  // Extract from various error sources
   if (typeof error === 'string') {
     errorMessage = error;
   } else if (error) {
-    // Standard error properties
     errorMessage = error?.message || error?.error || error?.response_description || error?.statusText || '';
     errorCode = error?.code || error?.status || error?.response_code || '';
     errorDetails = error?.details || error?.data || error?.content || error?.metadata || {};
     
-    // Vendor response
     if (error?.vendorResponse) {
       const vResp = error.vendorResponse;
       errorMessage = vResp?.response_description || vResp?.message || errorMessage;
@@ -302,7 +267,6 @@ function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, 
       errorDetails = vResp?.content || vResp?.data || errorDetails;
     }
     
-    // Vendor errors array
     if (error?.vendorErrors && Array.isArray(error.vendorErrors) && error.vendorErrors.length > 0) {
       const lastError = error.vendorErrors[error.vendorErrors.length - 1];
       if (lastError) {
@@ -312,12 +276,10 @@ function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, 
       }
     }
     
-    // Prisma errors
     if (error?.meta) {
       errorDetails = { ...errorDetails, ...error.meta };
     }
     
-    // HTTP errors
     if (error?.response) {
       const resp = error.response;
       errorMessage = resp?.statusText || resp?.data?.message || errorMessage;
@@ -325,62 +287,47 @@ function formatErrorMessage(error: any, accountInfo?: { accountNumber?: string, 
     }
   }
   
-  // If no message found, use a default
   if (!errorMessage || errorMessage === '') {
     errorMessage = 'An unknown error occurred';
   }
   
-  // Clean up the message
   errorMessage = errorMessage.replace(/^Error:\s*/, '').trim();
-  
-  console.log(`[Error Format] Message: ${errorMessage}, Code: ${errorCode}`);
-  console.log(`[Error Format] Details:`, JSON.stringify(errorDetails, null, 2));
-  
-  // ============================================================
-  // STEP 2: Check environment (sandbox/production)
-  // ============================================================
   
   const isSandbox = process.env.NODE_ENV !== 'production' || 
                     process.env.VTPASS_ENVIRONMENT === 'sandbox' ||
                     process.env.SANDBOX_MODE === 'true' ||
                     process.env.NODE_ENV === 'development';
   
-  // ============================================================
-  // STEP 3: Build user-friendly error messages
-  // ============================================================
-  
-  // --- VTPASS Specific Error Codes ---
-  
   if (errorCode === '000' || errorMessage.includes('success') || errorMessage.includes('Successful')) {
-    return `✅ Transaction successful! ${errorMessage}`;
+    return `SUCCESS: Transaction successful! ${errorMessage}`;
   }
   
   if (errorCode === '016' || errorMessage.includes('016') || 
       errorMessage.toUpperCase().includes('TRANSACTION FAILED') ||
       errorMessage.toUpperCase().includes('FAILED')) {
     if (isSandbox) {
-      return `⚠️ SANDBOX MODE: Transaction simulation failed.
+      return `SANDBOX MODE: Transaction simulation failed.
 
 Error: ${errorMessage}
 Code: ${errorCode}
 
-💡 This is expected in test mode.
+This is expected in test mode.
 Your wallet balance was NOT debited.
 
-💡 Try buying airtime for your own number:
+Try buying airtime for your own number:
 AIRTIME 100
 
 For production, this would be a real transaction.`;
     }
-    return `❌ Transaction Failed
+    return `Transaction Failed
 
 ${errorMessage}
 
 Possible reasons:
-• Insufficient vendor balance
-• Invalid phone number or meter number
-• Network issues with the service provider
-• Service temporarily unavailable
+- Insufficient vendor balance
+- Invalid phone number or meter number
+- Network issues with the service provider
+- Service temporarily unavailable
 
 Please try again or contact support.
 Reference: ${errorCode}`;
@@ -388,7 +335,7 @@ Reference: ${errorCode}`;
   
   if (errorCode === '015' || errorMessage.toUpperCase().includes('DUPLICATE') || 
       errorMessage.toUpperCase().includes('ALREADY PROCESSED')) {
-    return `⚠️ Duplicate Transaction Detected
+    return `Duplicate Transaction Detected
 
 This transaction appears to have been processed already.
 Please wait a moment and try again.
@@ -400,7 +347,7 @@ Reference: ${errorCode}`;
   if (errorCode === '009' || errorMessage.toUpperCase().includes('INSUFFICIENT') || 
       errorMessage.toUpperCase().includes('INSUFFICIENT BALANCE')) {
     const accountInfoStr = accountInfo?.accountNumber ? `\nYour Account: ${accountInfo.accountNumber}` : '';
-    return `❌ Insufficient Balance
+    return `Insufficient Balance
 
 The service provider has insufficient balance to complete this transaction.
 ${accountInfoStr}
@@ -411,7 +358,7 @@ Reference: ${errorCode}`;
   
   if (errorCode === '012' || errorMessage.toUpperCase().includes('UNAVAILABLE') || 
       errorMessage.toUpperCase().includes('SERVICE UNAVAILABLE')) {
-    return `⚠️ Service Unavailable
+    return `Service Unavailable
 
 The service is currently unavailable.
 Please try again in a few minutes.
@@ -421,7 +368,7 @@ Reference: ${errorCode}`;
   
   if (errorCode === '013' || errorMessage.toUpperCase().includes('INVALID PHONE') || 
       errorMessage.toUpperCase().includes('INVALID PHONE NUMBER')) {
-    return `❌ Invalid Phone Number
+    return `Invalid Phone Number
 
 The phone number you entered is invalid.
 Please check and try again.
@@ -432,66 +379,29 @@ Example: AIRTIME 08012345678 500
 Reference: ${errorCode}`;
   }
   
-  if (errorCode === '014' || errorMessage.toUpperCase().includes('INVALID AMOUNT') || 
-      errorMessage.toUpperCase().includes('AMOUNT')) {
-    return `❌ Invalid Amount
-
-The amount you entered is invalid.
-Please check and try again.
-
-Airtime: NGN 50 - NGN 50,000
-Data: Check available plans with PLANS
-Electricity: Minimum NGN 1,000
-
-Reference: ${errorCode}`;
-  }
-  
-  if (errorCode === '017' || errorMessage.toUpperCase().includes('INVALID SERVICE') || 
-      errorMessage.toUpperCase().includes('SERVICE NOT FOUND')) {
-    return `❌ Invalid Service
-
-The service you requested is not available.
-Please check your request and try again.
-
-Available services:
-• AIRTIME [amount] - Buy airtime
-• DATA [plan] - Buy data
-• ELECTRIC [meter] [disco] [amount] - Buy electricity
-• CABLE [index] [package] - Cable TV subscription
-
-Reference: ${errorCode}`;
-  }
-  
-  // --- All Vendors Failed ---
-  
   if (errorMessage.toLowerCase().includes('all vendors failed') || 
       errorMessage.toLowerCase().includes('all providers failed') ||
       errorMessage.toLowerCase().includes('no vendor available')) {
     if (isSandbox) {
-      return `⚠️ SANDBOX MODE: All Service Providers Failed
+      return `SANDBOX MODE: All Service Providers Failed
 
 All available vendors failed to process this transaction.
 This is expected in test mode.
 
-💡 Vendors in sandbox:
-• VTPASS (simulation mode)
-• BILAL_SADA (simulation mode)
-• LEGITDATAWAY (simulation mode)
+Vendors in sandbox:
+- VTPASS (simulation mode)
+- BILAL_SADA (simulation mode)
+- LEGITDATAWAY (simulation mode)
 
 Your wallet was NOT debited.
 Try: AIRTIME 100 (for your own number)
 
 Error: ${errorMessage}`;
     }
-    return `❌ All Service Providers Unavailable
+    return `All Service Providers Unavailable
 
 None of our service providers could process your request.
 This is a temporary issue.
-
-Possible reasons:
-• All vendors are experiencing issues
-• Network connectivity problems
-• System maintenance
 
 Please try again in a few minutes.
 Your wallet balance was not debited.
@@ -499,435 +409,21 @@ Your wallet balance was not debited.
 If this persists, contact support.`;
   }
   
-  // --- Vendor Doesn't Support Service ---
-  
-  if (errorMessage.toLowerCase().includes('does not support') || 
-      errorMessage.toLowerCase().includes('not support') ||
-      errorMessage.toLowerCase().includes('unsupported')) {
-    if (isSandbox) {
-      return `⚠️ SANDBOX MODE: Service Not Supported
-
-${errorMessage}
-
-💡 This vendor doesn't support this service in sandbox mode.
-The system tried other vendors but they may also be unavailable.
-
-Try: AIRTIME 100 (for your own number)`;
-    }
-    return `⚠️ Service Not Supported
-
-The service provider doesn't support this type of transaction.
-Please try a different service or contact support.
-
-Reference: ${errorCode}`;
-  }
-  
-  // --- Network Errors ---
-  
-  if (errorMessage.toLowerCase().includes('econnrefused') || 
-      errorMessage.toLowerCase().includes('enotfound') || 
-      errorMessage.toLowerCase().includes('etimedout') || 
-      errorMessage.toLowerCase().includes('network') ||
-      errorMessage.toLowerCase().includes('connection') ||
-      errorMessage.toLowerCase().includes('timeout') ||
-      errorMessage.toLowerCase().includes('fetch')) {
-    return `⚠️ Network Connection Issue
-
-We're having trouble connecting to the service provider.
-Please check your internet connection and try again.
-
-If the problem persists, try again in a few minutes.
-Your wallet was not debited.
-
-Reference: ${errorCode || 'Network Error'}`;
-  }
-  
-  // --- Timeout Errors ---
-  
-  if (errorMessage.toLowerCase().includes('timeout') || 
-      errorMessage.toLowerCase().includes('timed out')) {
-    return `⏱️ Request Timeout
-
-The service provider is taking too long to respond.
-Please try again in a few minutes.
-
-Your wallet was not debited.
-Reference: ${errorCode || 'Timeout'}`;
-  }
-  
-  // --- Database Errors ---
-  
-  if (errorMessage.toLowerCase().includes('database') || 
-      errorMessage.toLowerCase().includes('prisma') ||
-      errorMessage.toLowerCase().includes('db') ||
-      errorMessage.toLowerCase().includes('sequelize')) {
-    return `⚠️ System Busy
-
-Our system is currently processing many requests.
-Please try again in a moment.
-
-Your transaction is safe and your wallet was not debited.
-Reference: ${errorCode || 'DB Error'}`;
-  }
-  
-  // --- Authentication Errors ---
-  
-  if (errorMessage.toLowerCase().includes('auth') || 
-      errorMessage.toLowerCase().includes('unauthorized') ||
-      errorMessage.toLowerCase().includes('forbidden') ||
-      errorMessage.toLowerCase().includes('permission')) {
-    return `❌ Authentication Error
-
-There was a problem with your account authentication.
-Please try logging out and logging back in.
-
-If this persists, contact support.
-Reference: ${errorCode || 'Auth Error'}`;
-  }
-  
-  // --- Wallet Errors ---
-  
-  if (errorMessage.toLowerCase().includes('wallet not found') || 
-      errorMessage.toLowerCase().includes('no wallet')) {
-    return `❌ Wallet Not Found
-
-We couldn't find your wallet.
-Please contact support to resolve this issue.
-
-Reference: ${errorCode || 'Wallet Error'}`;
-  }
-  
-  if (errorMessage.toLowerCase().includes('insufficient balance') || 
-      errorMessage.toLowerCase().includes('not enough balance') ||
-      errorMessage.toLowerCase().includes('low balance')) {
-    const accountInfoStr = accountInfo?.accountNumber ? `\nAccount: ${accountInfo.accountNumber}` : '';
-    return `❌ Insufficient Balance
-
-You don't have enough balance in your wallet.
-${accountInfoStr}
-
-Please fund your wallet and try again.
-Check your balance with: BALANCE
-
-Reference: ${errorCode || 'Balance Error'}`;
-  }
-  
-  // --- Phone Number Errors ---
-  
-  if (errorMessage.toLowerCase().includes('phone') || 
-      errorMessage.toLowerCase().includes('number') ||
-      errorMessage.toLowerCase().includes('invalid number')) {
-    return `❌ Invalid Phone Number
-
-The phone number you entered is invalid.
-Please check and try again.
-
-Supported formats:
-• 08012345678 (11 digits with leading zero)
-• +2348012345678 (with country code)
-• 2348012345678 (without leading zero)
-
-Example: AIRTIME 08012345678 500
-
-Reference: ${errorCode || 'Phone Error'}`;
-  }
-  
-  // --- Meter Errors ---
-  
-  if (errorMessage.toLowerCase().includes('meter')) {
-    if (errorMessage.toLowerCase().includes('invalid') || 
-        errorMessage.toLowerCase().includes('incorrect')) {
-      return `❌ Invalid Meter Number
-
-The meter number you entered is invalid.
-Please check and try again.
-
-Format: 11-digit meter number
-Example: ELECTRIC 12345678901 ABUJA 5000
-
-Reference: ${errorCode || 'Meter Error'}`;
-    }
-    if (errorMessage.toLowerCase().includes('not found') || 
-        errorMessage.toLowerCase().includes('does not exist')) {
-      return `❌ Meter Not Found
-
-We couldn't find this meter in the system.
-Please verify the meter number and try again.
-
-If you're sure the number is correct, contact support.
-Reference: ${errorCode || 'Meter Error'}`;
-    }
-    if (errorMessage.toLowerCase().includes('disco') || 
-        errorMessage.toLowerCase().includes('distribution')) {
-      return `❌ Invalid DisCo
-
-The Distribution Company (DisCo) you entered is invalid.
-Please check and try again.
-
-Available DisCos:
-IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, BENIN, ENUGU, JOS, PORTHARCOURT
-
-Example: ELECTRIC 12345678901 ABUJA 5000
-
-Reference: ${errorCode || 'DisCo Error'}`;
-    }
-    return `❌ Meter Verification Failed
-
-We couldn't verify the meter number.
-Please check the number and try again.
-
-Reference: ${errorCode || 'Meter Error'}`;
-  }
-  
-  // --- Decoder Errors ---
-  
-  if (errorMessage.toLowerCase().includes('decoder') || 
-      errorMessage.toLowerCase().includes('smart card')) {
-    if (errorMessage.toLowerCase().includes('invalid') || 
-        errorMessage.toLowerCase().includes('incorrect')) {
-      return `❌ Invalid Decoder Number
-
-The decoder number you entered is invalid.
-Please check and try again.
-
-Format: Smart card number (10-12 digits)
-Example: CABLE 1234567890 PREMIUM
-
-Reference: ${errorCode || 'Decoder Error'}`;
-    }
-    if (errorMessage.toLowerCase().includes('not found') || 
-        errorMessage.toLowerCase().includes('does not exist')) {
-      return `❌ Decoder Not Found
-
-We couldn't find this decoder in the system.
-Please verify the smart card number and try again.
-
-Reference: ${errorCode || 'Decoder Error'}`;
-    }
-    if (errorMessage.toLowerCase().includes('provider') || 
-        errorMessage.toLowerCase().includes('package')) {
-      return `❌ Invalid Provider or Package
-
-The cable provider or package you selected is invalid.
-Please check and try again.
-
-Available providers: DSTV, GOTV, STARTIMES
-To see packages: PACKAGES [provider]
-
-Reference: ${errorCode || 'Cable Error'}`;
-    }
-    return `❌ Decoder Verification Failed
-
-We couldn't verify the decoder.
-Please check the smart card number and try again.
-
-Reference: ${errorCode || 'Decoder Error'}`;
-  }
-  
-  // --- Data Plan Errors ---
-  
-  if (errorMessage.toLowerCase().includes('plan') || 
-      errorMessage.toLowerCase().includes('data')) {
-    if (errorMessage.toLowerCase().includes('invalid') || 
-        errorMessage.toLowerCase().includes('not found')) {
-      return `❌ Invalid Data Plan
-
-The data plan you selected is not available.
-Please check available plans with: PLANS
-
-Example: DATA 1GB
-Example: DATA 08012345678 1GB
-
-Reference: ${errorCode || 'Data Error'}`;
-    }
-    return `❌ Data Plan Error
-
-We couldn't process your data purchase.
-Please check the plan and try again.
-
-To see available plans: PLANS
-Reference: ${errorCode || 'Data Error'}`;
-  }
-  
-  // --- Airtime Specific ---
-  
-  if (errorMessage.toLowerCase().includes('airtime')) {
-    return `❌ Airtime Purchase Failed
-
-We couldn't complete your airtime purchase.
-Please check the phone number and amount and try again.
-
-Airtime: NGN 50 - NGN 50,000
-Example: AIRTIME 500
-Example: AIRTIME 08012345678 500
-
-Reference: ${errorCode || 'Airtime Error'}`;
-  }
-  
-  // --- Cable TV Specific ---
-  
-  if (errorMessage.toLowerCase().includes('cable') || 
-      errorMessage.toLowerCase().includes('subscription')) {
-    return `❌ Cable Subscription Failed
-
-We couldn't complete your cable subscription.
-Please check the decoder number and package and try again.
-
-To see packages: PACKAGES [provider]
-Example: CABLE 1 PREMIUM
-
-Reference: ${errorCode || 'Cable Error'}`;
-  }
-  
-  // --- Education Specific ---
-  
-  if (errorMessage.toLowerCase().includes('education') || 
-      errorMessage.toLowerCase().includes('pin') ||
-      errorMessage.toLowerCase().includes('waec') ||
-      errorMessage.toLowerCase().includes('jamb') ||
-      errorMessage.toLowerCase().includes('neco')) {
-    return `❌ Education PIN Purchase Failed
-
-We couldn't complete your education PIN purchase.
-Please check the product and quantity and try again.
-
-Available: WAEC, JAMB, NECO, WAEC-RESULT
-Example: EDU WAEC 2
-Example: JAMB 1
-
-Reference: ${errorCode || 'Education Error'}`;
-  }
-  
-  // --- PIN Verification Errors ---
-  
-  if (errorMessage.toLowerCase().includes('pin') || 
-      errorMessage.toLowerCase().includes('verification')) {
-    if (errorMessage.toLowerCase().includes('incorrect') || 
-        errorMessage.toLowerCase().includes('invalid') ||
-        errorMessage.toLowerCase().includes('wrong')) {
-      return `❌ Incorrect PIN
-
-The PIN you entered is incorrect.
-Please try again.
-
-If you've forgotten your PIN, you can reset it in the app or website.
-
-Reference: ${errorCode || 'PIN Error'}`;
-    }
-    if (errorMessage.toLowerCase().includes('locked') || 
-        errorMessage.toLowerCase().includes('blocked')) {
-      return `🔒 PIN Locked
-
-Your PIN has been locked due to too many failed attempts.
-Please wait 15 minutes and try again.
-
-To reset your PIN, visit:
-${getAppUrl()}/profile
-
-Reference: ${errorCode || 'PIN Locked'}`;
-    }
-    return `❌ PIN Verification Failed
-
-Please verify your PIN and try again.
-
-Reference: ${errorCode || 'PIN Error'}`;
-  }
-  
-  // --- Minimum Amount Errors ---
-  
-  if (errorMessage.toLowerCase().includes('minimum') || 
-      errorMessage.toLowerCase().includes('below minimum') ||
-      errorMessage.toLowerCase().includes('minimum amount')) {
-    if (errorMessage.toLowerCase().includes('electricity') || 
-        errorMessage.toLowerCase().includes('meter')) {
-      return `❌ Minimum Amount: NGN 1,000
-
-Electricity purchase requires a minimum of NGN 1,000.
-Please try again with a higher amount.
-
-Example: ELECTRIC 1000
-
-Reference: ${errorCode || 'Min Amount'}`;
-    }
-    return `❌ Amount Below Minimum
-
-The amount you entered is below the minimum required.
-Please check and try again with a higher amount.
-
-Reference: ${errorCode || 'Min Amount'}`;
-  }
-  
-  // --- Maximum Amount Errors ---
-  
-  if (errorMessage.toLowerCase().includes('maximum') || 
-      errorMessage.toLowerCase().includes('above maximum') ||
-      errorMessage.toLowerCase().includes('max amount')) {
-    return `❌ Amount Exceeds Maximum
-
-The amount you entered exceeds the maximum allowed.
-Please check and try again with a lower amount.
-
-Airtime Maximum: NGN 50,000
-
-Reference: ${errorCode || 'Max Amount'}`;
-  }
-  
-  // --- User Not Found ---
-  
-  if (errorMessage.toLowerCase().includes('user not found') || 
-      errorMessage.toLowerCase().includes('no user')) {
-    return `❌ User Not Found
-
-We couldn't find your account.
-Please register first with:
-REG [Full Name] [Email] [Username]
-
-Example: REG John Doe john@email.com johndoe
-
-Reference: ${errorCode || 'User Error'}`;
-  }
-  
-  // --- Registration Errors ---
-  
-  if (errorMessage.toLowerCase().includes('registration') || 
-      errorMessage.toLowerCase().includes('register')) {
-    if (errorMessage.toLowerCase().includes('already') || 
-        errorMessage.toLowerCase().includes('exists')) {
-      return `⚠️ Already Registered
-
-You are already registered with Bilscore!
-Type HELP to see available commands.
-
-Reference: ${errorCode || 'Registration Error'}`;
-    }
-    return `❌ Registration Failed
-
-We couldn't complete your registration.
-Please try again or visit:
-${getAppUrl()}/auth
-
-Reference: ${errorCode || 'Registration Error'}`;
-  }
-  
-  // --- Sandbox Mode Generic ---
-  
   if (isSandbox) {
-    return `⚠️ SANDBOX MODE: ${errorMessage.substring(0, 200)}
+    return `SANDBOX MODE: ${errorMessage.substring(0, 200)}
 
 Code: ${errorCode || 'Unknown'}
 
-💡 This is expected in test mode.
+This is expected in test mode.
 Your wallet was NOT debited.
 
-💡 Try: AIRTIME 100 (for your own number)
+Try: AIRTIME 100 (for your own number)
 
 If you're testing, this is normal behavior.
 In production, this would be a real transaction.`;
   }
   
-  // --- Unknown Generic Error ---
-  
-  return `❌ Transaction Failed
+  return `Transaction Failed
 
 ${errorMessage.substring(0, 200)}
 
@@ -937,38 +433,6 @@ Please try again or contact support.
 If you need help, type HELP for available commands.
 
 Reference: ${errorCode || 'Unknown Error'}`;
-}
-
-// ============================================================
-// SEND WHATSAPP MESSAGE VIA TWILIO
-// ============================================================
-
-async function sendWhatsAppMessage(to: string, message: string): Promise<boolean> {
-  try {
-    console.log(`[WhatsApp] Sending message to ${to}`);
-    
-    const response = await fetch(`${getAppUrl()}/api/twilio/send-message`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        to: to,
-        message: message,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(`[WhatsApp] Failed to send message: ${response.status}`);
-      return false;
-    }
-
-    console.log(`[WhatsApp] Message sent successfully`);
-    return true;
-  } catch (error) {
-    console.error("[WhatsApp] Error sending message:", error);
-    return false;
-  }
 }
 
 // ============================================================
@@ -989,34 +453,6 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
     'BILALSADA': VtuVendor.BILAL_SADA,
   };
   return vendorMap[normalized] || null;
-}
-
-// ============================================================
-// SAVE METER HELPER (Non-blocking)
-// ============================================================
-
-async function saveMeterAsync(userId: string, meterNumber: string, disco: string, meterType: string) {
-  try {
-    const existing = await prisma.savedMeter.findFirst({
-      where: { userId, meterNumber },
-    });
-
-    if (!existing) {
-      await prisma.savedMeter.create({
-        data: {
-          userId,
-          meterNumber,
-          disco: disco.toUpperCase(),
-          meterType: meterType || "Prepaid",
-          isDefault: false,
-        },
-      });
-      console.log(`[WhatsApp] Meter ${meterNumber} saved automatically`);
-    }
-  } catch (error) {
-    // Non-critical - ignore
-    console.warn(`[WhatsApp] Failed to auto-save meter: ${error}`);
-  }
 }
 
 // ============================================================
@@ -1078,7 +514,7 @@ async function saveMeterWithCustomerInfo(
 }
 
 // ============================================================
-// METER VERIFICATION USING API ROUTE (Same as Dashboard)
+// METER VERIFICATION USING API ROUTE
 // ============================================================
 
 async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
@@ -1325,9 +761,6 @@ Reply with REG and your details to create your account!`;
 // ============================================================
 // USER REGISTRATION HANDLER
 // ============================================================
-// ============================================================
-// FIXED: USER REGISTRATION HANDLER WITH PROPER ERROR HANDLING
-// ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
   try {
@@ -1437,18 +870,13 @@ Example: REG John Doe - johndoe (skip email)`;
         email = `${username}@whatsapp.bilscore.com`;
       }
 
-      // ============================================================
-      // ✅ FIXED: Pre-check for duplicates with clear error messages
-      // ============================================================
-      
-      // Check for duplicate email
       if (email) {
         const existingEmail = await prisma.user.findUnique({
           where: { email: email },
           select: { email: true },
         });
         if (existingEmail) {
-          return `❌ Email Already Registered
+          return `Email Already Registered
 
 The email "${email}" is already registered with Bilscore.
 
@@ -1462,14 +890,13 @@ Type HELP for more options.`;
         }
       }
 
-      // Check for duplicate phone
       if (phone) {
         const existingPhone = await prisma.user.findFirst({
           where: { phone: phone },
           select: { phone: true },
         });
         if (existingPhone) {
-          return `❌ Phone Number Already Registered
+          return `Phone Number Already Registered
 
 The phone number ${phone} is already registered with Bilscore.
 
@@ -1481,14 +908,13 @@ Type HELP for more options.`;
         }
       }
 
-      // Check for duplicate username
       if (username) {
         const existingUsername = await prisma.user.findUnique({
           where: { username: username },
           select: { username: true },
         });
         if (existingUsername) {
-          return `❌ Username Already Taken
+          return `Username Already Taken
 
 The username "${username}" is already taken.
 Please choose another username.
@@ -1497,10 +923,6 @@ Example: REG ${fullName} ${email} ${username}123
 Or: REG ${fullName} ${email} ${username}_${Math.random().toString(36).substring(2, 5)}`;
         }
       }
-
-      // ============================================================
-      // PROCEED WITH REGISTRATION
-      // ============================================================
 
       const defaultPassword = `BIL${Math.random().toString(36).substring(2, 10).toUpperCase()}!`;
       const defaultPin = generateRandomPin();
@@ -1692,9 +1114,6 @@ ${getAppUrl()}/auth`;
   } catch (error: any) {
     console.error("[WhatsApp] Registration error:", error);
     
-    // ============================================================
-    // ✅ FIXED: Properly handle Prisma P2002 error
-    // ============================================================
     if (error.code === "P2002") {
       const target = error.meta?.target || [];
       let field = "";
@@ -1703,7 +1122,7 @@ ${getAppUrl()}/auth`;
       if (target.includes("email")) {
         field = "Email";
         value = error.meta?.target_value || "";
-        return `❌ Email Already Registered
+        return `Email Already Registered
 
 The email "${value}" is already registered with Bilscore.
 
@@ -1717,7 +1136,7 @@ Type HELP for more options.`;
       if (target.includes("phone")) {
         field = "Phone number";
         value = phone;
-        return `❌ Phone Number Already Registered
+        return `Phone Number Already Registered
 
 The phone number ${value} is already registered with Bilscore.
 
@@ -1731,7 +1150,7 @@ Type HELP for more options.`;
       if (target.includes("username")) {
         field = "Username";
         value = error.meta?.target_value || "";
-        return `❌ Username Already Taken
+        return `Username Already Taken
 
 The username "${value}" is already taken.
 Please choose another username.
@@ -1742,7 +1161,7 @@ Or: REG ${fullName} ${email} ${value}_${Math.random().toString(36).substring(2, 
 Type HELP for more options.`;
       }
       
-      return `❌ Registration Failed
+      return `Registration Failed
 
 This account information is already registered.
 Please check your details and try again.
@@ -1753,7 +1172,6 @@ ${getAppUrl()}/auth
 Type HELP for more options.`;
     }
     
-    // Handle other errors
     return formatErrorMessage(error);
   }
 }
@@ -1808,47 +1226,41 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 // FALLBACK FUNCTIONS
 // ============================================================
 
-// ============================================================
-// FALLBACK PLANS - WITH PRICE AND VALIDITY
-// ============================================================
-
 function getFallbackPlans(): string {
-  return `📱 *Available Data Plans:*
+  return `Available Data Plans:
 
-*MTN:*
-  • 1GB - ₦300 (30 days)
-  • 2GB - ₦500 (30 days)
-  • 5GB - ₦1,200 (30 days)
+MTN:
+  1GB - NGN 300 (30 days)
+  2GB - NGN 500 (30 days)
+  5GB - NGN 1,200 (30 days)
   
-*GLO:*
-  • 1GB - ₦250 (30 days)
-  • 2GB - ₦450 (30 days)
-  • 3GB - ₦600 (30 days)
-  
+GLO:
+  1GB - NGN 250 (30 days)
+  2GB - NGN 450 (30 days)
+  3GB - NGN 600 (30 days)
 
-*AIRTEL:*
-  • 1GB - ₦300 (30 days)
-  • 2GB - ₦500 (30 days)
-  • 3GB - ₦700 (30 days)
- 
+AIRTEL:
+  1GB - NGN 300 (30 days)
+  2GB - NGN 500 (30 days)
+  3GB - NGN 700 (30 days)
 
-*9MOBILE:*
-  • 1GB - ₦280 (30 days)
-  • 2GB - ₦480 (30 days)
-  • 5GB - ₦1,000 (30 days)
-  • 10GB - ₦1,800 (30 days)
+9MOBILE:
+  1GB - NGN 280 (30 days)
+  2GB - NGN 480 (30 days)
+  5GB - NGN 1,000 (30 days)
+  10GB - NGN 1,800 (30 days)
 
-_To buy: DATA [plan]_
-_Example: DATA 1GB_
-_For another number: DATA 08012345678 1GB_`;
+To buy: DATA [plan]
+Example: DATA 1GB
+For another number: DATA 08012345678 1GB`;
 }
 
 // ============================================================
-// GET AVAILABLE PLANS FOR WHATSAPP - WITH PRICE AND VALIDITY
+// GET AVAILABLE PLANS FOR WHATSAPP
 // ============================================================
+
 async function getAvailablePlansForWhatsApp(): Promise<string> {
   try {
-    // ✅ Use the plans API with whatsapp=true parameter
     const apiUrl = getApiUrl();
     const url = `${apiUrl}/api/vendors/plans?serviceType=DATA&whatsapp=true`;
     
@@ -1872,47 +1284,41 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
     
     if (result.success && result.data?.plans) {
       const { plans } = result.data;
-      let message = "📱 *Available Data Plans:*\n\n";
+      let message = "Available Data Plans:\n\n";
       
       for (const provider of plans) {
         const networkName = provider.name;
-        message += `*${networkName}:*\n`;
+        message += `${networkName}:\n`;
         
-        // Get all plans across categories
         const allPlans: string[] = [];
         for (const category of provider.categories || []) {
           for (const plan of category.plans || []) {
             if (plan.price && plan.price > 0) {
-              // ✅ Include price and validity in display
-              const priceDisplay = `₦${Number(plan.price).toFixed(0)}`;
+              const priceDisplay = `NGN ${Number(plan.price).toFixed(0)}`;
               const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
               allPlans.push(`${plan.data} - ${priceDisplay}${validityDisplay}`);
             }
           }
         }
         
-        // Take first 8 plans for WhatsApp (to keep message readable)
         const displayPlans = allPlans.slice(0, 8);
         if (displayPlans.length > 0) {
-          // Display as bullet points for better readability
           displayPlans.forEach(p => {
-            message += `  • ${p}\n`;
+            message += `  ${p}\n`;
           });
         } else {
           message += `  No plans available\n`;
         }
         
-        // Show count of additional plans if any
         if (allPlans.length > 8) {
-          message += `  *+${allPlans.length - 8} more plans*\n`;
+          message += `  +${allPlans.length - 8} more plans\n`;
         }
         message += '\n';
       }
       
-      // ✅ Add usage instructions
-      message += `_To buy: DATA [plan]_\n`;
-      message += `_Example: DATA 1GB_\n`;
-      message += `_For another number: DATA 08012345678 1GB_`;
+      message += `To buy: DATA [plan]\n`;
+      message += `Example: DATA 1GB\n`;
+      message += `For another number: DATA 08012345678 1GB`;
       
       return message;
     }
@@ -1928,9 +1334,6 @@ async function getAvailablePlansForWhatsApp(): Promise<string> {
 
 // ============================================================
 // FIND DATA PLAN FROM VENDOR API
-// ============================================================
-// ============================================================
-// FIND DATA PLAN FROM VENDOR API - WITH BETTER ERROR MESSAGE
 // ============================================================
 
 async function findDataPlanFromVendor(network: string, planQuery: string): Promise<any | null> {
@@ -1980,29 +1383,23 @@ async function findDataPlanFromVendor(network: string, planQuery: string): Promi
         for (const plan of category.plans || []) {
           const planData = plan.data?.toLowerCase() || '';
           
-          // ✅ Check for exact match including price or validity
           if (planData === normalizedQuery) {
             return { ...plan, provider: provider.name };
           }
           
-          // ✅ Check for MB/GB match with price and validity
           if (mbValue > 0 && plan.amountMB) {
-            // Check if the plan size matches
             if (Math.abs(plan.amountMB - mbValue) < 10) {
-              // Prefer exact match over closest
               if (!foundPlan || Math.abs(plan.amountMB - mbValue) < Math.abs(foundPlan.amountMB - mbValue)) {
                 foundPlan = { ...plan, provider: provider.name };
               }
             }
           }
 
-          // ✅ Check if the plan query contains the plan data or vice versa
           if (!foundPlan && (planData.includes(normalizedQuery) || 
               normalizedQuery.includes(planData))) {
             foundPlan = { ...plan, provider: provider.name };
           }
 
-          // ✅ Track closest plan by MB for fuzzy matching
           if (mbValue > 0 && plan.amountMB) {
             const diff = Math.abs(plan.amountMB - mbValue);
             if (diff < closestDiff) {
@@ -2014,9 +1411,8 @@ async function findDataPlanFromVendor(network: string, planQuery: string): Promi
       }
     }
 
-    // Return found plan, or closest plan if within reasonable difference
     if (foundPlan) return foundPlan;
-    if (closestPlan && closestDiff < 1024) return closestPlan; // Within 1GB
+    if (closestPlan && closestDiff < 1024) return closestPlan;
     return null;
 
   } catch (error) {
@@ -2346,13 +1742,13 @@ async function addMeterWithVerificationAndQR(userId: string, meterNumber: string
       meterStatus = verificationResult.data?.status || null;
       
       verificationMessage = `
-✅ Meter Verified!
+Meter Verified!
 Customer: ${customerName || "Unknown"}
 Meter: ${verificationResult.data?.meterNumber || meterNumber}
 Status: ${meterStatus || "ACTIVE"}`;
     } else {
       verificationMessage = `
-⚠️ Could not verify meter: ${verificationResult.error || "Unknown error"}
+Could not verify meter: ${verificationResult.error || "Unknown error"}
 You can still save the meter.`;
     }
 
@@ -2378,18 +1774,18 @@ You can still save the meter.`;
       
       const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
       
-      return `✅ Meter updated successfully!${verificationMessage}
+      return `Meter updated successfully!${verificationMessage}
 
-📋 Meter Details:
+Meter Details:
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || existing.name}
-${customerName ? `👤 Customer: ${customerName}` : ''}
-${customerAddress ? `📍 Address: ${customerAddress}` : ''}
-${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
-${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
+${customerName ? `Customer: ${customerName}` : ''}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+${customerPhone ? `Phone: ${customerPhone}` : ''}
+${customerEmail ? `Email: ${customerEmail}` : ''}
 
-📱 Quick Buy QR Code:
+Quick Buy QR Code:
 ${qrLink}
 
 Scan this QR code to quickly buy electricity for this meter.
@@ -2417,18 +1813,18 @@ Type ELECTRIC to see all your meters and buy power!`;
 
     const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
 
-    return `✅ Meter added successfully!${verificationMessage}
+    return `Meter added successfully!${verificationMessage}
 
-📋 Meter Details:
+Meter Details:
 Meter: ${meterNumber}
 DisCo: ${discoUpper}
 Name: ${name || `${discoUpper} Meter`}
-${customerName ? `👤 Customer: ${customerName}` : ''}
-${customerAddress ? `📍 Address: ${customerAddress}` : ''}
-${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
-${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
+${customerName ? `Customer: ${customerName}` : ''}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+${customerPhone ? `Phone: ${customerPhone}` : ''}
+${customerEmail ? `Email: ${customerEmail}` : ''}
 
-📱 Quick Buy QR Code:
+Quick Buy QR Code:
 ${qrLink}
 
 Scan this QR code to quickly buy electricity for this meter.
@@ -2476,13 +1872,13 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
       decoderStatus = verificationResult.data?.status || null;
       
       verificationMessage = `
-✅ Decoder Verified!
+Decoder Verified!
 Customer: ${customerName || "Unknown"}
 Decoder: ${verificationResult.data?.smartCardNumber || decoderNumber}
 Status: ${decoderStatus || "ACTIVE"}`;
     } else {
       verificationMessage = `
-⚠️ Could not verify decoder: ${verificationResult.error || "Unknown error"}
+Could not verify decoder: ${verificationResult.error || "Unknown error"}
 You can still save the decoder.`;
     }
 
@@ -2505,16 +1901,16 @@ You can still save the decoder.`;
           updatedAt: new Date(),
         },
       });
-      return `✅ Decoder updated successfully!${verificationMessage}
+      return `Decoder updated successfully!${verificationMessage}
 
-📋 Decoder Details:
+Decoder Details:
 Decoder: ${decoderNumber}
 Provider: ${providerUpper}
 Name: ${name || existing.name}
-${customerName ? `👤 Customer: ${customerName}` : ''}
-${customerAddress ? `📍 Address: ${customerAddress}` : ''}
-${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
-${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
+${customerName ? `Customer: ${customerName}` : ''}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+${customerPhone ? `Phone: ${customerPhone}` : ''}
+${customerEmail ? `Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
     }
@@ -2535,16 +1931,16 @@ Type CABLE to see all your decoders and subscribe!`;
       },
     });
 
-    return `✅ Decoder added successfully!${verificationMessage}
+    return `Decoder added successfully!${verificationMessage}
 
-📋 Decoder Details:
+Decoder Details:
 Decoder: ${decoderNumber}
 Provider: ${providerUpper}
 Name: ${name || `${providerUpper} Decoder`}
-${customerName ? `👤 Customer: ${customerName}` : ''}
-${customerAddress ? `📍 Address: ${customerAddress}` : ''}
-${customerPhone ? `📞 Phone: ${customerPhone}` : ''}
-${customerEmail ? `✉️ Email: ${customerEmail}` : ''}
+${customerName ? `Customer: ${customerName}` : ''}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+${customerPhone ? `Phone: ${customerPhone}` : ''}
+${customerEmail ? `Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
   } catch (error) {
@@ -2583,10 +1979,10 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     message += `   ${meter.disco}\n`;
     message += `   ${meter.meterNumber}\n`;
     if (meter.customerName) {
-      message += `   👤 ${meter.customerName}\n`;
+      message += `   Customer: ${meter.customerName}\n`;
     }
     if (meter.customerAddress) {
-      message += `   📍 ${meter.customerAddress}\n`;
+      message += `   Address: ${meter.customerAddress}\n`;
     }
     message += `\n`;
   });
@@ -2626,10 +2022,10 @@ Available providers: DSTV, GOTV, STARTIMES`;
     message += `   ${decoder.provider}\n`;
     message += `   ${decoder.decoderNumber}\n`;
     if (decoder.customerName) {
-      message += `   👤 ${decoder.customerName}\n`;
+      message += `   Customer: ${decoder.customerName}\n`;
     }
     if (decoder.customerAddress) {
-      message += `   📍 ${decoder.customerAddress}\n`;
+      message += `   Address: ${decoder.customerAddress}\n`;
     }
     message += `\n`;
   });
@@ -2962,7 +2358,7 @@ async function processAirtimePurchaseDirect(
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -3110,7 +2506,7 @@ Check balance with: BALANCE`;
         }),
       ]);
 
-      const successMessage = `✅ Airtime Purchase Successful!
+      const successMessage = `Airtime Purchase Successful!
 
 Phone: ${phoneNumber}
 Amount: NGN ${amount.toFixed(2)}
@@ -3120,7 +2516,6 @@ Reference: ${transaction.id.substring(0, 10)}
 
 Thank you for using Bilscore!`;
 
-      await sendWhatsAppMessage(user.phone, successMessage);
       return successMessage;
     } catch (vendorError: any) {
       console.error("[AIRTIME] Vendor error:", vendorError);
@@ -3170,7 +2565,7 @@ async function processAirtimePurchaseWithPin(
 ): Promise<string> {
   try {
     if (!user.pinHash) {
-      return `❌ PIN Not Set
+      return `PIN Not Set
 
 You need to set a transaction PIN first to buy airtime for other numbers.
 
@@ -3189,7 +2584,7 @@ For your own number, just use: AIRTIME 500 (no PIN needed)`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -3284,7 +2679,7 @@ Please fund your wallet and try again.`;
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `🔐 Airtime Purchase Requires PIN Confirmation!
+    return `Airtime Purchase Requires PIN Confirmation!
 
 Phone: ${phoneNumber}
 Amount: NGN ${amount.toFixed(2)}
@@ -3325,7 +2720,7 @@ async function processDataPurchaseDirect(
     
     if (!planData) {
       const availablePlans = await getAvailablePlansForWhatsApp();
-      return `❌ Data Plan Not Found
+      return `Data Plan Not Found
 
 No data plan found for ${detectedNetwork} with "${planQuery}".
 
@@ -3338,7 +2733,7 @@ Example: DATA 08012345678 1GB`;
     const amount = Number(planData.price);
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -3493,7 +2888,7 @@ Please fund your wallet and try again.`;
 
       const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-      const successMessage = `✅ Data Purchase Successful!
+      const successMessage = `Data Purchase Successful!
 
 Phone: ${phoneNumber}
 Plan: ${dataDisplay} (${planData.name || detectedNetwork})
@@ -3504,7 +2899,6 @@ Reference: ${transaction.id.substring(0, 10)}
 
 Thank you for using Bilscore!`;
 
-      await sendWhatsAppMessage(user.phone, successMessage);
       return successMessage;
     } catch (vendorError: any) {
       console.error("[DATA] Vendor error:", vendorError);
@@ -3554,7 +2948,7 @@ async function processDataPurchaseWithPin(
 ): Promise<string> {
   try {
     if (!user.pinHash) {
-      return `❌ PIN Not Set
+      return `PIN Not Set
 
 You need to set a transaction PIN first to buy data for other numbers.
 
@@ -3575,7 +2969,7 @@ For your own number, just use: DATA 1GB (no PIN needed)`;
     
     if (!planData) {
       const availablePlans = await getAvailablePlansForWhatsApp();
-      return `❌ Data Plan Not Found
+      return `Data Plan Not Found
 
 No data plan found for ${detectedNetwork} with "${planQuery}".
 
@@ -3587,7 +2981,7 @@ Example: DATA 08012345678 1GB`;
     const amount = Number(planData.price);
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -3689,7 +3083,7 @@ Please fund your wallet and try again.`;
 
     const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-    return `🔐 Data Purchase Requires PIN Confirmation!
+    return `Data Purchase Requires PIN Confirmation!
 
 Phone: ${phoneNumber}
 Plan: ${dataDisplay} (${planData.name || detectedNetwork})
@@ -3725,7 +3119,7 @@ async function processElectricityPurchaseDirect(
   try {
     const MIN_ELECTRICITY_AMOUNT = 1000;
     if (amount < MIN_ELECTRICITY_AMOUNT) {
-      return `❌ Minimum Amount: NGN 1,000
+      return `Minimum Amount: NGN 1,000
 
 Electricity purchase requires a minimum of NGN 1,000.
 Please try again with a higher amount.
@@ -3740,7 +3134,7 @@ Example: ELECTRIC 1000`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -3950,21 +3344,18 @@ Please fund your wallet and try again.`;
           meterStatus
         ).catch(() => {});
 
-        const successMessage = `✅ Electricity Purchase Successful!
+        const successMessage = `Electricity Purchase Successful!
 
 Meter: ${meterNumber}
 DisCo: ${discoCode}
 Amount: NGN ${amount.toFixed(2)}
-${customerName ? `👤 Customer: ${customerName}` : ''}
-${customerAddress ? `📍 Address: ${customerAddress}` : ''}
-${token ? `🔑 Token: ${token}` : ''}
+${customerName ? `Customer: ${customerName}` : ''}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+${token ? `Token: ${token}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 Thank you for using Bilscore!`;
 
-        console.log(`[WhatsApp] Sending success message to ${user.phone}`);
-        await sendWhatsAppMessage(user.phone, successMessage);
-        
         return successMessage;
       } else {
         console.error(`[WhatsApp] Vendor failed: ${result.error}`);
@@ -4131,7 +3522,7 @@ async function processElectricityPurchaseWithPin(
   try {
     const MIN_ELECTRICITY_AMOUNT = 1000;
     if (amount < MIN_ELECTRICITY_AMOUNT) {
-      return `❌ Minimum Amount: NGN 1,000
+      return `Minimum Amount: NGN 1,000
 
 Electricity purchase requires a minimum of NGN 1,000.
 Please try again with a higher amount.
@@ -4140,7 +3531,7 @@ Example: ELECTRIC 1234567890 ABUJA 1000`;
     }
 
     if (!user.pinHash) {
-      return `❌ PIN Not Set
+      return `PIN Not Set
 
 You need to set a transaction PIN first to buy electricity for external meters.
 
@@ -4159,7 +3550,7 @@ For your saved meters, just use: ELECTRIC [amount] (no PIN needed)`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -4254,7 +3645,7 @@ Please fund your wallet and try again.`;
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `🔐 Electricity Purchase Requires PIN Confirmation!
+    return `Electricity Purchase Requires PIN Confirmation!
 
 Meter: ${meterNumber}
 DisCo: ${discoCode}
@@ -4322,7 +3713,7 @@ async function processCablePurchaseDirect(
 
     if (!packageData) {
       const packagesList = await getAvailablePackagesForWhatsApp(provider);
-      return `❌ Package Not Found
+      return `Package Not Found
 
 No package found for "${packageQuery}" with ${provider}.
 
@@ -4338,7 +3729,7 @@ ${packagesList}`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -4487,7 +3878,7 @@ Please fund your wallet and try again.`;
         }),
       ]);
 
-      const successMessage = `✅ Cable Subscription Successful!
+      const successMessage = `Cable Subscription Successful!
 
 Decoder: ${decoderNumber}
 Provider: ${provider}
@@ -4499,7 +3890,6 @@ Reference: ${transaction.id.substring(0, 10)}
 Your subscription has been activated. Enjoy!
 Thank you for using Bilscore!`;
 
-      await sendWhatsAppMessage(user.phone, successMessage);
       return successMessage;
     } catch (vendorError: any) {
       console.error("[CABLE] Vendor error:", vendorError);
@@ -4548,7 +3938,7 @@ async function processEducationPurchaseWhatsApp(
 ): Promise<string> {
   try {
     if (!user.pinHash) {
-      return `❌ PIN Not Set
+      return `PIN Not Set
 
 You need to set a transaction PIN first to buy education pins.
 
@@ -4568,7 +3958,7 @@ Example: PIN 1234`;
     const productInfo = serviceMap[productType];
     if (!productInfo) {
       const productsList = await getAvailableEducationProducts();
-      return `❌ Invalid Product: ${productType}
+      return `Invalid Product: ${productType}
 
 Available products:
 ${productsList}
@@ -4588,7 +3978,7 @@ WAEC 2`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -4688,7 +4078,7 @@ Please fund your wallet and try again.`;
     const appUrl = getAppUrl();
     const validationLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-    return `🔐 Education Purchase Requires PIN Confirmation!
+    return `Education Purchase Requires PIN Confirmation!
 
 Product: ${productInfo.name}
 Quantity: ${quantity}
@@ -4722,7 +4112,7 @@ async function processSubscriptionWhatsApp(
 ): Promise<string> {
   try {
     if (!user.pinHash) {
-      return `❌ PIN Not Set
+      return `PIN Not Set
 
 You need to set a transaction PIN first to schedule subscriptions.
 
@@ -4742,7 +4132,7 @@ Example: PIN 1234`;
 
     const walletBalance = Number(wallet.walletBalance);
     if (walletBalance < amount) {
-      return `❌ Insufficient Balance
+      return `Insufficient Balance
 
 You have NGN ${walletBalance.toFixed(2)}
 Need NGN ${amount.toFixed(2)}
@@ -4774,7 +4164,7 @@ Please fund your wallet and try again.`;
 
     const discoEnum = mapDiscoCode(discoCode);
     if (!discoEnum) {
-      return `❌ Invalid DisCo: ${discoCode}
+      return `Invalid DisCo: ${discoCode}
 
 Available DisCos:
 IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, BENIN, ENUGU, JOS, PORTHARCOURT`;
@@ -4881,7 +4271,7 @@ IKEJA, EKO, ABUJA, KANO, PHCN, IBADAN, BENIN, ENUGU, JOS, PORTHARCOURT`;
 
     const deliveryDateStr = deliveryDate.toLocaleDateString();
 
-    return `🔐 Electricity Subscription Requires PIN Confirmation!
+    return `Electricity Subscription Requires PIN Confirmation!
 
 Meter: ${meterNumber}
 DisCo: ${discoCode}
@@ -4942,11 +4332,11 @@ Type HELP to see available commands.`;
       where: { referrerId: user.id },
     });
 
-    return `💰 Your Bilscore Balance: NGN ${Number(balance).toFixed(2)}
+    return `Your Bilscore Balance: NGN ${Number(balance).toFixed(2)}
 Account Name: ${wallet?.accountName || user.fullName}
 Account Number: ${wallet?.accountNumber || 'N/A'}
 
-📊 Quick Stats:
+Quick Stats:
 Total Transactions: ${totalTxns}
 Referrals: ${referrals}
 Wallet Status: ${wallet?.isActive ? "Active" : "Inactive"}
@@ -4955,7 +4345,7 @@ Reply with HELP for available commands.`;
   }
 
   // ============================================================
-  // ✅ AIRTIME - UPDATED WITH CORRECT NETWORK DETECTION
+  // AIRTIME - WITH CORRECT NETWORK DETECTION
   // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     let targetPhone: string;
@@ -4969,7 +4359,7 @@ Reply with HELP for available commands.`;
         amountNum = parseFloat(param);
         isOwnNumber = true;
       } else {
-        return `❌ Invalid Format
+        return `Invalid Format
 
 Please specify the amount.
 Example: AIRTIME 500 (buys for your number - no PIN)
@@ -4983,7 +4373,7 @@ Or: AIRTIME +2348012345678 500 (with country code)`;
       const normalizedUser = normalizePhoneNumber(user.phone);
       isOwnNumber = normalizedTarget === normalizedUser;
     } else {
-      return `📱 Buy Airtime
+      return `Buy Airtime
 
 AIRTIME [amount] - For YOUR number (no PIN required)
 AIRTIME [phone] [amount] - For another number (PIN required)
@@ -4997,7 +4387,7 @@ Minimum: NGN 50 | Maximum: NGN 50,000`;
     }
     
     if (isNaN(amountNum) || amountNum < 50 || amountNum > 50000) {
-      return `❌ Invalid Amount
+      return `Invalid Amount
 
 Please enter between NGN 50 and NGN 50,000.
 Example: AIRTIME 500`;
@@ -5014,15 +4404,15 @@ Example: AIRTIME 500`;
     console.log(`[AIRTIME] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
     
     if (!detectedNetwork) {
-      return `❌ Could Not Detect Network
+      return `Could Not Detect Network
 
 We couldn't detect the network for ${targetPhone}.
 Please ensure the phone number is correct.
 
 Supported formats:
-• 08012345678 (11 digits with leading zero)
-• +2348012345678 (with country code)
-• 2348012345678 (without leading zero)
+- 08012345678 (11 digits with leading zero)
+- +2348012345678 (with country code)
+- 2348012345678 (without leading zero)
 
 Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
     }
@@ -5035,7 +4425,7 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
   }
 
   // ============================================================
-  // ✅ DATA - UPDATED WITH CORRECT NETWORK DETECTION
+  // DATA - WITH CORRECT NETWORK DETECTION
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -5054,7 +4444,7 @@ Available networks: MTN, GLO, AIRTEL, 9MOBILE`;
       isOwnNumber = normalizedTarget === normalizedUser;
     } else {
       const availablePlans = await getAvailablePlansForWhatsApp();
-      return `📱 Buy Data
+      return `Buy Data
 
 DATA [plan] - For YOUR number (no PIN required)
 DATA [phone] [plan] - For another number (PIN required)
@@ -5068,7 +4458,7 @@ ${availablePlans}`;
     
     if (!planQuery) {
       const availablePlans = await getAvailablePlansForWhatsApp();
-      return `❌ Missing Plan
+      return `Missing Plan
 
 Please specify a data plan.
 Example: DATA 1GB
@@ -5087,15 +4477,15 @@ ${availablePlans}`;
     console.log(`[DATA] Target: ${targetPhone}, Normalized: ${normalizedTarget}, Network: ${detectedNetwork}`);
     
     if (!detectedNetwork) {
-      return `❌ Could Not Detect Network
+      return `Could Not Detect Network
 
 We couldn't detect the network for ${targetPhone}.
 Please ensure the phone number is correct.
 
 Supported formats:
-• 08012345678 (11 digits with leading zero)
-• +2348012345678 (with country code)
-• 2348012345678 (without leading zero)
+- 08012345678 (11 digits with leading zero)
+- +2348012345678 (with country code)
+- 2348012345678 (without leading zero)
 
 ${await getAvailablePlansForWhatsApp()}`;
     }
@@ -5108,14 +4498,14 @@ ${await getAvailablePlansForWhatsApp()}`;
   }
 
   // ============================================================
-  // ✅ METER MANAGEMENT
+  // METER MANAGEMENT
   // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
     const addParts = body.split(" ").filter(p => p.length > 0);
     if (addParts.length < 4) {
       const discosList = await getAvailableDiscosForWhatsApp();
-      return `⚡ Add Meter
+      return `Add Meter
 
 To add a meter, reply with:
 ADDMETER [meter_number] [disco_code] [name]
@@ -5140,7 +4530,7 @@ Name can be: HOME, OFFICE, SHOP, etc.`;
   if (command.startsWith("DELETEMETER") || command.startsWith("DELETE METER")) {
     const deleteParts = body.split(" ").filter(p => p.length > 0);
     if (deleteParts.length < 2) {
-      return `❌ Missing Meter Number
+      return `Missing Meter Number
 
 Please specify the meter number to delete.
 Example: DELETEMETER 1234567890`;
@@ -5152,7 +4542,7 @@ Example: DELETEMETER 1234567890`;
   if (command.startsWith("SETDEFAULTMETER") || command.startsWith("SET DEFAULT METER")) {
     const defaultParts = body.split(" ").filter(p => p.length > 0);
     if (defaultParts.length < 2) {
-      return `❌ Missing Selection
+      return `Missing Selection
 
 Please specify the meter number or index.
 Example: SETDEFAULTMETER 1
@@ -5167,7 +4557,7 @@ Or: SETDEFAULTMETER 1234567890`;
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
     const addParts = body.split(" ").filter(p => p.length > 0);
     if (addParts.length < 4) {
-      return `📺 Add Decoder
+      return `Add Decoder
 
 To add a decoder, reply with:
 ADDDECODER [decoder_number] [provider] [name]
@@ -5190,7 +4580,7 @@ Name can be: LIVING_ROOM, BEDROOM, OFFICE, etc.`;
   if (command.startsWith("DELETEDECODER") || command.startsWith("DELETE DECODER")) {
     const deleteParts = body.split(" ").filter(p => p.length > 0);
     if (deleteParts.length < 2) {
-      return `❌ Missing Decoder Number
+      return `Missing Decoder Number
 
 Please specify the decoder number to delete.
 Example: DELETEDECODER 1234567890`;
@@ -5202,7 +4592,7 @@ Example: DELETEDECODER 1234567890`;
   if (command.startsWith("SETDEFAULTDECODER") || command.startsWith("SET DEFAULT DECODER")) {
     const defaultParts = body.split(" ").filter(p => p.length > 0);
     if (defaultParts.length < 2) {
-      return `❌ Missing Selection
+      return `Missing Selection
 
 Please specify the decoder number or index.
 Example: SETDEFAULTDECODER 1
@@ -5213,7 +4603,7 @@ Or: SETDEFAULTDECODER 1234567890`;
   }
 
   // ============================================================
-  // ✅ ELECTRICITY - SUPPORTS BOTH SAVED AND EXTERNAL METERS
+  // ELECTRICITY - SUPPORTS BOTH SAVED AND EXTERNAL METERS
   // ============================================================
   
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
@@ -5227,7 +4617,7 @@ Or: SETDEFAULTDECODER 1234567890`;
 
       if (meters.length === 0) {
         const discosList = await getAvailableDiscosForWhatsApp();
-        return `⚡ Buy Electricity
+        return `Buy Electricity
 
 You don't have any saved meters.
 
@@ -5243,17 +4633,17 @@ Available DisCos:
 ${discosList}`;
       }
 
-      let message = "⚡ Your Saved Meters:\n\n";
+      let message = "Your Saved Meters:\n\n";
       meters.forEach((meter: any, index: number) => {
         const defaultTag = meter.isDefault ? " (Default)" : "";
         message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
         message += `   ${meter.disco}\n`;
         message += `   ${meter.meterNumber}\n`;
         if (meter.customerName) {
-          message += `   👤 ${meter.customerName}\n`;
+          message += `   Customer: ${meter.customerName}\n`;
         }
         if (meter.customerAddress) {
-          message += `   📍 ${meter.customerAddress}\n`;
+          message += `   Address: ${meter.customerAddress}\n`;
         }
         message += `\n`;
       });
@@ -5272,7 +4662,7 @@ ${discosList}`;
       const amount = parseFloat(amountStr);
       
       if (isNaN(amount) || amount < 100) {
-        return `❌ Invalid Amount
+        return `Invalid Amount
 
 Minimum is NGN 100.
 Example: ELECTRIC 1234567890 ABUJA 5000`;
@@ -5281,7 +4671,7 @@ Example: ELECTRIC 1234567890 ABUJA 5000`;
       const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
       const discoUpper = disco.toUpperCase();
       if (!validDiscos.includes(discoUpper)) {
-        return `❌ Invalid DisCo: ${discoUpper}
+        return `Invalid DisCo: ${discoUpper}
 
 Available DisCos:
 ${validDiscos.join(", ")}`;
@@ -5297,7 +4687,7 @@ ${validDiscos.join(", ")}`;
       if (verificationResult.success) {
         customerName = verificationResult.data?.customerName || "Unknown";
       } else {
-        return `⚠️ Could Not Verify Meter
+        return `Could Not Verify Meter
 
 ${verificationResult.error || "Unknown error"}
 
@@ -5323,14 +4713,14 @@ To cancel: Type HELP for other options.`;
       const amount = parseFloat(amountStr);
       
       if (isNaN(index) || index < 0) {
-        return `❌ Invalid Selection
+        return `Invalid Selection
 
 Please choose a number from the list.
 Example: ELECTRIC 1 5000`;
       }
       
       if (isNaN(amount) || amount < 100) {
-        return `❌ Invalid Amount
+        return `Invalid Amount
 
 Minimum is NGN 100.
 Example: ELECTRIC 1 5000`;
@@ -5342,7 +4732,7 @@ Example: ELECTRIC 1 5000`;
       });
       
       if (index >= meters.length) {
-        return `❌ Invalid Selection
+        return `Invalid Selection
 
 Please choose a number from the list.`;
       }
@@ -5363,7 +4753,7 @@ Please choose a number from the list.`;
       const amount = parseFloat(amountStr);
       
       if (isNaN(amount) || amount < 100) {
-        return `❌ Invalid Amount
+        return `Invalid Amount
 
 Minimum is NGN 100.
 Example: ELECTRIC 5000`;
@@ -5375,7 +4765,7 @@ Example: ELECTRIC 5000`;
       });
       
       if (meters.length === 0) {
-        return `⚡ No Saved Meters
+        return `No Saved Meters
 
 You don't have any saved meters.
 
@@ -5390,7 +4780,7 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
       let selectedMeter = meters.find(m => m.isDefault) || meters[0];
       
       if (meters.length > 1 && !meters.find(m => m.isDefault)) {
-        let message = "⚡ Multiple Meters Found\n\nPlease select one:\n\n";
+        let message = "Multiple Meters Found\n\nPlease select one:\n\n";
         meters.forEach((meter: any, index: number) => {
           message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
           message += `   ${meter.disco}\n\n`;
@@ -5414,7 +4804,7 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     });
 
-    let message = "⚡ Buy Electricity\n\n";
+    let message = "Buy Electricity\n\n";
     
     if (meters.length > 0) {
       message += "Your Saved Meters:\n";
@@ -5438,7 +4828,7 @@ To add a meter: ADDMETER [meter_number] [disco] [name]`;
   // ========== DISCOS ==========
   if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
     const discosList = await getAvailableDiscosForWhatsApp();
-    return `⚡ Available DisCos:
+    return `Available DisCos:
 
 ${discosList}
 
@@ -5447,7 +4837,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
   }
 
   // ============================================================
-  // ✅ CABLE - NO PIN FOR OWN DECODERS
+  // CABLE - NO PIN FOR OWN DECODERS
   // ============================================================
   if (command === "CABLE" || command === "TV") {
     const decoders = await prisma.savedDecoder.findMany({
@@ -5456,7 +4846,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     });
 
     if (decoders.length === 0) {
-      return `📺 Cable TV
+      return `Cable TV
 
 You don't have any saved decoders.
 
@@ -5470,7 +4860,7 @@ Available providers: DSTV, GOTV, STARTIMES
 After adding, you can buy cable by just typing CABLE!`;
     }
 
-    let message = "📺 Your Saved Decoders:\n\n";
+    let message = "Your Saved Decoders:\n\n";
     decoders.forEach((decoder: any, index: number) => {
       const defaultTag = decoder.isDefault ? " (Default)" : "";
       message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
@@ -5495,7 +4885,7 @@ After adding, you can buy cable by just typing CABLE!`;
       const index = parseInt(indexStr) - 1;
       
       if (isNaN(index) || index < 0) {
-        return `❌ Invalid Selection
+        return `Invalid Selection
 
 Please choose a number from the list.
 Example: CABLE 1 PREMIUM`;
@@ -5507,7 +4897,7 @@ Example: CABLE 1 PREMIUM`;
       });
       
       if (index >= decoders.length) {
-        return `❌ Invalid Selection
+        return `Invalid Selection
 
 Please choose a number from the list.`;
       }
@@ -5523,7 +4913,7 @@ Please choose a number from the list.`;
     }
     
     if (cableParts.length === 2) {
-      return `❌ Missing Package
+      return `Missing Package
 
 Please specify the package as well.
 Example: CABLE ${cableParts[1]} PREMIUM
@@ -5546,7 +4936,7 @@ Example: PACKAGES DSTV`;
     const scheduleParts = body.split(" ").filter(p => p.length > 0);
     
     if (scheduleParts.length < 4) {
-      return `📅 Schedule Electricity Token Delivery
+      return `Schedule Electricity Token Delivery
 
 SCHEDULE [meter_index] [amount] [days]
 
@@ -5564,21 +4954,21 @@ ${await getSavedMetersList(user.id)}`;
     const days = parseInt(daysStr);
 
     if (isNaN(index) || index < 0) {
-      return `❌ Invalid Meter Selection
+      return `Invalid Meter Selection
 
 Please choose a number from the list.
 Example: SCHEDULE 1 5000 7`;
     }
 
     if (isNaN(amount) || amount < 100) {
-      return `❌ Invalid Amount
+      return `Invalid Amount
 
 Minimum is NGN 100.
 Example: SCHEDULE 1 5000 7`;
     }
 
     if (isNaN(days) || days < 3) {
-      return `❌ Invalid Days
+      return `Invalid Days
 
 Minimum is 3 days.
 Example: SCHEDULE 1 5000 7`;
@@ -5590,7 +4980,7 @@ Example: SCHEDULE 1 5000 7`;
     });
 
     if (index >= meters.length) {
-      return `❌ Invalid Meter Selection
+      return `Invalid Meter Selection
 
 Please choose a number from the list.`;
     }
@@ -5613,7 +5003,7 @@ Please choose a number from the list.`;
   if (command.startsWith("CANCEL") || command.startsWith("UNSUBSCRIBE")) {
     const cancelParts = body.split(" ").filter(p => p.length > 0);
     if (cancelParts.length < 2) {
-      return `❌ Missing Subscription ID
+      return `Missing Subscription ID
 
 To cancel a subscription:
 CANCEL [subscription_id]
@@ -5636,7 +5026,7 @@ To see your active subscriptions: SUBSCRIPTIONS`;
     
     if (cmd === "EDU" || cmd === "EDUCATION") {
       const productsList = await getAvailableEducationProducts();
-      return `🎓 Education Services:
+      return `Education Services:
 
 ${productsList}
 
@@ -5655,7 +5045,7 @@ Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
       const product = eduParts[1].toUpperCase();
       const quantity = parseInt(eduParts[2]);
       if (isNaN(quantity) || quantity < 1) {
-        return `❌ Invalid Quantity
+        return `Invalid Quantity
 
 Please enter a number greater than 0.
 Example: EDU WAEC 2`;
@@ -5666,7 +5056,7 @@ Example: EDU WAEC 2`;
     if (eduParts.length >= 2 && ["WAEC", "JAMB", "NECO", "WAEC-RESULT"].includes(cmd)) {
       const quantity = parseInt(eduParts[1]);
       if (isNaN(quantity) || quantity < 1) {
-        return `❌ Invalid Quantity
+        return `Invalid Quantity
 
 Please enter a number greater than 0.
 Example: WAEC 2`;
@@ -5675,7 +5065,7 @@ Example: WAEC 2`;
     }
 
     const productsList = await getAvailableEducationProducts();
-    return `🎓 Education Services:
+    return `Education Services:
 
 ${productsList}
 
@@ -5705,7 +5095,7 @@ Available products: WAEC, JAMB, NECO, WAEC-RESULT`;
       where: { referrerId: user.id },
     });
     
-    return `👥 Your Referral Program
+    return `Your Referral Program
 
 Referral Code: ${referralCode}
 Total Referrals: ${count}
@@ -5723,7 +5113,7 @@ Copy this link and share with friends to earn rewards!`;
   }
 
   // ========== UNKNOWN COMMAND ==========
-  return `❓ Unknown Command
+  return `Unknown Command
 
 I didn't understand that command.
 
@@ -5755,20 +5145,20 @@ PIN - Set up transaction PIN`;
 // ============================================================
 
 function getHelpMessage(user: any): string {
-  return `ℹ️ Bilscore WhatsApp Commands
+  return `Bilscore WhatsApp Commands
 
-💰 Financial:
+Financial:
 BALANCE - Check wallet balance
 TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
-📱 Airtime & Data:
+Airtime & Data:
 AIRTIME [amount] - For YOUR number (no PIN)
 AIRTIME [phone] [amount] - For others (PIN required)
 DATA [plan] - For YOUR number (no PIN)
 DATA [phone] [plan] - For others (PIN required)
 
-⚡ Electricity:
+Electricity:
 ELECTRIC - Show saved meters
 ELECTRIC [amount] - Buy for saved meter (no PIN)
 ELECTRIC [index] [amount] - Buy for saved meter (no PIN)
@@ -5780,20 +5170,20 @@ SCHEDULE [index] [amount] [days] - Schedule electricity
 SUBSCRIPTIONS - View active schedules
 CANCEL [id] - Cancel subscription
 
-📺 Cable TV (Your decoders - no PIN):
+Cable TV (Your decoders - no PIN):
 CABLE - Show saved decoders
 CABLE [index] [package] - Subscribe
 ADDDECODER [decoder] [provider] [name] - Add decoder
 DECODERS - List saved decoders
 PACKAGES [provider] - Show packages
 
-🎓 Education:
+Education:
 EDU [product] [quantity] - Buy education pins
 WAEC [quantity] - Buy WAEC pins
 JAMB [quantity] - Buy JAMB pins
 NECO [quantity] - Buy NECO pins
 
-👥 Referral:
+Referral:
 REFERRAL - Get referral link
 
 Need help? Visit: ${getAppUrl()}/support`;
@@ -5811,7 +5201,7 @@ async function getTransactionHistory(userId: string): Promise<string> {
   });
 
   if (transactions.length === 0) {
-    return `📊 No Transactions
+    return `No Transactions
 
 No transactions found.
 
@@ -5819,9 +5209,9 @@ Start using Bilscore today!
 Type HELP to see available commands.`;
   }
 
-  let message = "📊 Recent Transactions:\n\n";
+  let message = "Recent Transactions:\n\n";
   transactions.forEach((tx, i) => {
-    const status = tx.status === "SUCCESS" ? "✅" : tx.status === "PENDING" ? "⏳" : "❌";
+    const status = tx.status === "SUCCESS" ? "[OK]" : tx.status === "PENDING" ? "[PENDING]" : "[FAILED]";
     const type = tx.transactionType.replace("_", " ");
     message += `${i + 1}. ${status} ${type}\n`;
     message += `   Amount: NGN ${Number(tx.amount).toFixed(2)}\n`;
@@ -5842,7 +5232,7 @@ Type HELP to see available commands.`;
 
 async function handlePinCommand(user: any, parts: string[]): Promise<string> {
   if (parts.length < 2) {
-    return `🔐 Set Transaction PIN
+    return `Set Transaction PIN
 
 To set up your transaction PIN, reply with:
 PIN [4-6 digit PIN]
@@ -5854,14 +5244,14 @@ Your PIN will be encrypted and used for transaction verification.`;
 
   const pin = parts[1];
   if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
-    return `❌ Invalid PIN Format
+    return `Invalid PIN Format
 
 Please use 4-6 digits only.
 Example: PIN 1234`;
   }
 
   if (user.pinHash) {
-    return `ℹ️ PIN Already Set
+    return `PIN Already Set
 
 You already have a transaction PIN set.
 To change your PIN, please use the Bilscore mobile app or website.
@@ -5880,14 +5270,14 @@ ${getAppUrl()}/profile`;
     },
   });
 
-  return `✅ PIN Set Successfully!
+  return `PIN Set Successfully!
 
 Your PIN has been encrypted and saved.
 You'll need this PIN for all transactions.
 
 PIN: **** (hidden for security)
 
-⚠️ Keep your PIN safe and never share it with anyone.
+Keep your PIN safe and never share it with anyone.
 
 You can change your PIN anytime in the Bilscore app.`;
 }
