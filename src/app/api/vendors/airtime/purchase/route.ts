@@ -1,12 +1,12 @@
 // app/api/vendors/airtime/purchase/route.ts
-// OPTIMIZED VERSION - Only uses existing CacheService methods
+// UPDATED: channelDisplay = "WEB_APP"
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { CacheService } from "~/lib/cache/cache.service";
-import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus } from "@prisma/client";
+import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus, ChannelType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 // ============================================================
@@ -325,6 +325,12 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // STATIC CHANNEL CONFIGURATION
+    // ============================================================
+    const CHANNEL_ENUM = ChannelType.WEB_APP;
+    const CHANNEL_DISPLAY = "WEB_APP";
+
+    // ============================================================
     // OPTIMIZATION: PARALLEL FETCH user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
@@ -415,8 +421,6 @@ export async function POST(request: NextRequest) {
     if (walletBalance === undefined || walletBalance === null) {
       const wallet = user.wallet;
       walletBalance = wallet ? Number(wallet.walletBalance) : 0;
-      // Note: CacheService doesn't have setBalance, so we skip caching the balance
-      // The balance will be fetched from DB on next request if not cached
     }
 
     if (!user.wallet) {
@@ -427,21 +431,22 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD (early, before PIN verification)
+    // CREATE TRANSACTION RECORD USING RAW SQL (ensures channelDisplay is inserted)
     // ============================================================
 
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.AIRTIME,
-        product: network,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: phoneNumber,
-        network: networkEnum,
-        status: TransactionStatus.PENDING,
-        channel: "MOBILE_APP",
-        metadata: {
+    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    
+    // Use raw SQL to insert the transaction with channelDisplay
+    await prisma.$executeRaw`
+      INSERT INTO vtu_transactions (
+        id, userId, transactionType, product, amount, totalDebited, 
+        phoneNumber, network, status, channel, channelDisplay, 
+        metadata, createdAt, updatedAt
+      ) VALUES (
+        ${transactionId}, ${user.id}, ${VtuType.AIRTIME}, ${network}, 
+        ${amount}, 0, ${phoneNumber}, ${networkEnum}, ${TransactionStatus.PENDING}, 
+        ${CHANNEL_ENUM}, ${CHANNEL_DISPLAY}, 
+        ${JSON.stringify({
           source: "AirtimeAPI",
           service: "AIRTIME",
           timestamp: new Date().toISOString(),
@@ -452,9 +457,21 @@ export async function POST(request: NextRequest) {
           attemptStage: "INITIALIZED",
           wasDebited: false,
           refundProcessed: false,
-        },
-      },
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
+        })}, 
+        ${new Date()}, ${new Date()}
+      )
+    `;
+
+    // Fetch the created transaction
+    const transaction = await prisma.vtuTransaction.findUnique({
+      where: { id: transactionId },
     });
+
+    if (!transaction) {
+      throw new Error("Failed to create transaction");
+    }
 
     // ============================================================
     // PIN VERIFICATION
@@ -836,6 +853,7 @@ export async function POST(request: NextRequest) {
               netProfit: grossProfit,
               totalCommission: (vendorCommission || 0) + (platformCommission || 0),
               effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+              // channelDisplay already set from initial creation
               metadata: {
                 ...transaction.metadata,
                 vendorResponse: result.data,
@@ -926,6 +944,7 @@ export async function POST(request: NextRequest) {
             vendorSwitched: result.vendorSwitched,
             switchedFrom: result.switchedFrom,
             totalTime: Date.now() - startTime,
+            channel: CHANNEL_DISPLAY,
             commission: {
               vendorCommission: vendorCommission,
               vendorTotalAmount: vendorTotalAmount,
@@ -1000,6 +1019,7 @@ async function handleVendorFailure(
       },
       failedVendors: result.vendorErrors || [],
       refundStatus: wasDebited ? RefundStatus.PENDING : RefundStatus.NONE,
+      // channelDisplay already set on creation
       metadata: {
         ...transaction.metadata,
         error: result.error,
@@ -1101,6 +1121,7 @@ async function handleUnexpectedError(
         increment: 1,
       },
       refundStatus: wasDebited ? RefundStatus.PENDING : RefundStatus.NONE,
+      // channelDisplay already set on creation
       metadata: {
         ...transaction.metadata,
         error: error.message || "Unknown error",

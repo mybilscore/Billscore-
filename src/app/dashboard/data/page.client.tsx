@@ -1,4 +1,4 @@
-// app/dashboard/buy/data/page.client.tsx - COMPLETE FIXED
+// app/dashboard/buy/data/page.client.tsx - COMPLETE UPDATED WITH BRAND COLOR CATEGORY BUTTONS ONLY
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -130,7 +130,7 @@ const formatDate = (dateString: string | null) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
-// ✅ Detect network from phone number
+// Detect network from phone number
 const detectNetworkFromPhone = (phone: string, networks: NetworkInfo[] = []) => {
   if (!phone || phone.length < 4) return null;
 
@@ -179,7 +179,7 @@ const detectNetworkFromPhone = (phone: string, networks: NetworkInfo[] = []) => 
   return null;
 };
 
-// ✅ Service Detection Component
+// Service Detection Component
 const ServiceDetection = ({
   phoneNumber,
   detectedNetwork,
@@ -194,7 +194,7 @@ const ServiceDetection = ({
       <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
       <span className="text-xs text-blue-700 dark:text-blue-300">
         {detectedNetwork ? (
-          <>📡 <strong>{detectedNetwork.name}</strong> detected</>
+          <><strong>{detectedNetwork.name}</strong> detected</>
         ) : (
           <>Enter a valid phone number to detect network</>
         )}
@@ -203,7 +203,7 @@ const ServiceDetection = ({
   );
 };
 
-// ✅ Provider Button
+// Provider Button - ORIGINAL STYLE (no changes)
 const ProviderButton = ({
   provider,
   isSelected,
@@ -264,8 +264,8 @@ const ProviderButton = ({
   );
 };
 
-// ✅ Category Tag - Updated for Plan Types (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
-const CategoryTag = ({
+// UPDATED: Category Button - Compact with brand color
+const CategoryButton = ({
   category,
   isSelected,
   onClick,
@@ -276,71 +276,44 @@ const CategoryTag = ({
   onClick: () => void;
   planCount: number;
 }) => {
-  const getColor = (name: string, selected: boolean) => {
-    if (selected) return "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40";
-    
-    if (name === 'SME') {
-      return "text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30";
-    }
-    if (name === 'Daily') {
-      return "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30";
-    }
-    if (name === 'Weekly') {
-      return "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30";
-    }
-    if (name === 'Monthly') {
-      return "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30";
-    }
-    if (name === '2 Monthly') {
-      return "text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30";
-    }
-    if (name === 'Yearly') {
-      return "text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30";
-    }
-    return "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800";
-  };
-
   const getIcon = (name: string) => {
-    if (name === 'SME') {
-      return <Briefcase className="h-3 w-3" />;
-    }
-    if (name === 'Daily') {
-      return <Sun className="h-3 w-3" />;
-    }
-    if (name === 'Weekly') {
-      return <CalendarDays className="h-3 w-3" />;
-    }
-    if (name === 'Monthly') {
-      return <CalendarRange className="h-3 w-3" />;
-    }
-    if (name === '2 Monthly') {
-      return <CalendarCheck className="h-3 w-3" />;
-    }
-    if (name === 'Yearly') {
-      return <CalendarClock className="h-3 w-3" />;
-    }
-    return <Calendar className="h-3 w-3" />;
+    const icons: { [key: string]: React.ReactNode } = {
+      'SME': <Briefcase className="h-3 w-3" />,
+      'Daily': <Sun className="h-3 w-3" />,
+      'Weekly': <CalendarDays className="h-3 w-3" />,
+      'Monthly': <CalendarRange className="h-3 w-3" />,
+      '2 Monthly': <CalendarCheck className="h-3 w-3" />,
+      'Yearly': <CalendarClock className="h-3 w-3" />,
+    };
+    return icons[name] || <Calendar className="h-3 w-3" />;
   };
 
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-200 ${
         isSelected
-          ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 ring-1 ring-blue-400 dark:ring-blue-600"
-          : `${getColor(category.name, false)} hover:bg-opacity-50`
+          ? "bg-[#1e293b] text-white border-[#1e293b] shadow-sm"
+          : "bg-white text-gray-700 border-gray-200 hover:border-[#1e293b] hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:border-gray-500"
       }`}
     >
       {getIcon(category.name)}
       <span>{category.name}</span>
-      <span className={`text-[10px] ${isSelected ? "text-blue-500 dark:text-blue-400" : "text-gray-400 dark:text-gray-500"}`}>
-        ({planCount})
+      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+        isSelected 
+          ? 'bg-white/20 text-white' 
+          : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+      }`}>
+        {planCount}
       </span>
+      {isSelected && (
+        <Check className="h-2.5 w-2.5" />
+      )}
     </button>
   );
 };
 
-// ✅ Plan Card
+// Plan Card
 const PlanCard = ({
   plan,
   isSelected,
@@ -355,7 +328,7 @@ const PlanCard = ({
       onClick={onClick}
       className={`group relative rounded-lg border-2 p-2.5 text-left transition-all duration-200 min-h-[70px] ${
         isSelected
-          ? "border-blue-500 bg-blue-500 text-white shadow-md scale-[1.02]"
+          ? "border-[#1e293b] bg-[#1e293b] text-white shadow-md scale-[1.02]"
           : "border-gray-200 bg-white hover:border-[#1e293b]/30 hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
       }`}
     >
@@ -384,7 +357,7 @@ const PlanCard = ({
   );
 };
 
-// ✅ Status Message Component
+// Status Message Component
 const StatusMessage = ({ 
   error, 
   success, 
@@ -414,7 +387,7 @@ const StatusMessage = ({
           <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-green-700 dark:text-green-400">
-              Data purchase successful! 🎉
+              Data purchase successful!
             </p>
             {transactionId && (
               <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
@@ -461,7 +434,7 @@ export function DataClient({
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
   
-  // ✅ Dropdown states
+  // Dropdown states
   const [showDropdown, setShowDropdown] = useState(false);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -503,7 +476,7 @@ export function DataClient({
     }
   }, [phoneNumber, networks, providers]);
 
-  // ✅ Filter customers when typing
+  // Filter customers when typing
   useEffect(() => {
     if (phoneNumber.length > 0) {
       const filtered = recentCustomers.filter(c => 
@@ -537,7 +510,7 @@ export function DataClient({
     fetchRecentCustomers();
   }, []);
 
-  // ✅ Handle click outside to close dropdown
+  // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -599,7 +572,7 @@ export function DataClient({
     setPinError("");
   };
 
-  // ✅ Handle selecting a customer from dropdown
+  // Handle selecting a customer from dropdown
   const handleSelectCustomer = (customer: Customer) => {
     setPhoneNumber(customer.phone);
     setShowDropdown(false);
@@ -607,14 +580,14 @@ export function DataClient({
     setPinError("");
   };
 
-  // ✅ Handle input focus
+  // Handle input focus
   const handleInputFocus = () => {
     if (filteredCustomers.length > 0) {
       setShowDropdown(true);
     }
   };
 
-  // ✅ Handle input change
+  // Handle input change
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, "");
     setPhoneNumber(value);
@@ -773,18 +746,18 @@ export function DataClient({
           <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Get the best data bundles from all networks
-            {vendorInfo && (
+            {/* {vendorInfo && (
               <span className="text-xs text-gray-400 ml-2">
                 • Powered by {vendorInfo.name}
               </span>
-            )}
+            )} */}
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Form - 2 columns */}
           <div className="lg:col-span-2 space-y-6">
-            {/* ✅ Phone Number & Network Provider */}
+            {/* Phone Number & Network Provider */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Recipient Details
@@ -819,7 +792,7 @@ export function DataClient({
                   </div>
                 </div>
 
-                {/* ✅ Dropdown for recent customers */}
+                {/* Dropdown for recent customers */}
                 {showDropdown && filteredCustomers.length > 0 && (
                   <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                     <div className="sticky top-0 bg-gray-50 px-3 py-2 border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
@@ -876,7 +849,7 @@ export function DataClient({
                 detectedNetwork={detectedNetwork} 
               />
 
-              {/* Network Selection */}
+              {/* Network Selection - ORIGINAL STYLE */}
               <div className="mt-4">
                 <div className="flex items-center justify-between mb-3">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -902,26 +875,33 @@ export function DataClient({
                 </div>
                 {!detectedNetwork && phoneNumber.length >= 4 && (
                   <p className="mt-2 text-[10px] text-yellow-600 dark:text-yellow-400">
-                    ⚠️ Could not detect network. Please select manually.
+                    Could not detect network. Please select manually.
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Categories - Grouped by Plan Type (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly) */}
+            {/* UPDATED: Categories - Compact buttons with brand color */}
             {currentProvider && currentProvider.categories.length > 0 ? (
-              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    Plan Categories
-                  </h2>
-                  <span className="text-[10px] text-gray-500">
+              <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                      Plan Categories
+                    </h2>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                      Select a category to filter plans
+                    </p>
+                  </div>
+                  <span className="text-[10px] bg-[#1e293b] text-white px-2.5 py-1 rounded-full">
                     {currentProvider.categories.length} options
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                
+                {/* Categories as compact buttons */}
+                <div className="flex flex-wrap gap-2">
                   {currentProvider.categories.map((category) => (
-                    <CategoryTag
+                    <CategoryButton
                       key={category.id}
                       category={category}
                       isSelected={selectedCategory === category.id}
@@ -942,11 +922,16 @@ export function DataClient({
             {/* Data Plans - 5 columns */}
             {currentCategory && plans.length > 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {currentCategory.name} Plans
-                  </h2>
-                  <span className="text-[10px] text-gray-500">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {currentCategory.name} Plans
+                    </h2>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                      {plans.length} plans available
+                    </p>
+                  </div>
+                  <span className="text-xs bg-[#1e293b] text-white px-2.5 py-1 rounded-full">
                     {plans.length} plans
                   </span>
                 </div>
@@ -1110,7 +1095,7 @@ export function DataClient({
                   {selectedPlan && user.walletBalance < selectedPlan.price && (
                     <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
                       <p className="text-xs text-red-600 dark:text-red-400">
-                        ⚠️ Insufficient balance. You need {formatCurrency(selectedPlan.price - user.walletBalance)} more.
+                        Insufficient balance. You need {formatCurrency(selectedPlan.price - user.walletBalance)} more.
                       </p>
                     </div>
                   )}
@@ -1138,7 +1123,7 @@ export function DataClient({
 
               {!user.hasWallet && !isEnsuringWallet && (
                 <p className="text-center text-sm text-yellow-600 dark:text-yellow-400 mt-2">
-                  ⚠️ You need a wallet to make purchases. Creating one...
+                  You need a wallet to make purchases. Creating one...
                 </p>
               )}
             </div>

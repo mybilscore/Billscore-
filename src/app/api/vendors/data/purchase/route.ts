@@ -1,12 +1,11 @@
-// app/api/vendors/data/purchase/route.ts - WITH MINIMAL LOGGING
+// app/api/vendors/data/purchase/route.ts - WITH channelDisplay SET TO "WEB_APP"
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
-// import { cacheService as CacheService } from "~/lib/cache.service";
 import { CacheService } from "~/lib/cache/cache.service";
-import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus } from "@prisma/client";
+import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus, ChannelType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 // ============================================================
@@ -17,17 +16,14 @@ const isDev = process.env.NODE_ENV === 'development';
 const isDebug = process.env.DEBUG === 'true';
 
 function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
-  // Always log errors
   if (level === 'error') {
     console.error(`❌ ${message}`, data || '');
     return;
   }
-  // Always log warnings
   if (level === 'warn') {
     console.warn(`⚠️ ${message}`, data || '');
     return;
   }
-  // Only log info in development or debug mode
   if (!isDev && !isDebug) return;
   console.log(`✅ ${message}`, data || '');
 }
@@ -263,7 +259,7 @@ async function processRefund(
 }
 
 // ============================================================
-// MAIN API ROUTE - OPTIMIZED WITH MINIMAL LOGGING
+// MAIN API ROUTE
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -316,6 +312,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // STATIC CHANNEL - Always WEB_APP for web routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "WEB_APP";
+
+    // ============================================================
     // PARALLEL FETCH user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
@@ -330,7 +331,6 @@ export async function POST(request: NextRequest) {
     let customer = cachedCustomer;
     let walletBalance = cachedBalance?.balance;
 
-    // Fallback to database if cache misses
     if (!user) {
       const dbUser = await prisma.user.findUnique({
         where: { id: userId },
@@ -409,9 +409,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD
+    // CREATE TRANSACTION RECORD - channelDisplay = "WEB_APP"
     // ============================================================
-
+    
     const transaction = await prisma.vtuTransaction.create({
       data: {
         userId: user.id,
@@ -423,7 +423,8 @@ export async function POST(request: NextRequest) {
         network: networkEnum,
         networkPlan: planCode,
         status: TransactionStatus.PENDING,
-        channel: "WEB_APP",
+        channel: ChannelType.WEB_APP,
+        channelDisplay: CHANNEL_DISPLAY,
         dataPlanId: planId || null,
         metadata: {
           source: "DataAPI",
@@ -432,6 +433,8 @@ export async function POST(request: NextRequest) {
           planCode: planCode,
           customerId: customer.id,
           pinVerified: false,
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
@@ -734,6 +737,7 @@ export async function POST(request: NextRequest) {
             vendorSwitched: result.vendorSwitched,
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
+            channel: CHANNEL_DISPLAY,
             ...result.data,
           },
         });

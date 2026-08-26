@@ -1,4 +1,4 @@
-// app/api/vendors/education/purchase/route.ts - FIXED VERSION
+// app/api/vendors/education/purchase/route.ts - FIXED VERSION WITH channelDisplay
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -287,7 +287,8 @@ async function createFailedEducationTransaction(
         networkPlan: variationCode,
         status: TransactionStatus.FAILED,
         refundStatus: RefundStatus.NONE,
-        channel: ChannelType.MOBILE_APP,
+        channel: ChannelType.WEB_APP,
+        channelDisplay: "WEB_APP",
         isBulkPurchase: quantity > 1,
         bulkQuantity: quantity > 1 ? quantity : undefined,
         metadata: {
@@ -300,6 +301,8 @@ async function createFailedEducationTransaction(
           failedAt: new Date().toISOString(),
           wasDebited: false,
           requiresRefund: false,
+          channel: "WEB_APP",
+          channelDisplay: "WEB_APP",
           ...metadata,
         },
       },
@@ -351,6 +354,11 @@ export async function POST(request: NextRequest) {
     sessionUser = await requireAuth("/auth/sign-in");
     const body = await request.json();
     const { serviceId, variationCode, amount, quantity, phone, billersCode, pin } = body;
+
+    // ============================================================
+    // STATIC CHANNEL - Always WEB_APP for web routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "WEB_APP";
 
     // ============================================================
     // VALIDATION
@@ -582,7 +590,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD
+    // CREATE TRANSACTION RECORD - channelDisplay = "WEB_APP"
     // ============================================================
 
     const transaction = await prisma.vtuTransaction.create({
@@ -596,7 +604,8 @@ export async function POST(request: NextRequest) {
         network: null,
         networkPlan: variationCode,
         status: TransactionStatus.PENDING,
-        channel: ChannelType.MOBILE_APP,
+        channel: ChannelType.WEB_APP,
+        channelDisplay: CHANNEL_DISPLAY,
         isBulkPurchase: quantity > 1,
         bulkQuantity: quantity > 1 ? quantity : undefined,
         metadata: {
@@ -607,6 +616,8 @@ export async function POST(request: NextRequest) {
           billersCode: billersCode,
           pinVerified: true,
           wasDebited: false,
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
@@ -744,6 +755,7 @@ export async function POST(request: NextRequest) {
             netProfit: (vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0,
             totalCommission: (vendorCommission || 0) + ((vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0),
             effectiveRate: finalAmount > 0 ? ((vendorCommission || 0) / finalAmount) * 100 : 0,
+            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               vendorName: result.vendor,
@@ -849,6 +861,7 @@ export async function POST(request: NextRequest) {
           token: token,
           tokens: tokens,
           cards: cards,
+          channel: CHANNEL_DISPLAY,
           commission: {
             vendorCommission,
             vendorTotalAmount,
@@ -868,6 +881,7 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           vendorId: vendorId || undefined,
+          // channelDisplay already set on creation
           metadata: {
             ...transaction.metadata,
             error: vendorError.message,

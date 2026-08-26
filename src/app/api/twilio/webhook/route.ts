@@ -70,6 +70,76 @@ function generateValidationToken(): string {
 // GENERATE QR CODE FOR METER
 // ============================================================
 
+// Add this mapping at the top of the file after the imports
+
+// ============================================================
+// DISCO MAPPING - Supports both full names and acronyms
+// ============================================================
+
+const DISCO_MAPPING: Record<string, { code: string, fullName: string, serviceID: string }> = {
+  // Acronyms
+  'AEDC': { code: 'ABUJA', fullName: 'Abuja Electric', serviceID: 'abuja-electric' },
+  'IBEDC': { code: 'IBADAN', fullName: 'Ibadan Electric', serviceID: 'ibadan-electric' },
+  'EEDC': { code: 'ENUGU', fullName: 'Enugu Electric', serviceID: 'enugu-electric' },
+  'JED': { code: 'JOS', fullName: 'Jos Electric', serviceID: 'jos-electric' },
+  'PHED': { code: 'PORTHARCOURT', fullName: 'Port Harcourt Electric', serviceID: 'portharcourt-electric' },
+  'KEDCO': { code: 'KANO', fullName: 'Kano Electric', serviceID: 'kano-electric' },
+  'KAEDCO': { code: 'KADUNA', fullName: 'Kaduna Electric', serviceID: 'kaduna-electric' },
+  'IKEDC': { code: 'IKEJA', fullName: 'Ikeja Electric', serviceID: 'ikeja-electric' },
+  'EKEDC': { code: 'EKO', fullName: 'Eko Electric', serviceID: 'eko-electric' },
+  'BEDC': { code: 'BENIN', fullName: 'Benin Electric', serviceID: 'benin-electric' },
+  
+  // Full names
+  'ABUJA': { code: 'ABUJA', fullName: 'Abuja Electric', serviceID: 'abuja-electric' },
+  'IBADAN': { code: 'IBADAN', fullName: 'Ibadan Electric', serviceID: 'ibadan-electric' },
+  'ENUGU': { code: 'ENUGU', fullName: 'Enugu Electric', serviceID: 'enugu-electric' },
+  'JOS': { code: 'JOS', fullName: 'Jos Electric', serviceID: 'jos-electric' },
+  'PORTHARCOURT': { code: 'PORTHARCOURT', fullName: 'Port Harcourt Electric', serviceID: 'portharcourt-electric' },
+  'PORT HARCOURT': { code: 'PORTHARCOURT', fullName: 'Port Harcourt Electric', serviceID: 'portharcourt-electric' },
+  'KANO': { code: 'KANO', fullName: 'Kano Electric', serviceID: 'kano-electric' },
+  'KADUNA': { code: 'KADUNA', fullName: 'Kaduna Electric', serviceID: 'kaduna-electric' },
+  'IKEJA': { code: 'IKEJA', fullName: 'Ikeja Electric', serviceID: 'ikeja-electric' },
+  'EKO': { code: 'EKO', fullName: 'Eko Electric', serviceID: 'eko-electric' },
+  'BENIN': { code: 'BENIN', fullName: 'Benin Electric', serviceID: 'benin-electric' },
+  'PHCN': { code: 'PHCN', fullName: 'PHCN Electric', serviceID: 'phcn-electric' },
+};
+
+function normalizeDisco(input: string): { code: string; fullName: string; serviceID: string } | null {
+  if (!input) return null;
+  
+  const normalized = input.toUpperCase().trim();
+  
+  // Check if it's a valid DisCo
+  const mapped = DISCO_MAPPING[normalized];
+  if (mapped) {
+    return mapped;
+  }
+  
+  // Try to find by partial match
+  for (const [key, value] of Object.entries(DISCO_MAPPING)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return value;
+    }
+  }
+  
+  return null;
+}
+
+function getValidDiscosList(): string {
+  const uniqueDiscos = new Map<string, { code: string, fullName: string }>();
+  for (const [key, value] of Object.entries(DISCO_MAPPING)) {
+    if (!uniqueDiscos.has(value.code)) {
+      uniqueDiscos.set(value.code, { code: value.code, fullName: value.fullName });
+    }
+  }
+  
+  let list = "";
+  for (const [code, info] of uniqueDiscos) {
+    list += `   ${code} - ${info.fullName}\n`;
+  }
+  return list;
+}
+
 async function generateMeterQRCode(userId: string, meterNumber: string, disco: string): Promise<string> {
   try {
     const appUrl = getAppUrl();
@@ -1478,17 +1548,34 @@ async function getAvailableDiscosForWhatsApp(): Promise<string> {
           if (servicesResponse.ok) {
             const servicesData = await servicesResponse.json();
             if (servicesData.response_description === "000" && servicesData.content) {
-              let message = "";
-              servicesData.content.forEach((service: any) => {
+              let message = "Available DisCos:\n\n";
+              let hasServices = false;
+              for (const service of servicesData.content) {
                 let code = service.serviceID || "";
                 code = code.replace("-electric", "").toUpperCase();
                 let name = service.name || "";
                 name = name.replace(" Payment", "").replace(" Distribution Company", "").replace("Electricity", "").trim();
                 if (code && code.length > 1) {
-                  message += `   ${code} - ${name}\n`;
+                  // Find the acronym from mapping
+                  let acronym = "";
+                  for (const [key, value] of Object.entries(DISCO_MAPPING)) {
+                    if (value.code === code && key !== code) {
+                      acronym = ` (${key})`;
+                      break;
+                    }
+                  }
+                  message += `   ${code}${acronym} - ${name}\n`;
+                  hasServices = true;
                 }
-              });
-              if (message) return message;
+              }
+              if (hasServices) {
+                message += `\nExamples:\n`;
+                message += `- ADDMETER 1234567890 ABUJA HOME\n`;
+                message += `- ADDMETER 1234567890 AEDC HOME\n`;
+                message += `- ADDMETER 1234567890 IKEDC HOME\n`;
+                message += `- ADDMETER 1234567890 EKEDC HOME`;
+                return message;
+              }
             }
           }
         }
@@ -1498,16 +1585,17 @@ async function getAvailableDiscosForWhatsApp(): Promise<string> {
     console.error("Error fetching DisCos:", error);
   }
 
-  return `   IKEJA - Ikeja Electric
-   EKO - Eko Electric
-   ABUJA - Abuja Electric
-   KANO - Kano Electric
-   IBADAN - Ibadan Electric
-   BENIN - Benin Electric
-   ENUGU - Enugu Electric
-   JOS - Jos Electric
-   PORTHARCOURT - Port Harcourt Electric
-   KADUNA - Kaduna Electric`;
+  // Fallback with acronyms
+  return `Available DisCos:
+
+${getValidDiscosList()}
+
+Examples:
+- ADDMETER 1234567890 ABUJA HOME
+- ADDMETER 1234567890 AEDC HOME
+- ADDMETER 1234567890 IKEDC HOME
+- ADDMETER 1234567890 EKEDC HOME
+- ADDMETER 1234567890 IBEDC HOME`;
 }
 
 // ============================================================
@@ -1719,29 +1807,28 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 // ADD METER WITH VERIFICATION AND QR CODE
 // ============================================================
 
-async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, disco: string, name: string): Promise<string> {
+async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, discoInput: string, name: string): Promise<string> {
   try {
-    const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
-    const discoUpper = disco.toUpperCase();
-    if (!validDiscos.includes(discoUpper)) {
-      return `Invalid DisCo. Available: ${validDiscos.join(", ")}`;
+    // Normalize the DisCo input
+    const discoInfo = normalizeDisco(discoInput);
+    if (!discoInfo) {
+      const discosList = getValidDiscosList();
+      return `Invalid DisCo: "${discoInput}"
+
+Available DisCos (use full name or acronym):
+${discosList}
+
+Examples:
+- ADDMETER 1234567890 ABUJA HOME
+- ADDMETER 1234567890 AEDC HOME
+- ADDMETER 1234567890 EKEDC HOME
+- ADDMETER 1234567890 IKEDC HOME`;
     }
 
-    const serviceIDMap: Record<string, string> = {
-      "IKEJA": "ikeja-electric",
-      "EKO": "eko-electric",
-      "ABUJA": "abuja-electric",
-      "KANO": "kano-electric",
-      "IBADAN": "ibadan-electric",
-      "BENIN": "benin-electric",
-      "ENUGU": "enugu-electric",
-      "JOS": "jos-electric",
-      "PORTHARCOURT": "portharcourt-electric",
-      "KADUNA": "kaduna-electric",
-      "PHCN": "phcn-electric",
-    };
-    const serviceID = serviceIDMap[discoUpper] || discoUpper.toLowerCase() + "-electric";
+    const discoCode = discoInfo.code;
+    const serviceID = discoInfo.serviceID;
 
+    // Verification
     const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, "prepaid");
     
     let verificationMessage = "";
@@ -1769,6 +1856,7 @@ Could not verify meter: ${verificationResult.error || "Unknown error"}
 You can still save the meter.`;
     }
 
+    // Check existing
     const existing = await prisma.savedMeter.findFirst({
       where: { userId: userId, meterNumber: meterNumber },
     });
@@ -1777,7 +1865,7 @@ You can still save the meter.`;
       await prisma.savedMeter.update({
         where: { id: existing.id },
         data: { 
-          disco: discoUpper, 
+          disco: discoCode, 
           name: name || existing.name,
           customerName: customerName || existing.customerName,
           customerAddress: customerAddress || existing.customerAddress,
@@ -1789,13 +1877,13 @@ You can still save the meter.`;
         },
       });
       
-      const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
+      const qrLink = await generateMeterQRCode(userId, meterNumber, discoCode);
       
       return `Meter updated successfully!${verificationMessage}
 
 Meter Details:
 Meter: ${meterNumber}
-DisCo: ${discoUpper}
+DisCo: ${discoCode} (${discoInfo.fullName})
 Name: ${name || existing.name}
 ${customerName ? `Customer: ${customerName}` : ''}
 ${customerAddress ? `Address: ${customerAddress}` : ''}
@@ -1811,12 +1899,13 @@ You can also find this QR code in your saved meters.
 Type ELECTRIC to see all your meters and buy power!`;
     }
 
+    // Create new meter
     await prisma.savedMeter.create({
       data: {
         userId: userId,
         meterNumber: meterNumber,
-        disco: discoUpper,
-        name: name || `${discoUpper} Meter`,
+        disco: discoCode,
+        name: name || `${discoCode} Meter`,
         meterType: "Prepaid",
         isDefault: false,
         customerName: customerName || null,
@@ -1828,14 +1917,14 @@ Type ELECTRIC to see all your meters and buy power!`;
       },
     });
 
-    const qrLink = await generateMeterQRCode(userId, meterNumber, discoUpper);
+    const qrLink = await generateMeterQRCode(userId, meterNumber, discoCode);
 
     return `Meter added successfully!${verificationMessage}
 
 Meter Details:
 Meter: ${meterNumber}
-DisCo: ${discoUpper}
-Name: ${name || `${discoUpper} Meter`}
+DisCo: ${discoCode} (${discoInfo.fullName})
+Name: ${name || `${discoCode} Meter`}
 ${customerName ? `Customer: ${customerName}` : ''}
 ${customerAddress ? `Address: ${customerAddress}` : ''}
 ${customerPhone ? `Phone: ${customerPhone}` : ''}
@@ -4787,236 +4876,265 @@ Or: SETDEFAULTDECODER 1234567890`;
   // ============================================================
   
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
-      command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
-    userSessions.delete(user.id);
-    
-    if (parts.length === 1) {
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
+    command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
+  userSessions.delete(user.id);
+  
+  if (parts.length === 1) {
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
 
-      if (meters.length === 0) {
-        const discosList = await getAvailableDiscosForWhatsApp();
-        return `Buy Electricity
+    if (meters.length === 0) {
+      const discosList = await getAvailableDiscosForWhatsApp();
+      return `Buy Electricity
 
 You don't have any saved meters.
 
 To buy electricity for any meter:
 ELECTRIC [meter_number] [disco] [amount]
 
-Example: ELECTRIC 1234567890 ABUJA 5000
+Examples:
+ELECTRIC 1234567890 ABUJA 5000
+ELECTRIC 1234567890 AEDC 5000
+ELECTRIC 1234567890 IKEDC 5000
 
 To add a meter for quick buying:
 ADDMETER [meter_number] [disco] [name]
 
 Available DisCos:
 ${discosList}`;
-      }
-
-      let message = "Your Saved Meters:\n\n";
-      meters.forEach((meter: any, index: number) => {
-        const defaultTag = meter.isDefault ? " (Default)" : "";
-        message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-        message += `   ${meter.disco}\n`;
-        message += `   ${meter.meterNumber}\n`;
-        if (meter.customerName) {
-          message += `   Customer: ${meter.customerName}\n`;
-        }
-        if (meter.customerAddress) {
-          message += `   Address: ${meter.customerAddress}\n`;
-        }
-        message += `\n`;
-      });
-
-      message += `To buy for saved meter: ELECTRIC [index] [amount]\n`;
-      message += `Example: ELECTRIC 1 5000\n\n`;
-      message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
-      message += `Example: ELECTRIC 1234567890 ABUJA 5000\n\n`;
-      message += `To add more meters: ADDMETER [meter] [disco] [name]`;
-
-      return message;
     }
 
-    if (parts.length >= 4) {
-      const [, meterNumber, disco, amountStr] = parts;
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount
+    let message = "Your Saved Meters:\n\n";
+    meters.forEach((meter: any, index: number) => {
+      const defaultTag = meter.isDefault ? " (Default)" : "";
+      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+      message += `   ${meter.disco}\n`;
+      message += `   ${meter.meterNumber}\n`;
+      if (meter.customerName) {
+        message += `   Customer: ${meter.customerName}\n`;
+      }
+      if (meter.customerAddress) {
+        message += `   Address: ${meter.customerAddress}\n`;
+      }
+      message += `\n`;
+    });
+
+    message += `To buy for saved meter: ELECTRIC [index] [amount]\n`;
+    message += `Example: ELECTRIC 1 5000\n\n`;
+    message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
+    message += `Example: ELECTRIC 1234567890 ABUJA 5000\n\n`;
+    message += `To add more meters: ADDMETER [meter] [disco] [name]`;
+
+    return message;
+  }
+
+  if (parts.length >= 4) {
+    const [, meterNumber, discoInput, amountStr] = parts;
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount
 
 Minimum is NGN 100.
 Example: ELECTRIC 1234567890 ABUJA 5000`;
-      }
-      
-      const validDiscos = ["IKEJA", "EKO", "ABUJA", "KANO", "PHCN", "IBADAN", "BENIN", "ENUGU", "JOS", "PORTHARCOURT", "KADUNA"];
-      const discoUpper = disco.toUpperCase();
-      if (!validDiscos.includes(discoUpper)) {
-        return `Invalid DisCo: ${discoUpper}
+    }
+    
+    // ✅ Use the normalizeDisco function to support both full names and acronyms
+    const discoInfo = normalizeDisco(discoInput);
+    if (!discoInfo) {
+      const discosList = getValidDiscosList();
+      return `Invalid DisCo: "${discoInput}"
 
-Available DisCos:
-${validDiscos.join(", ")}`;
-      }
-      
-      const verificationResult = await verifyMeterWithVTpass(
-        discoUpper.toLowerCase() + "-electric",
-        meterNumber,
-        "prepaid"
-      );
-      
-      let customerName = "Unknown";
-      if (verificationResult.success) {
-        customerName = verificationResult.data?.customerName || "Unknown";
-      } else {
-        return `Could Not Verify Meter
+Available DisCos (use full name or acronym):
+${discosList}
+
+Examples:
+ELECTRIC 1234567890 ABUJA 5000
+ELECTRIC 1234567890 AEDC 5000
+ELECTRIC 1234567890 IKEDC 5000
+ELECTRIC 1234567890 EKEDC 5000
+ELECTRIC 1234567890 IBEDC 5000`;
+    }
+    
+    const discoUpper = discoInfo.code;
+    const serviceID = discoInfo.serviceID;
+    
+    // ✅ Verify meter using the correct serviceID
+    const verificationResult = await verifyMeterWithVTpass(
+      serviceID,
+      meterNumber,
+      "prepaid"
+    );
+    
+    let customerName = "Unknown";
+    if (verificationResult.success) {
+      customerName = verificationResult.data?.customerName || "Unknown";
+    } else {
+      return `Could Not Verify Meter
 
 ${verificationResult.error || "Unknown error"}
 
 You can still proceed with the purchase.
 
-To continue: ELECTRIC ${meterNumber} ${discoUpper} ${amount}
+To continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}
 To cancel: Type HELP for other options.`;
-      }
-      
-      return await processElectricityPurchaseWithPin(
-        user,
-        meterNumber,
-        amount,
-        discoUpper,
-        "Prepaid",
-        customerName
-      );
     }
     
-    if (parts.length === 3) {
-      const [, indexStr, amountStr] = parts;
-      const index = parseInt(indexStr) - 1;
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(index) || index < 0) {
-        return `Invalid Selection
+    return await processElectricityPurchaseWithPin(
+      user,
+      meterNumber,
+      amount,
+      discoUpper,
+      "Prepaid",
+      customerName
+    );
+  }
+  
+  if (parts.length === 3) {
+    const [, indexStr, amountStr] = parts;
+    const index = parseInt(indexStr) - 1;
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(index) || index < 0) {
+      return `Invalid Selection
 
 Please choose a number from the list.
 Example: ELECTRIC 1 5000`;
-      }
-      
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount
+    }
+    
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount
 
 Minimum is NGN 100.
 Example: ELECTRIC 1 5000`;
-      }
-      
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
-      
-      if (index >= meters.length) {
-        return `Invalid Selection
-
-Please choose a number from the list.`;
-      }
-      
-      const selectedMeter = meters[index];
-      
-      return await processElectricityPurchaseDirect(
-        user,
-        selectedMeter.meterNumber,
-        amount,
-        selectedMeter.disco,
-        selectedMeter.meterType || "Prepaid"
-      );
-    }
-    
-    if (parts.length === 2) {
-      const amountStr = parts[1];
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount
-
-Minimum is NGN 100.
-Example: ELECTRIC 5000`;
-      }
-      
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
-      
-      if (meters.length === 0) {
-        return `No Saved Meters
-
-You don't have any saved meters.
-
-To buy for any meter:
-ELECTRIC [meter_number] [disco] [amount]
-
-Example: ELECTRIC 1234567890 ABUJA 5000
-
-To add a meter: ADDMETER [meter_number] [disco] [name]`;
-      }
-      
-      let selectedMeter = meters.find(m => m.isDefault) || meters[0];
-      
-      if (meters.length > 1 && !meters.find(m => m.isDefault)) {
-        let message = "Multiple Meters Found\n\nPlease select one:\n\n";
-        meters.forEach((meter: any, index: number) => {
-          message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
-          message += `   ${meter.disco}\n\n`;
-        });
-        message += `Reply with: ELECTRIC [index] [amount]\n`;
-        message += `Example: ELECTRIC 1 5000`;
-        return message;
-      }
-      
-      return await processElectricityPurchaseDirect(
-        user,
-        selectedMeter.meterNumber,
-        amount,
-        selectedMeter.disco,
-        selectedMeter.meterType || "Prepaid"
-      );
     }
     
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     });
-
-    let message = "Buy Electricity\n\n";
     
-    if (meters.length > 0) {
-      message += "Your Saved Meters:\n";
-      meters.forEach((meter: any, index: number) => {
-        const defaultTag = meter.isDefault ? " (Default)" : "";
-        message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-        message += `   ${meter.disco}\n\n`;
-      });
-      message += `To buy: ELECTRIC [index] [amount]\n`;
-      message += `Example: ELECTRIC 1 5000\n\n`;
+    if (index >= meters.length) {
+      return `Invalid Selection
+
+Please choose a number from the list.`;
     }
     
-    message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
-    message += `Example: ELECTRIC 1234567890 ABUJA 5000\n\n`;
-    message += `To add meter: ADDMETER [meter] [disco] [name]\n`;
-    message += `To see DisCos: DISCOS`;
-
-    return message;
+    const selectedMeter = meters[index];
+    
+    return await processElectricityPurchaseDirect(
+      user,
+      selectedMeter.meterNumber,
+      amount,
+      selectedMeter.disco,
+      selectedMeter.meterType || "Prepaid"
+    );
   }
+  
+  if (parts.length === 2) {
+    const amountStr = parts[1];
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount
+
+Minimum is NGN 100.
+Example: ELECTRIC 5000`;
+    }
+    
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+    
+    if (meters.length === 0) {
+      return `No Saved Meters
+
+You don't have any saved meters.
+
+To buy for any meter:
+ELECTRIC [meter_number] [disco] [amount]
+
+Examples:
+ELECTRIC 1234567890 ABUJA 5000
+ELECTRIC 1234567890 AEDC 5000
+
+To add a meter: ADDMETER [meter_number] [disco] [name]`;
+    }
+    
+    let selectedMeter = meters.find(m => m.isDefault) || meters[0];
+    
+    if (meters.length > 1 && !meters.find(m => m.isDefault)) {
+      let message = "Multiple Meters Found\n\nPlease select one:\n\n";
+      meters.forEach((meter: any, index: number) => {
+        message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
+        message += `   ${meter.disco}\n\n`;
+      });
+      message += `Reply with: ELECTRIC [index] [amount]\n`;
+      message += `Example: ELECTRIC 1 5000`;
+      return message;
+    }
+    
+    return await processElectricityPurchaseDirect(
+      user,
+      selectedMeter.meterNumber,
+      amount,
+      selectedMeter.disco,
+      selectedMeter.meterType || "Prepaid"
+    );
+  }
+  
+  const meters = await prisma.savedMeter.findMany({
+    where: { userId: user.id },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+  });
+
+  let message = "Buy Electricity\n\n";
+  
+  if (meters.length > 0) {
+    message += "Your Saved Meters:\n";
+    meters.forEach((meter: any, index: number) => {
+      const defaultTag = meter.isDefault ? " (Default)" : "";
+      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+      message += `   ${meter.disco}\n\n`;
+    });
+    message += `To buy: ELECTRIC [index] [amount]\n`;
+    message += `Example: ELECTRIC 1 5000\n\n`;
+  }
+  
+  message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
+  message += `Examples:\n`;
+  message += `- ELECTRIC 1234567890 ABUJA 5000\n`;
+  message += `- ELECTRIC 1234567890 AEDC 5000\n`;
+  message += `- ELECTRIC 1234567890 IKEDC 5000\n\n`;
+  message += `To add meter: ADDMETER [meter] [disco] [name]\n`;
+  message += `To see DisCos: DISCOS`;
+
+  return message;
+}
 
   // ========== DISCOS ==========
-  if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
-    userSessions.delete(user.id);
-    const discosList = await getAvailableDiscosForWhatsApp();
-    return `Available DisCos:
+// ========== DISCOS ==========
+if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
+  userSessions.delete(user.id);
+  const discosList = getValidDiscosList();
+  return `Available DisCos (use full name or acronym):
 
 ${discosList}
 
-To add a meter: ADDMETER [meter_number] [disco_code] [name]
-Example: ADDMETER 1234567890 ABUJA HOME`;
-  }
+Examples:
+- ADDMETER 1234567890 ABUJA HOME
+- ADDMETER 1234567890 AEDC HOME
+- ADDMETER 1234567890 IKEDC HOME
+- ADDMETER 1234567890 EKEDC HOME
+- ADDMETER 1234567890 IBEDC HOME
+
+To buy electricity:
+ELECTRIC [meter_number] [disco] [amount]
+Example: ELECTRIC 1234567890 ABUJA 5000`;
+}
 
   // ============================================================
   // CABLE - NO PIN FOR OWN DECODERS

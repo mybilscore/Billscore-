@@ -912,8 +912,26 @@ model User {
   initiatedRefunds      Refund[]        @relation("InitiatedRefunds")
   processedRefunds      Refund[]        @relation("ProcessedRefunds")
   approvedRefunds       Refund[]        @relation("ApprovedRefunds")
+   passwordResets        PasswordReset[]  
 
   @@map("users")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("password_resets")
 }
 
 model Channel {

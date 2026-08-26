@@ -1,3 +1,5 @@
+// app/dashboard/transactions/page.client.tsx
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -77,6 +79,7 @@ interface Transaction {
   createdAt: string;
   updatedAt: string;
   channel: string | null;
+  channelDisplay: string | null;
   isBulkPurchase: boolean;
   bulkQuantity: number | null;
   user: {
@@ -208,56 +211,36 @@ const getTypeLabel = (type: string) => {
   return labels[type] || type;
 };
 
-// ✅ UPDATED: Channel helper functions with correct mapping
-const getChannelIcon = (channel: string | null) => {
-  if (!channel) return <Globe className="h-3.5 w-3.5 text-gray-400" />;
-  
-  const channelMap: Record<string, any> = {
-    WHATSAPP: <MessageSquare className="h-3.5 w-3.5 text-green-500" />,
-    MOBILE_APP: <Smartphone className="h-3.5 w-3.5 text-blue-500" />,
-    WEB_APP: <Monitor className="h-3.5 w-3.5 text-purple-500" />,
-    USSD: <Radio className="h-3.5 w-3.5 text-orange-500" />,
-    SMS: <Send className="h-3.5 w-3.5 text-gray-500" />,
-    TELEGRAM: <Send className="h-3.5 w-3.5 text-blue-400" />,
-    MESSENGER: <MessageSquare className="h-3.5 w-3.5 text-blue-600" />,
-    API: <Code className="h-3.5 w-3.5 text-purple-600" />,
-  };
-  
-  return channelMap[channel] || <Globe className="h-3.5 w-3.5 text-gray-400" />;
+// ✅ SIMPLE: Just return channelDisplay as-is
+const getDisplayChannel = (transaction: Transaction): string => {
+  return transaction.channelDisplay || transaction.channel || "Unknown";
 };
 
-const getChannelLabel = (channel: string | null) => {
-  if (!channel) return "Unknown";
-  
-  const labels: Record<string, string> = {
-    WHATSAPP: "WhatsApp",
-    MOBILE_APP: "Mobile App",
-    WEB_APP: "Web App",
-    USSD: "USSD",
-    SMS: "SMS",
-    TELEGRAM: "Telegram",
-    MESSENGER: "Messenger",
-    API: "API",
-  };
-  
-  return labels[channel] || channel;
+// Channel icon based on display text
+const getChannelIcon = (channel: string) => {
+  const lower = channel.toLowerCase();
+  if (lower.includes('whatsapp')) return <MessageSquare className="h-3.5 w-3.5 text-green-500" />;
+  if (lower.includes('mobile') || lower.includes('app')) return <Smartphone className="h-3.5 w-3.5 text-blue-500" />;
+  if (lower.includes('web')) return <Monitor className="h-3.5 w-3.5 text-purple-500" />;
+  if (lower.includes('ussd')) return <Radio className="h-3.5 w-3.5 text-orange-500" />;
+  if (lower.includes('sms')) return <Send className="h-3.5 w-3.5 text-gray-500" />;
+  if (lower.includes('telegram')) return <Send className="h-3.5 w-3.5 text-blue-400" />;
+  if (lower.includes('messenger')) return <MessageSquare className="h-3.5 w-3.5 text-blue-600" />;
+  if (lower.includes('api')) return <Code className="h-3.5 w-3.5 text-purple-600" />;
+  return <Globe className="h-3.5 w-3.5 text-gray-400" />;
 };
 
-const getChannelColor = (channel: string | null) => {
-  if (!channel) return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
-  
-  const colors: Record<string, string> = {
-    WHATSAPP: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    MOBILE_APP: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    WEB_APP: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    USSD: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-    SMS: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
-    TELEGRAM: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    MESSENGER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    API: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  };
-  
-  return colors[channel] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
+const getChannelColor = (channel: string) => {
+  const lower = channel.toLowerCase();
+  if (lower.includes('whatsapp')) return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+  if (lower.includes('mobile') || lower.includes('app')) return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+  if (lower.includes('web')) return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400";
+  if (lower.includes('ussd')) return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
+  if (lower.includes('sms')) return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
+  if (lower.includes('telegram')) return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+  if (lower.includes('messenger')) return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+  if (lower.includes('api')) return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400";
+  return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
 };
 
 // Stats Card Component
@@ -319,6 +302,9 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   const hasBalanceAfter = transaction.balanceAfter !== null && 
                          transaction.balanceAfter !== undefined && 
                          !isNaN(transaction.balanceAfter);
+
+  // ✅ Just get the display channel
+  const displayChannel = getDisplayChannel(transaction);
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-800 last:border-0">
@@ -388,11 +374,11 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
           </span>
         </div>
 
-        {/* Channel - UPDATED with proper display */}
+        {/* ✅ Channel - Display as-is */}
         <div className="col-span-2 flex items-center">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
-            {getChannelIcon(transaction.channel)}
-            {getChannelLabel(transaction.channel)}
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(displayChannel)}`}>
+            {getChannelIcon(displayChannel)}
+            {displayChannel}
           </span>
           {transaction.isBulkPurchase && (
             <span className="ml-1 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
@@ -461,15 +447,15 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </span>
             </div>
             
-            {/* Channel in expanded view - UPDATED */}
+            {/* ✅ Channel in expanded view */}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
                 <MessageSquare className="h-3.5 w-3.5" />
                 Channel
               </span>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
-                {getChannelIcon(transaction.channel)}
-                {getChannelLabel(transaction.channel)}
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(displayChannel)}`}>
+                {getChannelIcon(displayChannel)}
+                {displayChannel}
               </span>
             </div>
             
@@ -659,6 +645,15 @@ export function TransactionsClient({
 
   const totalPages = Math.ceil(totalTransactions / pageSize);
 
+  // Get unique channel display values
+  const channelOptions = Array.from(
+    new Set(
+      transactions
+        .map((t) => t.channelDisplay || t.channel)
+        .filter(Boolean)
+    )
+  );
+
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     try {
@@ -668,7 +663,7 @@ export function TransactionsClient({
         ...(searchTerm && { search: searchTerm }),
         ...(filterType !== "all" && { type: filterType }),
         ...(filterStatus !== "all" && { status: filterStatus }),
-        ...(filterChannel !== "all" && { channel: filterChannel }),
+        ...(filterChannel !== "all" && { channelDisplay: filterChannel }),
       });
 
       const response = await fetch(`/api/transactions?${params}`);
@@ -714,7 +709,6 @@ export function TransactionsClient({
 
   const transactionTypes = Array.from(new Set(transactions.map((t) => t.type)));
   const statuses = ["SUCCESS", "FAILED", "PENDING", "PROCESSING"];
-  const channels = Array.from(new Set(transactions.map((t) => t.channel).filter(Boolean)));
 
   const brandColor = '#1e293b';
 
@@ -858,7 +852,6 @@ export function TransactionsClient({
                   ))}
                 </select>
               </div>
-              {/* Channel Filter - UPDATED */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Channel
@@ -869,9 +862,9 @@ export function TransactionsClient({
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 >
                   <option value="all">All Channels</option>
-                  {channels.map((channel) => (
+                  {channelOptions.map((channel) => (
                     <option key={channel} value={channel}>
-                      {getChannelLabel(channel)}
+                      {channel}
                     </option>
                   ))}
                 </select>
@@ -921,83 +914,86 @@ export function TransactionsClient({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-                {transactions.map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="rounded-full bg-gray-100 p-2 dark:bg-gray-800">
-                          {getTypeIcon(transaction.type)}
+                {transactions.map((transaction) => {
+                  const displayChannel = getDisplayChannel(transaction);
+                  return (
+                    <div
+                      key={transaction.id}
+                      className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="rounded-full bg-gray-100 p-2 dark:bg-gray-800">
+                            {getTypeIcon(transaction.type)}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              {getTypeLabel(transaction.type)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {transaction.product}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {getTypeLabel(transaction.type)}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {transaction.product}
-                          </p>
-                        </div>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getStatusColor(transaction.status)}`}>
+                          {getStatusIcon(transaction.status)}
+                          {transaction.status}
+                        </span>
                       </div>
-                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getStatusColor(transaction.status)}`}>
-                        {getStatusIcon(transaction.status)}
-                        {transaction.status}
-                      </span>
-                    </div>
 
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-500 dark:text-gray-400">Amount</span>
-                        <span className="font-medium text-gray-900 dark:text-white">
-                          {formatCurrency(transaction.amount)}
-                        </span>
-                      </div>
-                      
-                      {/* Channel in grid view - UPDATED */}
-                      <div className="flex justify-between">
-                        <span className="text-gray-500 dark:text-gray-400">Channel</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getChannelColor(transaction.channel)}`}>
-                          {getChannelIcon(transaction.channel)}
-                          {getChannelLabel(transaction.channel)}
-                        </span>
-                      </div>
-                      
-                      {transaction.meterNumber && (
+                      <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-gray-500 dark:text-gray-400">Meter</span>
-                          <span className="font-mono text-xs text-gray-900 dark:text-white">
-                            {transaction.meterNumber}
+                          <span className="text-gray-500 dark:text-gray-400">Amount</span>
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            {formatCurrency(transaction.amount)}
                           </span>
                         </div>
-                      )}
-                      
-                      {transaction.phoneNumber && !transaction.meterNumber && (
+                        
+                        {/* ✅ Channel in grid view */}
                         <div className="flex justify-between">
-                          <span className="text-gray-500 dark:text-gray-400">Phone</span>
-                          <span className="text-gray-900 dark:text-white">{transaction.phoneNumber}</span>
+                          <span className="text-gray-500 dark:text-gray-400">Channel</span>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getChannelColor(displayChannel)}`}>
+                            {getChannelIcon(displayChannel)}
+                            {displayChannel}
+                          </span>
                         </div>
-                      )}
-                      
-                      {transaction.networkPlan && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-500 dark:text-gray-400">Plan</span>
-                          <span className="text-gray-900 dark:text-white">{transaction.networkPlan}</span>
+                        
+                        {transaction.meterNumber && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500 dark:text-gray-400">Meter</span>
+                            <span className="font-mono text-xs text-gray-900 dark:text-white">
+                              {transaction.meterNumber}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {transaction.phoneNumber && !transaction.meterNumber && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500 dark:text-gray-400">Phone</span>
+                            <span className="text-gray-900 dark:text-white">{transaction.phoneNumber}</span>
+                          </div>
+                        )}
+                        
+                        {transaction.networkPlan && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500 dark:text-gray-400">Plan</span>
+                            <span className="text-gray-900 dark:text-white">{transaction.networkPlan}</span>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                          <span>{formatDateShort(transaction.createdAt)}</span>
+                          {transaction.deliveredAt && (
+                            <span className="text-green-600">Delivered</span>
+                          )}
+                          {transaction.scheduledFor && !transaction.deliveredAt && (
+                            <span className="text-yellow-600">Scheduled</span>
+                          )}
                         </div>
-                      )}
-                      
-                      <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <span>{formatDateShort(transaction.createdAt)}</span>
-                        {transaction.deliveredAt && (
-                          <span className="text-green-600">✓ Delivered</span>
-                        )}
-                        {transaction.scheduledFor && !transaction.deliveredAt && (
-                          <span className="text-yellow-600">⏳ Scheduled</span>
-                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

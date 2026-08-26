@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search") || "";
     const type = searchParams.get("type");
     const status = searchParams.get("status");
+    const channelDisplay = searchParams.get("channelDisplay");
 
     const skip = (page - 1) * limit;
 
@@ -38,6 +39,10 @@ export async function GET(request: NextRequest) {
       where.status = status as TransactionStatus;
     }
 
+    if (channelDisplay && channelDisplay !== "all") {
+      where.channelDisplay = channelDisplay;
+    }
+
     // Fetch transactions
     const [transactions, total] = await Promise.all([
       prisma.vtuTransaction.findMany({
@@ -52,11 +57,20 @@ export async function GET(request: NextRequest) {
               phone: true,
             },
           },
+          walletTransaction: {
+            select: {
+              balanceBefore: true,
+              balanceAfter: true,
+              reference: true,
+              description: true,
+            },
+          },
         },
       }),
       prisma.vtuTransaction.count({ where }),
     ]);
 
+    // ✅ Format transactions - INCLUDE channelDisplay and all fields
     const formattedTransactions = transactions.map((tx) => ({
       id: tx.id,
       type: tx.transactionType,
@@ -66,11 +80,27 @@ export async function GET(request: NextRequest) {
       status: tx.status,
       phoneNumber: tx.phoneNumber,
       network: tx.network,
+      networkPlan: tx.networkPlan,
+      meterNumber: tx.meterNumber,
+      meterType: tx.meterType,
+      token: tx.token,
+      vendor: tx.vendor,
       vendorReference: tx.vendorReference,
+      vendorCommission: tx.vendorCommission ? Number(tx.vendorCommission) : null,
+      channel: tx.channel,
+      channelDisplay: tx.channelDisplay, // ✅ CRITICAL FIX - include channelDisplay
+      isBulkPurchase: tx.isBulkPurchase,
+      bulkQuantity: tx.bulkQuantity,
+      scheduledFor: tx.scheduledFor?.toISOString() || null,
+      deliveredAt: tx.deliveredAt?.toISOString() || null,
       createdAt: tx.createdAt.toISOString(),
       updatedAt: tx.updatedAt.toISOString(),
-      deliveredAt: tx.deliveredAt?.toISOString(),
       user: tx.user,
+      balanceBefore: tx.walletTransaction?.balanceBefore ? Number(tx.walletTransaction.balanceBefore) : null,
+      balanceAfter: tx.walletTransaction?.balanceAfter ? Number(tx.walletTransaction.balanceAfter) : null,
+      walletReference: tx.walletTransaction?.reference || null,
+      walletDescription: tx.walletTransaction?.description || null,
+      hasWalletTransaction: !!tx.walletTransaction,
     }));
 
     return NextResponse.json({

@@ -1,3 +1,5 @@
+// app/api/auth/forgot-password/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { sendPasswordResetEmail } from "~/lib/email";
@@ -22,17 +24,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find user by email with party information
+    // Find user by email - just get id, email, and fullName
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-      include: {
-        party: {
-          include: {
-            individual: true,
-            organization: true,
-            community: true,
-          },
-        },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
       },
     });
 
@@ -65,17 +63,8 @@ export async function POST(req: NextRequest) {
       console.log(`✅ Password reset record created with ID: ${passwordReset.id}`);
       console.log(`🔑 OTP: ${otp} (will expire at ${expiresAt})`);
 
-      // Get user's name
-      let userName = user.email?.split('@')[0] || "User";
-      if (user.party) {
-        if (user.party.individual) {
-          userName = `${user.party.individual.first_name} ${user.party.individual.last_name}`;
-        } else if (user.party.organization) {
-          userName = user.party.organization.name;
-        } else if (user.party.community) {
-          userName = user.party.community.name;
-        }
-      }
+      // Use fullName directly from User model
+      const userName = user.fullName || user.email?.split('@')[0] || "User";
 
       console.log(`📧 Sending password reset email to: ${user.email}`);
       console.log(`👤 User name: ${userName}`);

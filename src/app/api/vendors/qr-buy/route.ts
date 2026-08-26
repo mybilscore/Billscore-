@@ -1,5 +1,5 @@
 // app/api/vendors/qr-buy/route.ts
-// COMPLETE UPDATED VERSION - WITH FULL METER INFORMATION SAVING
+// COMPLETE UPDATED VERSION - WITH FULL METER INFORMATION SAVING AND QR_CODE channel
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -315,6 +315,11 @@ export async function POST(request: NextRequest) {
     log('info', `QR Buy request: ${serviceType} for ${identifier}, amount: ${amount}, user: ${user?.id || 'guest'}`);
 
     // ============================================================
+    // STATIC CHANNEL - QR_CODE for QR purchases
+    // ============================================================
+    const CHANNEL_DISPLAY = "QR_CODE";
+
+    // ============================================================
     // VALIDATION
     // ============================================================
 
@@ -518,14 +523,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION
+    // CREATE TRANSACTION - channelDisplay = "QR_CODE"
     // ============================================================
 
     const meterTypeEnum = serviceType === "electricity" 
       ? (meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE)
       : undefined;
 
-    const channelType = isGuest ? ChannelType.GUEST : ChannelType.WEB_APP;
+    const channelType = ChannelType.QR_PAYMENT;
 
     const transaction = await prisma.vtuTransaction.create({
       data: {
@@ -540,6 +545,7 @@ export async function POST(request: NextRequest) {
         networkPlan: serviceType === "cable" ? packageCode : undefined,
         status: TransactionStatus.PENDING,
         channel: channelType,
+        channelDisplay: CHANNEL_DISPLAY,
         metadata: {
           source: "QR_BUY_API",
           service: serviceType.toUpperCase(),
@@ -555,6 +561,8 @@ export async function POST(request: NextRequest) {
           qrPurchase: true,
           isGuest: isGuest,
           qrHash: qrHash,
+          channel: "QR_CODE",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
@@ -684,6 +692,12 @@ export async function POST(request: NextRequest) {
                 description: `QR Purchase: ${serviceType} for ${identifier}`,
                 status: TransactionStatus.SUCCESS,
                 category: serviceType === "electricity" ? "ELECTRICITY" : "CABLE_TV",
+                channel: channelType,
+                metadata: {
+                  channel: "QR_CODE",
+                  channelDisplay: CHANNEL_DISPLAY,
+                  qrPurchase: true,
+                },
               },
             }),
           ]);
@@ -716,6 +730,7 @@ export async function POST(request: NextRequest) {
             netProfit: grossProfit,
             totalCommission: (vendorCommission || 0) + (platformCommission || 0),
             effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               vendorResponse: result.data,
@@ -778,6 +793,8 @@ export async function POST(request: NextRequest) {
                 vendorReference: result.vendorReference,
                 token: result.data?.token,
                 completedAt: new Date().toISOString(),
+                channel: "QR_CODE",
+                channelDisplay: CHANNEL_DISPLAY,
                 commission: {
                   vendorCommission,
                   vendorTotalAmount,
@@ -853,6 +870,7 @@ export async function POST(request: NextRequest) {
             switchedFrom: result.switchedFrom,
             isGuest: isGuest,
             totalTime: totalTime,
+            channel: CHANNEL_DISPLAY,
             commission: {
               vendorCommission: vendorCommission,
               vendorTotalAmount: vendorTotalAmount,
@@ -886,6 +904,7 @@ export async function POST(request: NextRequest) {
             vendorReference: result.vendorReference || null,
             selectedVendorId: vendorId,
             failedVendors: result.vendorErrors || [],
+            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               error: result.error || "Vendor transaction failed",
@@ -921,6 +940,8 @@ export async function POST(request: NextRequest) {
               pinVerified: true,
               qrPurchase: true,
               isGuest: isGuest,
+              channel: "QR_CODE",
+              channelDisplay: CHANNEL_DISPLAY,
               failedAt: new Date().toISOString(),
             },
           },
@@ -961,6 +982,7 @@ export async function POST(request: NextRequest) {
               token: vendorResult.data?.token || "TOKEN_GENERATED",
               isGuest: isGuest,
               vendor: vendorResult.vendor,
+              channel: CHANNEL_DISPLAY,
               warning: "Request timed out but vendor transaction succeeded",
               customerInfo: serviceType === "electricity" ? {
                 name: vendorResult.data?.customerName || vendorResult.data?.name || null,
@@ -985,6 +1007,7 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           selectedVendorId: vendorId,
+          // channelDisplay already set on creation
           metadata: {
             ...transaction.metadata,
             error: error.message || "Unknown error",
@@ -1016,6 +1039,8 @@ export async function POST(request: NextRequest) {
             errorType: error.name,
             qrPurchase: true,
             isGuest: isGuest,
+            channel: "QR_CODE",
+            channelDisplay: CHANNEL_DISPLAY,
             failedAt: new Date().toISOString(),
           },
         },

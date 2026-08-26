@@ -1,3 +1,6 @@
+// app/api/vendors/subscription/create/route.ts
+// COMPLETE UPDATED VERSION - With channelDisplay support
+
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
@@ -264,6 +267,11 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth("/auth/sign-in");
     const body = await request.json();
     const { meterNumber, discoCode, amount, deliveryDate, pin } = body;
+
+    // ============================================================
+    // STATIC CHANNEL - Always WEB_APP for web routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "WEB_APP";
 
     // ============================================================
     // VALIDATION
@@ -589,7 +597,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE PREORDER
+    // CREATE PREORDER - channelDisplay = "WEB_APP"
     // ============================================================
 
     const preOrder = await prisma.preOrder.create({
@@ -605,7 +613,7 @@ export async function POST(request: NextRequest) {
         deliveryDate: selectedDate,
         status: tokenSaved ? PreOrderStatus.PURCHASED : PreOrderStatus.PENDING,
         isCancelled: false,
-        channel: ChannelType.MOBILE_APP,
+        channel: ChannelType.WEB_APP,
         metadata: {
           serviceType: "electricity",
           isSubscription: true,
@@ -618,6 +626,8 @@ export async function POST(request: NextRequest) {
           paymentPending: true,
           source: "SubscriptionAPI",
           wasDebited: wasDebited,
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
           commission: {
             vendorCommission,
             vendorTotalAmount,
@@ -647,7 +657,8 @@ export async function POST(request: NextRequest) {
           vendorId: vendorId || undefined,
           token: token,
           scheduledFor: selectedDate,
-          channel: ChannelType.MOBILE_APP,
+          channel: ChannelType.WEB_APP,
+          channelDisplay: CHANNEL_DISPLAY,
           preOrder: { connect: { id: preOrder.id } },
           vendorCommission: vendorCommission,
           vendorTotalAmount: vendorTotalAmount,
@@ -674,6 +685,8 @@ export async function POST(request: NextRequest) {
             paymentPending: true,
             source: "SubscriptionAPI",
             wasDebited: true,
+            channel: "WEB_APP",
+            channelDisplay: CHANNEL_DISPLAY,
             commission: {
               vendorCommission,
               vendorTotalAmount,
@@ -724,6 +737,8 @@ export async function POST(request: NextRequest) {
             paymentPending: true,
             source: "SubscriptionAPI",
             wasDebited: true,
+            channel: "WEB_APP",
+            channelDisplay: CHANNEL_DISPLAY,
             commission: {
               vendorCommission,
               vendorTotalAmount,
@@ -743,7 +758,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // RESERVE AMOUNT
+    // RESERVE AMOUNT - channelDisplay = "WEB_APP"
     // ============================================================
 
     const reserveTransaction = await prisma.walletTransaction.create({
@@ -756,11 +771,11 @@ export async function POST(request: NextRequest) {
         balanceAfter: walletBalance,
         reference: `RESERVE_${preOrder.id}`,
         description: tokenSaved 
-          ? `🔒 Token purchased & reserved for delivery on ${new Date(deliveryDate).toLocaleDateString()}`
-          : `🔒 Reserved for electricity delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
+          ? `Token purchased & reserved for delivery on ${new Date(deliveryDate).toLocaleDateString()}`
+          : `Reserved for electricity delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
         status: TransactionStatus.PENDING,
         category: WalletCategory.ELECTRICITY,
-        channel: ChannelType.MOBILE_APP,
+        channel: ChannelType.WEB_APP,
         metadata: {
           preOrderId: preOrder.id,
           deliveryDate: deliveryDate,
@@ -777,6 +792,8 @@ export async function POST(request: NextRequest) {
           paymentPending: true,
           source: "SubscriptionAPI",
           wasDebited: wasDebited,
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
           commission: {
             vendorCommission,
             vendorTotalAmount,
@@ -811,6 +828,8 @@ export async function POST(request: NextRequest) {
           meterNumber: meterNumber,
           discoCode: discoCode,
           source: "SubscriptionAPI",
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
           commission: {
             vendorCommission,
             vendorTotalAmount,
@@ -855,6 +874,7 @@ export async function POST(request: NextRequest) {
         reservedAmount: amount,
         walletId: walletId,
         wasDebited: wasDebited,
+        channel: CHANNEL_DISPLAY,
         commission: {
           vendorCommission: vendorCommission,
           vendorTotalAmount: vendorTotalAmount,
@@ -864,8 +884,8 @@ export async function POST(request: NextRequest) {
           profitMargin: profitMargin,
         },
         message: tokenSaved 
-          ? "✅ Token purchased and reserved! Balance will be deducted on delivery date."
-          : "📅 Subscription created! Token purchase will be completed before delivery date.",
+          ? "Token purchased and reserved! Balance will be deducted on delivery date."
+          : "Subscription created! Token purchase will be completed before delivery date.",
       },
     }, { status: 201 });
 

@@ -6,7 +6,7 @@ import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { CacheService } from "~/lib/cache/cache.service";
-import { TransactionStatus, VtuType, CustomerType, MeterType, VtuVendor, RefundStatus } from "@prisma/client";
+import { TransactionStatus, VtuType, CustomerType, MeterType, VtuVendor, RefundStatus, ChannelType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 // ============================================================
@@ -353,6 +353,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // STATIC CHANNEL - Always WEB_APP for web routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "WEB_APP";
+
+    // ============================================================
     // PARALLEL FETCH user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
@@ -453,7 +458,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD
+    // CREATE TRANSACTION RECORD - channelDisplay = "WEB_APP"
     // ============================================================
 
     const meterTypeEnum = meterType?.toLowerCase() === 'prepaid' 
@@ -470,7 +475,8 @@ export async function POST(request: NextRequest) {
         meterNumber: meterNumber,
         meterType: meterTypeEnum,
         status: TransactionStatus.PENDING,
-        channel: "WEB_APP",
+        channel: ChannelType.WEB_APP,
+        channelDisplay: CHANNEL_DISPLAY,
         metadata: {
           source: "ElectricityAPI",
           timestamp: new Date().toISOString(),
@@ -479,6 +485,8 @@ export async function POST(request: NextRequest) {
           customerId: customer.id,
           pinVerified: false,
           wasDebited: false,
+          channel: "WEB_APP",
+          channelDisplay: CHANNEL_DISPLAY,
           customerData: {
             name: customerName || null,
             address: customerAddress || null,
@@ -775,6 +783,7 @@ export async function POST(request: NextRequest) {
               netProfit: grossProfit,
               totalCommission: (vendorCommission || 0) + (platformCommission || 0),
               effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+              // channelDisplay already set on creation
               metadata: {
                 ...transaction.metadata,
                 vendorResponse: result.data,
@@ -893,6 +902,7 @@ export async function POST(request: NextRequest) {
             vendorSwitched: result.vendorSwitched,
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
+            channel: CHANNEL_DISPLAY,
             commission: {
               vendorCommission: vendorCommission,
               vendorTotalAmount: vendorTotalAmount,
@@ -922,6 +932,7 @@ export async function POST(request: NextRequest) {
             vendorReference: result.vendorReference || null,
             selectedVendorId: vendorId,
             failedVendors: result.vendorErrors || [],
+            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               error: result.error || "Vendor transaction failed",
@@ -1000,6 +1011,7 @@ export async function POST(request: NextRequest) {
               discoCode: discoCode,
               meterNumber: meterNumber,
               token: vendorResult.data?.token || "TOKEN_GENERATED",
+              channel: CHANNEL_DISPLAY,
               warning: "Request timed out but vendor transaction succeeded",
               customerInfo: {
                 name: customerName,
@@ -1022,6 +1034,7 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           selectedVendorId: vendorId,
+          // channelDisplay already set on creation
           metadata: {
             ...transaction.metadata,
             error: error.message || "Unknown error",

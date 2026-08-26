@@ -14,8 +14,6 @@ import {
   Smartphone,
   Mail,
   Phone,
-  Wallet,
-  CreditCard,
   Settings,
   Check,
   Copy,
@@ -845,7 +843,7 @@ const ApiKeyDisplayModal = ({
             </div>
             <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-900/30 dark:bg-yellow-900/20">
               <p className="text-xs text-yellow-700 dark:text-yellow-400">
-                ⚠️ Keep this key secure. Do not share it publicly or commit it to version control.
+                Keep this key secure. Do not share it publicly or commit it to version control.
               </p>
             </div>
           </div>
@@ -1448,129 +1446,95 @@ export function SettingsClient({
         <div className="lg:col-span-3 space-y-6">
           {/* ===================== PROFILE TAB ===================== */}
           {activeTab === "profile" && (
-            <>
-              <SettingsCard>
-                <SectionHeader
-                  title="Profile Information"
-                  description="Update your personal information"
-                  icon={User}
-                />
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Full Name
-                    </label>
+            <SettingsCard>
+              <SectionHeader
+                title="Profile Information"
+                description="Update your personal information"
+                icon={User}
+              />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Referral Code
+                  </label>
+                  <div className="flex items-center gap-3">
                     <input
                       type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                      value={user.referralCode}
+                      readOnly
+                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Phone Number
-                    </label>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:border-[#040724] focus:ring-2 focus:ring-[#040724]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Referral Code
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        value={user.referralCode}
-                        readOnly
-                        className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                      />
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(user.referralCode);
-                        }}
-                        className="rounded-xl bg-[#040724] px-4 py-3 text-white hover:bg-[#1e2b5a] transition-colors"
-                      >
-                        <Copy className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Role</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">{user.role.replace("_", " ")}</p>
-                    </div>
-                    <span className="rounded-full bg-green-100 px-3 py-1 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                      Verified
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleSaveProfile}
-                    disabled={isSaving}
-                    className="flex items-center justify-center gap-2 w-full rounded-xl bg-[#040724] py-3 text-white hover:bg-[#1e2b5a] transition-all disabled:opacity-50"
-                  >
-                    {isSaving ? (
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    ) : saveSuccess ? (
-                      <>
-                        <Check className="h-5 w-5" /> Saved!
-                      </>
-                    ) : (
-                      <>
-                        <Save className="h-5 w-5" /> Save Changes
-                      </>
-                    )}
-                  </button>
-                </div>
-              </SettingsCard>
-
-              <SettingsCard>
-                <SectionHeader
-                  title="Wallet"
-                  description="Manage your wallet and payment methods"
-                  icon={Wallet}
-                />
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">Balance</p>
-                      <p className="text-2xl font-bold text-[#040724] dark:text-white">
-                        {user.hasWallet ? formatCurrency(user.walletBalance) : "No wallet"}
-                      </p>
-                    </div>
-                    {user.hasWallet && (
-                      <div className="flex gap-2">
-                        <button className="rounded-lg bg-[#040724] px-4 py-2 text-sm text-white hover:bg-[#1e2b5a]">
-                          Fund
-                        </button>
-                        <button className="rounded-lg border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
-                          Withdraw
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Account Status</span>
-                    <span className="text-sm font-medium text-green-600 dark:text-green-400">Active</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(user.referralCode);
+                      }}
+                      className="rounded-xl bg-[#040724] px-4 py-3 text-white hover:bg-[#1e2b5a] transition-colors"
+                    >
+                      <Copy className="h-5 w-5" />
+                    </button>
                   </div>
                 </div>
-              </SettingsCard>
-            </>
+                <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Role</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{user.role.replace("_", " ")}</p>
+                  </div>
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                    Verified
+                  </span>
+                </div>
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={isSaving}
+                  className="flex items-center justify-center gap-2 w-full rounded-xl bg-[#040724] py-3 text-white hover:bg-[#1e2b5a] transition-all disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : saveSuccess ? (
+                    <>
+                      <Check className="h-5 w-5" /> Saved!
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-5 w-5" /> Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </SettingsCard>
           )}
 
           {/* ===================== NOTIFICATIONS TAB ===================== */}
