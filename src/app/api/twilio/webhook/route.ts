@@ -2328,119 +2328,122 @@ You'll receive a confirmation shortly.`;
     return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
 
-  // ============================================================
-  // ELECTRICITY COMMAND
-  // ============================================================
-  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
-      command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
-    userSessions.delete(user.id);
-    
-    if (parts.length === 1) {
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
+// ============================================================
+// ELECTRICITY COMMAND - FIXED TO USE QUEUE
+// ============================================================
+if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
+    command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
+  userSessions.delete(user.id);
+  
+  if (parts.length === 1) {
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
 
-      if (meters.length === 0) {
-        const discosList = await getAvailableDiscosForWhatsApp();
-        return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]\n\nAvailable DisCos:\n${discosList}`;
+    if (meters.length === 0) {
+      const discosList = await getAvailableDiscosForWhatsApp();
+      return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]\n\nAvailable DisCos:\n${discosList}`;
+    }
+
+    let message = "Your Saved Meters:\n\n";
+    meters.forEach((meter: any, index: number) => {
+      const defaultTag = meter.isDefault ? " (Default)" : "";
+      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+      message += `   ${meter.disco}\n`;
+      message += `   ${meter.meterNumber}\n`;
+      if (meter.customerName) {
+        message += `   Customer: ${meter.customerName}\n`;
       }
+      message += `\n`;
+    });
 
-      let message = "Your Saved Meters:\n\n";
+    message += `\nTo buy: ELECTRIC [index] [amount]\nExample: ELECTRIC 1 5000`;
+    return message;
+  }
+
+  // ✅ ELECTRIC [amount] - Buy using default/saved meter (VIA QUEUE)
+  if (parts.length === 2) {
+    const amountStr = parts[1];
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount. Minimum is NGN 100. Example: ELECTRIC 5000`;
+    }
+    
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+    
+    if (meters.length === 0) {
+      return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]`;
+    }
+    
+    let selectedMeter = meters.find(m => m.isDefault) || meters[0];
+    
+    if (meters.length > 1 && !meters.find(m => m.isDefault)) {
+      let message = "Multiple meters found. Please select one:\n\n";
       meters.forEach((meter: any, index: number) => {
-        const defaultTag = meter.isDefault ? " (Default)" : "";
-        message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-        message += `   ${meter.disco}\n`;
-        message += `   ${meter.meterNumber}\n`;
-        if (meter.customerName) {
-          message += `   Customer: ${meter.customerName}\n`;
-        }
-        message += `\n`;
+        message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
+        message += `   ${meter.disco}\n\n`;
       });
-
-      message += `\nTo buy: ELECTRIC [index] [amount]\nExample: ELECTRIC 1 5000`;
+      message += `Reply: ELECTRIC [index] [amount]`;
       return message;
     }
 
-    // ELECTRIC [amount] - Buy using default/saved meter
-    if (parts.length === 2) {
-      const amountStr = parts[1];
-      const amount = parseFloat(amountStr);
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount. Minimum is NGN 100. Example: ELECTRIC 5000`;
-      }
-      
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
-      
-      if (meters.length === 0) {
-        return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]`;
-      }
-      
-      let selectedMeter = meters.find(m => m.isDefault) || meters[0];
-      
-      if (meters.length > 1 && !meters.find(m => m.isDefault)) {
-        let message = "Multiple meters found. Please select one:\n\n";
-        meters.forEach((meter: any, index: number) => {
-          message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
-          message += `   ${meter.disco}\n\n`;
-        });
-        message += `Reply: ELECTRIC [index] [amount]`;
-        return message;
-      }
-
-      const transaction = await prisma.vtuTransaction.create({
-        data: {
-          userId: user.id,
-          transactionType: VtuType.ELECTRICITY_INSTANT,
-          product: selectedMeter.disco,
-          amount: amount,
-          totalDebited: 0,
-          meterNumber: selectedMeter.meterNumber,
-          meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-          status: TransactionStatus.PROCESSING,
-          channel: ChannelType.WHATSAPP,
-          metadata: {
-            source: "WhatsApp",
-            service: "ELECTRICITY",
-            timestamp: new Date().toISOString(),
-            discoCode: selectedMeter.disco,
-            meterType: selectedMeter.meterType || "Prepaid",
-            customerName: selectedMeter.customerName,
-            customerAddress: selectedMeter.customerAddress,
-            customerPhone: selectedMeter.customerPhone,
-            customerEmail: selectedMeter.customerEmail,
-            meterStatus: selectedMeter.meterStatus,
-            queued: true,
-          },
-        },
-      });
-
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          meterNumber: selectedMeter.meterNumber,
-          amount: amount,
+    // ✅ Create transaction with PROCESSING status
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.ELECTRICITY_INSTANT,
+        product: selectedMeter.disco,
+        amount: amount,
+        totalDebited: 0,
+        meterNumber: selectedMeter.meterNumber,
+        meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+        status: TransactionStatus.PROCESSING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "ELECTRICITY",
+          timestamp: new Date().toISOString(),
           discoCode: selectedMeter.disco,
           meterType: selectedMeter.meterType || "Prepaid",
-          phone: user.phone,
           customerName: selectedMeter.customerName,
           customerAddress: selectedMeter.customerAddress,
           customerPhone: selectedMeter.customerPhone,
           customerEmail: selectedMeter.customerEmail,
           meterStatus: selectedMeter.meterStatus,
-          serviceType: "ELECTRICITY",
+          queued: true,
         },
-        5,
-        3,
-        new Date()
-      );
+      },
+    });
 
-      return `✅ Electricity purchase queued!
+    // ✅ Create background job instead of processing directly
+    await createJob(
+      JobType.VTU_TRANSACTION,
+      {
+        transactionId: transaction.id,
+        userId: user.id,
+        meterNumber: selectedMeter.meterNumber,
+        amount: amount,
+        discoCode: selectedMeter.disco,
+        meterType: selectedMeter.meterType || "Prepaid",
+        phone: user.phone,
+        customerName: selectedMeter.customerName,
+        customerAddress: selectedMeter.customerAddress,
+        customerPhone: selectedMeter.customerPhone,
+        customerEmail: selectedMeter.customerEmail,
+        meterStatus: selectedMeter.meterStatus,
+        serviceType: "ELECTRICITY",
+      },
+      5,
+      3,
+      new Date()
+    );
+
+    // ✅ Send immediate acknowledgment (THIS IS WHAT THE USER SEES)
+    return `✅ Electricity purchase queued!
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -2449,82 +2452,85 @@ ${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
+  }
+
+  // ✅ ELECTRIC [index] [amount] - Buy using saved meter by index (VIA QUEUE)
+  if (parts.length === 3) {
+    const [, indexStr, amountStr] = parts;
+    const index = parseInt(indexStr) - 1;
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(index) || index < 0) {
+      return `Invalid selection. Please choose a number from the list.`;
     }
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount. Minimum is NGN 100.`;
+    }
+    
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+    
+    if (index >= meters.length) {
+      return `Invalid selection. Please choose a number from the list.`;
+    }
+    
+    const selectedMeter = meters[index];
 
-    // ELECTRIC [index] [amount] - Buy using saved meter by index
-    if (parts.length === 3) {
-      const [, indexStr, amountStr] = parts;
-      const index = parseInt(indexStr) - 1;
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(index) || index < 0) {
-        return `Invalid selection. Please choose a number from the list.`;
-      }
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount. Minimum is NGN 100.`;
-      }
-      
-      const meters = await prisma.savedMeter.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
-      
-      if (index >= meters.length) {
-        return `Invalid selection. Please choose a number from the list.`;
-      }
-      
-      const selectedMeter = meters[index];
-
-      const transaction = await prisma.vtuTransaction.create({
-        data: {
-          userId: user.id,
-          transactionType: VtuType.ELECTRICITY_INSTANT,
-          product: selectedMeter.disco,
-          amount: amount,
-          totalDebited: 0,
-          meterNumber: selectedMeter.meterNumber,
-          meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-          status: TransactionStatus.PROCESSING,
-          channel: ChannelType.WHATSAPP,
-          metadata: {
-            source: "WhatsApp",
-            service: "ELECTRICITY",
-            timestamp: new Date().toISOString(),
-            discoCode: selectedMeter.disco,
-            meterType: selectedMeter.meterType || "Prepaid",
-            customerName: selectedMeter.customerName,
-            customerAddress: selectedMeter.customerAddress,
-            customerPhone: selectedMeter.customerPhone,
-            customerEmail: selectedMeter.customerEmail,
-            meterStatus: selectedMeter.meterStatus,
-            queued: true,
-          },
-        },
-      });
-
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          meterNumber: selectedMeter.meterNumber,
-          amount: amount,
+    // ✅ Create transaction with PROCESSING status
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.ELECTRICITY_INSTANT,
+        product: selectedMeter.disco,
+        amount: amount,
+        totalDebited: 0,
+        meterNumber: selectedMeter.meterNumber,
+        meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+        status: TransactionStatus.PROCESSING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "ELECTRICITY",
+          timestamp: new Date().toISOString(),
           discoCode: selectedMeter.disco,
           meterType: selectedMeter.meterType || "Prepaid",
-          phone: user.phone,
           customerName: selectedMeter.customerName,
           customerAddress: selectedMeter.customerAddress,
           customerPhone: selectedMeter.customerPhone,
           customerEmail: selectedMeter.customerEmail,
           meterStatus: selectedMeter.meterStatus,
-          serviceType: "ELECTRICITY",
+          queued: true,
         },
-        5,
-        3,
-        new Date()
-      );
+      },
+    });
 
-      return `✅ Electricity purchase queued!
+    // ✅ Create background job
+    await createJob(
+      JobType.VTU_TRANSACTION,
+      {
+        transactionId: transaction.id,
+        userId: user.id,
+        meterNumber: selectedMeter.meterNumber,
+        amount: amount,
+        discoCode: selectedMeter.disco,
+        meterType: selectedMeter.meterType || "Prepaid",
+        phone: user.phone,
+        customerName: selectedMeter.customerName,
+        customerAddress: selectedMeter.customerAddress,
+        customerPhone: selectedMeter.customerPhone,
+        customerEmail: selectedMeter.customerEmail,
+        meterStatus: selectedMeter.meterStatus,
+        serviceType: "ELECTRICITY",
+      },
+      5,
+      3,
+      new Date()
+    );
+
+    // ✅ Send immediate acknowledgment
+    return `✅ Electricity purchase queued!
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -2533,63 +2539,66 @@ ${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
+  }
+
+  // ✅ ELECTRIC [meter_number] [disco] [amount] - NEW meter (VIA QUEUE)
+  if (parts.length >= 4) {
+    const [, meterNumber, discoInput, amountStr] = parts;
+    const amount = parseFloat(amountStr);
+    
+    if (isNaN(amount) || amount < 100) {
+      return `Invalid Amount. Minimum is NGN 100.`;
+    }
+    
+    const discoInfo = normalizeDisco(discoInput);
+    if (!discoInfo) {
+      const discosList = getValidDiscosList();
+      return `Invalid DisCo.\n\nAvailable DisCos:\n${discosList}`;
     }
 
-    // ELECTRIC [meter_number] [disco] [amount] - NEW meter
-    if (parts.length >= 4) {
-      const [, meterNumber, discoInput, amountStr] = parts;
-      const amount = parseFloat(amountStr);
-      
-      if (isNaN(amount) || amount < 100) {
-        return `Invalid Amount. Minimum is NGN 100.`;
-      }
-      
-      const discoInfo = normalizeDisco(discoInput);
-      if (!discoInfo) {
-        const discosList = getValidDiscosList();
-        return `Invalid DisCo.\n\nAvailable DisCos:\n${discosList}`;
-      }
-
-      const transaction = await prisma.vtuTransaction.create({
-        data: {
-          userId: user.id,
-          transactionType: VtuType.ELECTRICITY_INSTANT,
-          product: discoInfo.code,
-          amount: amount,
-          totalDebited: 0,
-          meterNumber: meterNumber,
-          meterType: MeterType.HOME,
-          status: TransactionStatus.PROCESSING,
-          channel: ChannelType.WHATSAPP,
-          metadata: {
-            source: "WhatsApp",
-            service: "ELECTRICITY",
-            timestamp: new Date().toISOString(),
-            discoCode: discoInfo.code,
-            meterType: "Prepaid",
-            queued: true,
-          },
-        },
-      });
-
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          meterNumber: meterNumber,
-          amount: amount,
+    // ✅ Create transaction with PROCESSING status
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.ELECTRICITY_INSTANT,
+        product: discoInfo.code,
+        amount: amount,
+        totalDebited: 0,
+        meterNumber: meterNumber,
+        meterType: MeterType.HOME,
+        status: TransactionStatus.PROCESSING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "ELECTRICITY",
+          timestamp: new Date().toISOString(),
           discoCode: discoInfo.code,
           meterType: "Prepaid",
-          phone: user.phone,
-          serviceType: "ELECTRICITY",
+          queued: true,
         },
-        5,
-        3,
-        new Date()
-      );
+      },
+    });
 
-      return `✅ Electricity purchase queued!
+    // ✅ Create background job
+    await createJob(
+      JobType.VTU_TRANSACTION,
+      {
+        transactionId: transaction.id,
+        userId: user.id,
+        meterNumber: meterNumber,
+        amount: amount,
+        discoCode: discoInfo.code,
+        meterType: "Prepaid",
+        phone: user.phone,
+        serviceType: "ELECTRICITY",
+      },
+      5,
+      3,
+      new Date()
+    );
+
+    // ✅ Send immediate acknowledgment
+    return `✅ Electricity purchase queued!
 
 Meter: ${meterNumber}
 DisCo: ${discoInfo.code} (${discoInfo.fullName})
@@ -2597,10 +2606,10 @@ Amount: NGN ${amount.toFixed(2)}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
-    }
-
-    return `Buy Electricity\n\nELECTRIC [amount] - For your saved meter\nELECTRIC [meter] [disco] [amount] - For any meter`;
   }
+
+  return `Buy Electricity\n\nELECTRIC [amount] - For your saved meter\nELECTRIC [meter] [disco] [amount] - For any meter`;
+}
 
   // ============================================================
   // CABLE COMMAND
