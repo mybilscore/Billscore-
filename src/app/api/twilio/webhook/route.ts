@@ -481,15 +481,19 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 // VERIFY DECODER WITH VTPASS - DIRECT CALL (NO INTERNAL API)
 // ============================================================
 
+// ============================================================
+// VERIFY DECODER WITH VTPASS - DIRECT CALL
+// ============================================================
+
 async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
   try {
-    // Determine environment
+    // ✅ Determine environment
     const isProduction = process.env.NODE_ENV === "production";
     const baseUrl = isProduction 
       ? "https://vtpass.com/api/merchant-verify"
       : "https://sandbox.vtpass.com/api/merchant-verify";
     
-    // Get API keys from environment
+    // ✅ Get API keys from environment
     const apiKey = isProduction 
       ? process.env.VTPASS_LIVE_API_KEY 
       : process.env.VTPASS_SANDBOX_API_KEY;
@@ -504,7 +508,7 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
       billersCode: smartCardNumber,
     };
 
-    console.log(`🔍 [Decoder Verify] Direct call:`, {
+    console.log(`🔍 [Decoder Verify] Direct call to VTpass:`, {
       serviceID,
       smartCardNumber,
       baseUrl,
@@ -2269,18 +2273,33 @@ You'll receive a confirmation shortly.`;
   }
 
   // ========== DECODER MANAGEMENT ==========
-  
-  if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
-    userSessions.delete(user.id);
-    const addParts = body.split(" ").filter(p => p.length > 0);
-    if (addParts.length < 4) {
-      return `Add Decoder\n\nTo add a decoder, reply with:\nADDDECODER [decoder_number] [provider] [name]\n\nExample: ADDDECODER 1234567890 DSTV LIVING_ROOM\n\nAvailable providers: DSTV, GOTV, STARTIMES`;
-    }
+// In processWhatsAppCommand function
 
-    const [, decoderNumber, provider, ...nameParts] = addParts;
-    const name = nameParts.join(" ");
-    return await addDecoderWithVerification(user.id, decoderNumber, provider, name);
+// ============================================================
+// DECODER MANAGEMENT
+// ============================================================
+
+if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
+  userSessions.delete(user.id);
+  const addParts = body.split(" ").filter(p => p.length > 0);
+  if (addParts.length < 4) {
+    return `Add Decoder
+
+To add a decoder, reply with:
+ADDDECODER [decoder_number] [provider] [name]
+
+Example: ADDDECODER 1234567890 DSTV LIVING_ROOM
+
+Available providers: DSTV, GOTV, STARTIMES`;
   }
+
+  const [, decoderNumber, provider, ...nameParts] = addParts;
+  const name = nameParts.join(" ");
+  
+  // ✅ Call the addDecoderWithVerification function
+  const result = await addDecoderWithVerification(user.id, decoderNumber, provider, name);
+  return result;
+}
 
   if (command === "DECODERS" || command === "LIST DECODERS") {
     userSessions.delete(user.id);
