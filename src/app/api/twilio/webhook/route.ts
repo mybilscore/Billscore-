@@ -3188,12 +3188,17 @@ For your own number, use: DATA 1 (no PIN needed)`;
 // ELECTRICITY PURCHASE - NO PIN (OWN METER)
 // ============================================================
 
+// ============================================================
+// ELECTRICITY PURCHASE - NO PIN (OWN METER) - SKIP VERIFICATION FOR SAVED METERS
+// ============================================================
+
 async function processElectricityPurchaseDirect(
   user: any, 
   meterNumber: string, 
   amount: number, 
   discoCode: string,
-  meterType: string = "Prepaid"
+  meterType: string = "Prepaid",
+  skipVerification: boolean = true // ✅ New parameter - skip verification for saved meters
 ): Promise<string> {
   try {
     const MIN_ELECTRICITY_AMOUNT = 1000;
@@ -3222,24 +3227,47 @@ Account: ${wallet.accountNumber || 'N/A'}
 Please fund your wallet and try again.`;
     }
 
-    const serviceID = discoCode.toLowerCase() + "-electric";
-    const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, meterType.toLowerCase());
-    
+    // ✅ Skip verification for saved meters to avoid unnecessary API calls
     let customerName = null;
     let customerAddress = null;
     let customerPhone = null;
     let customerEmail = null;
     let meterStatus = null;
-    
-    if (verificationResult.success) {
-      customerName = verificationResult.data?.customerName || null;
-      customerAddress = verificationResult.data?.customerAddress || null;
-      customerPhone = verificationResult.data?.customerPhone || null;
-      customerEmail = verificationResult.data?.customerEmail || null;
-      meterStatus = verificationResult.data?.status || null;
-      console.log(`[WhatsApp] Verified meter: ${meterNumber} - Customer: ${customerName}`);
+    let verificationSuccess = false;
+
+    if (!skipVerification) {
+      // Only verify if it's a new meter (not saved)
+      const serviceID = discoCode.toLowerCase() + "-electric";
+      const verificationResult = await verifyMeterWithVTpass(serviceID, meterNumber, meterType.toLowerCase());
+      
+      if (verificationResult.success) {
+        customerName = verificationResult.data?.customerName || null;
+        customerAddress = verificationResult.data?.customerAddress || null;
+        customerPhone = verificationResult.data?.customerPhone || null;
+        customerEmail = verificationResult.data?.customerEmail || null;
+        meterStatus = verificationResult.data?.status || null;
+        verificationSuccess = true;
+        console.log(`[WhatsApp] Verified meter: ${meterNumber} - Customer: ${customerName}`);
+      } else {
+        console.warn(`[WhatsApp] Verification failed for ${meterNumber}: ${verificationResult.error}`);
+      }
     } else {
-      console.warn(`[WhatsApp] Verification failed for ${meterNumber}: ${verificationResult.error}`);
+      // ✅ For saved meters, retrieve customer info from database
+      const savedMeter = await prisma.savedMeter.findFirst({
+        where: { 
+          userId: user.id, 
+          meterNumber: meterNumber,
+        },
+      });
+      
+      if (savedMeter) {
+        customerName = savedMeter.customerName || null;
+        customerAddress = savedMeter.customerAddress || null;
+        customerPhone = savedMeter.customerPhone || null;
+        customerEmail = savedMeter.customerEmail || null;
+        meterStatus = savedMeter.meterStatus || null;
+        console.log(`[WhatsApp] Using saved meter data for ${meterNumber}: ${customerName}`);
+      }
     }
 
     let customer = await prisma.customer.findUnique({
@@ -3289,7 +3317,8 @@ Please fund your wallet and try again.`;
           customerPhone: customerPhone,
           customerEmail: customerEmail,
           meterStatus: meterStatus,
-          verified: verificationResult.success,
+          verified: verificationSuccess || skipVerification,
+          skippedVerification: skipVerification,
         },
       },
     });
@@ -3411,17 +3440,20 @@ Please fund your wallet and try again.`;
           }),
         ]);
 
-        saveMeterWithCustomerInfo(
-          user.id, 
-          meterNumber, 
-          discoCode, 
-          meterType,
-          customerName,
-          customerAddress,
-          customerPhone,
-          customerEmail,
-          meterStatus
-        ).catch(() => {});
+        // ✅ Update saved meter with latest customer info (but don't re-verify)
+        if (customerName) {
+          saveMeterWithCustomerInfo(
+            user.id, 
+            meterNumber, 
+            discoCode, 
+            meterType,
+            customerName,
+            customerAddress,
+            customerPhone,
+            customerEmail,
+            meterStatus
+          ).catch(() => {});
+        }
 
         const successMessage = `Electricity Purchase Successful!
 
@@ -4875,7 +4907,7 @@ Or: SETDEFAULTDECODER 1234567890`;
   // ELECTRICITY - SUPPORTS BOTH SAVED AND EXTERNAL METERS
   // ============================================================
   
-  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
+if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
     command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
   userSessions.delete(user.id);
   
@@ -4930,68 +4962,61 @@ ${discosList}`;
     return message;
   }
 
-  if (parts.length >= 4) {
-    const [, meterNumber, discoInput, amountStr] = parts;
+  // ✅ CASE 1: ELECTRIC [amount] - Buy using default/saved meter (NO VERIFICATION)
+  if (parts.length === 2) {
+    const amountStr = parts[1];
     const amount = parseFloat(amountStr);
     
     if (isNaN(amount) || amount < 100) {
       return `Invalid Amount
 
 Minimum is NGN 100.
-Example: ELECTRIC 1234567890 ABUJA 5000`;
+Example: ELECTRIC 5000`;
     }
     
-    // ✅ Use the normalizeDisco function to support both full names and acronyms
-    const discoInfo = normalizeDisco(discoInput);
-    if (!discoInfo) {
-      const discosList = getValidDiscosList();
-      return `Invalid DisCo: "${discoInput}"
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+    
+    if (meters.length === 0) {
+      return `No Saved Meters
 
-Available DisCos (use full name or acronym):
-${discosList}
+You don't have any saved meters.
 
-Examples:
-ELECTRIC 1234567890 ABUJA 5000
-ELECTRIC 1234567890 AEDC 5000
-ELECTRIC 1234567890 IKEDC 5000
-ELECTRIC 1234567890 EKEDC 5000
-ELECTRIC 1234567890 IBEDC 5000`;
+To buy for any meter:
+ELECTRIC [meter_number] [disco] [amount]
+
+Example: ELECTRIC 1234567890 ABUJA 5000
+
+To add a meter: ADDMETER [meter_number] [disco] [name]`;
     }
     
-    const discoUpper = discoInfo.code;
-    const serviceID = discoInfo.serviceID;
+    let selectedMeter = meters.find(m => m.isDefault) || meters[0];
     
-    // ✅ Verify meter using the correct serviceID
-    const verificationResult = await verifyMeterWithVTpass(
-      serviceID,
-      meterNumber,
-      "prepaid"
-    );
-    
-    let customerName = "Unknown";
-    if (verificationResult.success) {
-      customerName = verificationResult.data?.customerName || "Unknown";
-    } else {
-      return `Could Not Verify Meter
-
-${verificationResult.error || "Unknown error"}
-
-You can still proceed with the purchase.
-
-To continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}
-To cancel: Type HELP for other options.`;
+    if (meters.length > 1 && !meters.find(m => m.isDefault)) {
+      let message = "Multiple Meters Found\n\nPlease select one:\n\n";
+      meters.forEach((meter: any, index: number) => {
+        message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
+        message += `   ${meter.disco}\n\n`;
+      });
+      message += `Reply with: ELECTRIC [index] [amount]\n`;
+      message += `Example: ELECTRIC 1 5000`;
+      return message;
     }
     
-    return await processElectricityPurchaseWithPin(
+    // ✅ Skip verification for saved meter - use stored data
+    return await processElectricityPurchaseDirect(
       user,
-      meterNumber,
+      selectedMeter.meterNumber,
       amount,
-      discoUpper,
-      "Prepaid",
-      customerName
+      selectedMeter.disco,
+      selectedMeter.meterType || "Prepaid",
+      true // ✅ skip verification
     );
   }
-  
+
+  // ✅ CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index (NO VERIFICATION)
   if (parts.length === 3) {
     const [, indexStr, amountStr] = parts;
     const index = parseInt(indexStr) - 1;
@@ -5024,68 +5049,101 @@ Please choose a number from the list.`;
     
     const selectedMeter = meters[index];
     
+    // ✅ Skip verification for saved meter - use stored data
     return await processElectricityPurchaseDirect(
       user,
       selectedMeter.meterNumber,
       amount,
       selectedMeter.disco,
-      selectedMeter.meterType || "Prepaid"
+      selectedMeter.meterType || "Prepaid",
+      true // ✅ skip verification
     );
   }
-  
-  if (parts.length === 2) {
-    const amountStr = parts[1];
+
+  // ✅ CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter (WITH VERIFICATION)
+  if (parts.length >= 4) {
+    const [, meterNumber, discoInput, amountStr] = parts;
     const amount = parseFloat(amountStr);
     
     if (isNaN(amount) || amount < 100) {
       return `Invalid Amount
 
 Minimum is NGN 100.
-Example: ELECTRIC 5000`;
+Example: ELECTRIC 1234567890 ABUJA 5000`;
     }
     
-    const meters = await prisma.savedMeter.findMany({
-      where: { userId: user.id },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    // Check if meter is already saved
+    const existingMeter = await prisma.savedMeter.findFirst({
+      where: { 
+        userId: user.id, 
+        meterNumber: meterNumber 
+      },
     });
     
-    if (meters.length === 0) {
-      return `No Saved Meters
+    // If meter is already saved, use saved data (skip verification)
+    if (existingMeter) {
+      return await processElectricityPurchaseDirect(
+        user,
+        existingMeter.meterNumber,
+        amount,
+        existingMeter.disco,
+        existingMeter.meterType || "Prepaid",
+        true // ✅ skip verification for existing saved meter
+      );
+    }
+    
+    // ✅ New meter - need verification
+    const discoInfo = normalizeDisco(discoInput);
+    if (!discoInfo) {
+      const discosList = getValidDiscosList();
+      return `Invalid DisCo: "${discoInput}"
 
-You don't have any saved meters.
-
-To buy for any meter:
-ELECTRIC [meter_number] [disco] [amount]
+Available DisCos (use full name or acronym):
+${discosList}
 
 Examples:
 ELECTRIC 1234567890 ABUJA 5000
 ELECTRIC 1234567890 AEDC 5000
+ELECTRIC 1234567890 IKEDC 5000
+ELECTRIC 1234567890 EKEDC 5000
+ELECTRIC 1234567890 IBEDC 5000`;
+    }
+    
+    const discoUpper = discoInfo.code;
+    const serviceID = discoInfo.serviceID;
+    
+    // ✅ Verify new meter
+    const verificationResult = await verifyMeterWithVTpass(
+      serviceID,
+      meterNumber,
+      "prepaid"
+    );
+    
+    let customerName = "Unknown";
+    if (verificationResult.success) {
+      customerName = verificationResult.data?.customerName || "Unknown";
+    } else {
+      return `Could Not Verify Meter
 
-To add a meter: ADDMETER [meter_number] [disco] [name]`;
+${verificationResult.error || "Unknown error"}
+
+You can still proceed with the purchase.
+
+To continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}
+To cancel: Type HELP for other options.`;
     }
     
-    let selectedMeter = meters.find(m => m.isDefault) || meters[0];
-    
-    if (meters.length > 1 && !meters.find(m => m.isDefault)) {
-      let message = "Multiple Meters Found\n\nPlease select one:\n\n";
-      meters.forEach((meter: any, index: number) => {
-        message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
-        message += `   ${meter.disco}\n\n`;
-      });
-      message += `Reply with: ELECTRIC [index] [amount]\n`;
-      message += `Example: ELECTRIC 1 5000`;
-      return message;
-    }
-    
-    return await processElectricityPurchaseDirect(
+    return await processElectricityPurchaseWithPin(
       user,
-      selectedMeter.meterNumber,
+      meterNumber,
       amount,
-      selectedMeter.disco,
-      selectedMeter.meterType || "Prepaid"
+      discoUpper,
+      "Prepaid",
+      customerName
     );
   }
   
+  // Default: Show available meters
   const meters = await prisma.savedMeter.findMany({
     where: { userId: user.id },
     orderBy: [{ isDefault: "desc" }, { name: "asc" }],
