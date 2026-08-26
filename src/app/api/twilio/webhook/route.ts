@@ -909,6 +909,10 @@ Type ELECTRIC to see all your meters and buy power!`;
 // ADD DECODER WITH VERIFICATION
 // ============================================================
 
+// ============================================================
+// ADD DECODER WITH VERIFICATION
+// ============================================================
+
 async function addDecoderWithVerification(userId: string, decoderNumber: string, provider: string, name: string): Promise<string> {
   try {
     const validProviders = ["DSTV", "GOTV", "STARTIMES"];
@@ -924,7 +928,9 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
     };
     const serviceId = serviceMap[providerUpper] || 'dstv';
 
+    // ✅ Verify decoder using the fixed function
     const verificationResult = await verifyDecoderWithVTpass(serviceId, decoderNumber);
+    
     let verificationMessage = "";
     let customerName = null;
     let customerAddress = null;
@@ -940,13 +946,13 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
       decoderStatus = verificationResult.data?.status || null;
       
       verificationMessage = `
-Decoder Verified!
+✅ Decoder Verified!
 Customer: ${customerName || "Unknown"}
 Decoder: ${verificationResult.data?.smartCardNumber || decoderNumber}
 Status: ${decoderStatus || "ACTIVE"}`;
     } else {
       verificationMessage = `
-Could not verify decoder: ${verificationResult.error || "Unknown error"}
+⚠️ Could not verify decoder: ${verificationResult.error || "Unknown error"}
 You can still save the decoder.`;
     }
 
@@ -969,7 +975,7 @@ You can still save the decoder.`;
           updatedAt: new Date(),
         },
       });
-      return `Decoder updated successfully!${verificationMessage}
+      return `✅ Decoder updated successfully!${verificationMessage}
 
 Decoder Details:
 Decoder: ${decoderNumber}
@@ -977,8 +983,6 @@ Provider: ${providerUpper}
 Name: ${name || existing.name}
 ${customerName ? `Customer: ${customerName}` : ''}
 ${customerAddress ? `Address: ${customerAddress}` : ''}
-${customerPhone ? `Phone: ${customerPhone}` : ''}
-${customerEmail ? `Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
     }
@@ -999,7 +1003,7 @@ Type CABLE to see all your decoders and subscribe!`;
       },
     });
 
-    return `Decoder added successfully!${verificationMessage}
+    return `✅ Decoder added successfully!${verificationMessage}
 
 Decoder Details:
 Decoder: ${decoderNumber}
@@ -1007,8 +1011,6 @@ Provider: ${providerUpper}
 Name: ${name || `${providerUpper} Decoder`}
 ${customerName ? `Customer: ${customerName}` : ''}
 ${customerAddress ? `Address: ${customerAddress}` : ''}
-${customerPhone ? `Phone: ${customerPhone}` : ''}
-${customerEmail ? `Email: ${customerEmail}` : ''}
 
 Type CABLE to see all your decoders and subscribe!`;
   } catch (error) {
