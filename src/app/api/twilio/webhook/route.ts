@@ -4416,6 +4416,102 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   const parts = body.split(" ").filter(p => p.length > 0);
 
   // ============================================================
+  // AIRTIME COMMAND HANDLER
+  // ============================================================
+  if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
+    userSessions.delete(user.id);
+    
+    // CASE 1: AIRTIME [amount] - Buy for own number (no PIN)
+    if (parts.length === 2) {
+      const amountStr = parts[1];
+      const amount = parseFloat(amountStr);
+      
+      if (isNaN(amount) || amount < 50) {
+        return `Invalid Amount
+
+Minimum is NGN 50.
+Example: AIRTIME 500`;
+      }
+      
+      const normalizedUserPhone = normalizePhoneNumber(user.phone);
+      const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
+      
+      if (!detectedNetwork) {
+        return `Could Not Detect Your Network
+
+We couldn't detect the network for ${normalizedUserPhone}.
+Please ensure your phone number is correct.`;
+      }
+      
+      return await processAirtimePurchaseDirect(
+        user,
+        normalizedUserPhone,
+        amount,
+        detectedNetwork
+      );
+    }
+    
+    // CASE 2: AIRTIME [phone] [amount] - Buy for another number (PIN required)
+    if (parts.length >= 3) {
+      const phoneInput = parts[1];
+      const amountStr = parts[2];
+      const amount = parseFloat(amountStr);
+      
+      if (isNaN(amount) || amount < 50) {
+        return `Invalid Amount
+
+Minimum is NGN 50.
+Example: AIRTIME 08012345678 500`;
+      }
+      
+      const normalizedPhone = normalizePhoneNumber(phoneInput);
+      const detectedNetwork = detectNetworkFromPhone(normalizedPhone);
+      
+      if (!detectedNetwork) {
+        return `Could Not Detect Network
+
+We couldn't detect the network for ${phoneInput}.
+Please ensure the phone number is correct.
+
+Supported formats:
+- 08012345678 (11 digits with leading zero)
+- +2348012345678 (with country code)`;
+      }
+      
+      const normalizedUserPhone = normalizePhoneNumber(user.phone);
+      const isOwnNumber = normalizedPhone === normalizedUserPhone;
+      
+      if (isOwnNumber) {
+        return await processAirtimePurchaseDirect(
+          user,
+          normalizedPhone,
+          amount,
+          detectedNetwork
+        );
+      }
+      
+      return await processAirtimePurchaseWithPin(
+        user,
+        normalizedPhone,
+        amount,
+        detectedNetwork
+      );
+    }
+    
+    // CASE 3: Just "AIRTIME" - Show help
+    return `Buy Airtime
+
+AIRTIME [amount] - For YOUR number (no PIN)
+AIRTIME [phone] [amount] - For another number (PIN required)
+
+Examples:
+AIRTIME 500 (for your own number)
+AIRTIME 08012345678 500 (for another number)
+
+Minimum amount: NGN 50`;
+  }
+
+  // ============================================================
   // SPECIAL CASE: Just an index number (e.g., "1", "2", "3")
   // ============================================================
   if (/^\d+$/.test(command) && !command.startsWith("0")) {
