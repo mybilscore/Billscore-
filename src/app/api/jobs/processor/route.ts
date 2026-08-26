@@ -1,27 +1,27 @@
-// app/api/jobs/processor/route.ts - JOB PROCESSOR ROUTE
+// app/api/jobs/processor/route.ts - FIXED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
-import { JobStatus, JobType, TransactionStatus, VtuVendor } from "@prisma/client";
+import { JobStatus, TransactionStatus } from "@prisma/client";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { sendWhatsAppMessage } from "~/lib/twilio";
 
 // ============================================================
-// MAP VENDOR TO ENUM HELPER
+// MAP VENDOR TO ENUM
 // ============================================================
 
-function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
+function mapVendorToEnum(vendorCode: string | undefined): any {
   if (!vendorCode) return null;
   const normalized = vendorCode.toUpperCase();
-  const vendorMap: Record<string, VtuVendor> = {
-    'VTPASS': VtuVendor.VTPASS,
-    'GIDIGITAL': VtuVendor.GIDIGITAL,
-    'MONIEPOINT': VtuVendor.MONIEPOINT,
-    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
-    'QUICKTELLER': VtuVendor.QUICKTELLER,
-    'BILAL_SADA': VtuVendor.BILAL_SADA,
-    'LEGITDATAWAY': VtuVendor.VTPASS,
-    'BILALSADA': VtuVendor.BILAL_SADA,
+  const vendorMap: Record<string, any> = {
+    'VTPASS': 'VTPASS',
+    'GIDIGITAL': 'GIDIGITAL',
+    'MONIEPOINT': 'MONIEPOINT',
+    'FLUTTERWAVE_VTU': 'FLUTTERWAVE_VTU',
+    'QUICKTELLER': 'QUICKTELLER',
+    'BILAL_SADA': 'BILAL_SADA',
+    'LEGITDATAWAY': 'VTPASS',
+    'BILALSADA': 'BILAL_SADA',
   };
   return vendorMap[normalized] || null;
 }
@@ -32,16 +32,9 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
 
 export async function POST(request: NextRequest) {
   try {
-    // Optional: Add authentication for security
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     console.log(`[Job Processor] Starting job processing...`);
 
-    // Get pending jobs (limit to 10 per run)
+    // Get pending jobs
     const jobs = await prisma.job.findMany({
       where: {
         status: JobStatus.PENDING,
@@ -59,13 +52,30 @@ export async function POST(request: NextRequest) {
 
     for (const job of jobs) {
       try {
+        // ✅ Check if payload has transactionId
+        const payload = job.payload;
+        if (!payload.transactionId) {
+          console.error(`[Job Processor] Job ${job.id} missing transactionId`);
+          await prisma.job.update({
+            where: { id: job.id },
+            data: {
+              status: JobStatus.FAILED,
+              errorMessage: "Missing transactionId in payload",
+              completedAt: new Date(),
+            },
+          });
+          failed++;
+          continue;
+        }
+
         await processJob(job);
         processed++;
         console.log(`[Job Processor] Job ${job.id} processed successfully`);
       } catch (error: any) {
         console.error(`[Job Processor] Job ${job.id} failed:`, error);
         
-        // Increment attempts and update status
+        // ✅ Truncate error message to prevent column overflow
+        const errorMessage = (error.message || "Unknown error").substring(0, 500);
         const newAttempts = job.attempts + 1;
         const isFinalAttempt = newAttempts >= job.maxAttempts;
 
@@ -74,7 +84,7 @@ export async function POST(request: NextRequest) {
           data: {
             attempts: newAttempts,
             status: isFinalAttempt ? JobStatus.FAILED : JobStatus.PENDING,
-            errorMessage: error.message || "Unknown error",
+            errorMessage: errorMessage,
             updatedAt: new Date(),
             ...(isFinalAttempt ? { completedAt: new Date() } : {}),
             ...(!isFinalAttempt ? { 
@@ -82,24 +92,6 @@ export async function POST(request: NextRequest) {
             } : {}),
           },
         });
-
-        // Send failure notification if this was the final attempt
-        if (isFinalAttempt) {
-          const payload = job.payload;
-          const user = await prisma.user.findUnique({ where: { id: payload.userId } });
-          if (user) {
-            await sendWhatsAppMessage(
-              user.phone,
-              `❌ ${payload.serviceType || 'Purchase'} Failed
-
-Error: ${error.message || "Unknown error"}
-Reference: ${payload.transactionId?.substring(0, 10) || 'N/A'}
-
-Your funds have not been deducted.
-Please try again or contact support.`
-            );
-          }
-        }
 
         failed++;
       }
@@ -110,13 +102,13 @@ Please try again or contact support.`
       processed,
       failed,
       total: jobs.length,
-      timestamp: new Date().toISOString(),
     });
 
   } catch (error: any) {
     console.error("[Job Processor] Error:", error);
+    const errorMessage = (error.message || "Unknown error").substring(0, 500);
     return NextResponse.json(
-      { error: error.message || "Failed to process jobs" },
+      { error: errorMessage },
       { status: 500 }
     );
   }
@@ -130,16 +122,9 @@ async function processJob(job: any) {
   const payload = job.payload;
   const { transactionId, userId, serviceType } = payload;
 
-  // Update job to processing
-  await prisma.job.update({
-    where: { id: job.id },
-    data: {
-      status: JobStatus.PROCESSING,
-      startedAt: new Date(),
-    },
-  });
+  console.log(`[Job] Processing ${serviceType} for transaction ${transactionId}...`);
 
-  // Check if transaction already exists
+  // ✅ Check if transaction exists
   const existingTransaction = await prisma.vtuTransaction.findUnique({
     where: { id: transactionId },
   });
@@ -148,7 +133,7 @@ async function processJob(job: any) {
     throw new Error(`Transaction ${transactionId} not found`);
   }
 
-  // If already successful, skip
+  // ✅ If already successful, skip
   if (existingTransaction.status === TransactionStatus.SUCCESS) {
     console.log(`[Job] Transaction ${transactionId} already completed. Skipping.`);
     await prisma.job.update({
@@ -161,7 +146,7 @@ async function processJob(job: any) {
     return;
   }
 
-  // Process based on service type
+  // ✅ Process based on service type
   switch (serviceType) {
     case "AIRTIME":
       await processAirtimePurchase(job);
@@ -180,219 +165,6 @@ async function processJob(job: any) {
       break;
     default:
       throw new Error(`Unknown service type: ${serviceType}`);
-  }
-}
-
-// ============================================================
-// AIRTIME PURCHASE PROCESSOR
-// ============================================================
-
-async function processAirtimePurchase(job: any) {
-  const payload = job.payload;
-  const { transactionId, userId, phoneNumber, amount, detectedNetwork } = payload;
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { wallet: true },
-  });
-
-  if (!user) throw new Error("User not found");
-
-  const vendorService = getVendorService();
-  const result = await vendorService.buyAirtime(
-    { phoneNumber, amount, network: detectedNetwork },
-    userId
-  );
-
-  const wallet = user.wallet;
-  const walletBalance = Number(wallet?.walletBalance || 0);
-
-  if (result.success) {
-    const token = result.data?.token || result.data?.purchased_code || null;
-    const vendorReference = result.vendorReference || null;
-
-    await prisma.$transaction(async (tx) => {
-      const currentTx = await tx.vtuTransaction.findUnique({
-        where: { id: transactionId },
-      });
-
-      if (currentTx?.status === TransactionStatus.SUCCESS) {
-        console.log(`[Job] Transaction ${transactionId} already completed. Skipping.`);
-        return;
-      }
-
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { walletBalance: { decrement: amount } },
-      });
-
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          userId: userId,
-          type: "DEBIT",
-          amount: amount,
-          balanceBefore: walletBalance,
-          balanceAfter: walletBalance - amount,
-          reference: `VTU_${transactionId}`,
-          description: `Airtime purchase for ${phoneNumber}`,
-          status: "SUCCESS",
-          category: "AIRTIME",
-        },
-      });
-
-      await tx.vtuTransaction.update({
-        where: { id: transactionId },
-        data: {
-          status: TransactionStatus.SUCCESS,
-          totalDebited: amount,
-          token: token,
-          vendorReference: vendorReference,
-          vendor: mapVendorToEnum(result.vendor) || VtuVendor.VTPASS,
-          deliveredAt: new Date(),
-          metadata: {
-            ...currentTx?.metadata,
-            processed: true,
-            completedAt: new Date().toISOString(),
-          },
-        },
-      });
-    });
-
-    // Update job as completed
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.COMPLETED,
-        completedAt: new Date(),
-      },
-    });
-
-    // Send success message
-    await sendWhatsAppMessage(
-      user.phone,
-      `✅ Airtime Purchase Successful!
-
-Phone: ${phoneNumber}
-Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
-${token ? `Token: ${token}` : ''}
-Reference: ${transactionId.substring(0, 10)}
-
-Thank you for using Bilscore!`
-    );
-  } else {
-    throw new Error(result.error || "Vendor transaction failed");
-  }
-}
-
-// ============================================================
-// DATA PURCHASE PROCESSOR
-// ============================================================
-
-async function processDataPurchase(job: any) {
-  const payload = job.payload;
-  const { transactionId, userId, phoneNumber, planData, provider, detectedNetwork } = payload;
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { wallet: true },
-  });
-
-  if (!user) throw new Error("User not found");
-
-  const amount = Number(planData.price);
-  const wallet = user.wallet;
-  const walletBalance = Number(wallet?.walletBalance || 0);
-
-  const vendorService = getVendorService();
-  const result = await vendorService.buyData(
-    {
-      phoneNumber,
-      planCode: planData.planCode || planData.data,
-      network: detectedNetwork,
-      amount: amount,
-    },
-    userId
-  );
-
-  if (result.success) {
-    const token = result.data?.token || result.data?.purchased_code || null;
-    const vendorReference = result.vendorReference || null;
-
-    await prisma.$transaction(async (tx) => {
-      const currentTx = await tx.vtuTransaction.findUnique({
-        where: { id: transactionId },
-      });
-
-      if (currentTx?.status === TransactionStatus.SUCCESS) {
-        console.log(`[Job] Transaction ${transactionId} already completed. Skipping.`);
-        return;
-      }
-
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { walletBalance: { decrement: amount } },
-      });
-
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          userId: userId,
-          type: "DEBIT",
-          amount: amount,
-          balanceBefore: walletBalance,
-          balanceAfter: walletBalance - amount,
-          reference: `VTU_${transactionId}`,
-          description: `Data purchase for ${phoneNumber}`,
-          status: "SUCCESS",
-          category: "DATA",
-        },
-      });
-
-      await tx.vtuTransaction.update({
-        where: { id: transactionId },
-        data: {
-          status: TransactionStatus.SUCCESS,
-          totalDebited: amount,
-          token: token,
-          vendorReference: vendorReference,
-          vendor: mapVendorToEnum(result.vendor) || VtuVendor.VTPASS,
-          deliveredAt: new Date(),
-          metadata: {
-            ...currentTx?.metadata,
-            processed: true,
-            completedAt: new Date().toISOString(),
-          },
-        },
-      });
-    });
-
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.COMPLETED,
-        completedAt: new Date(),
-      },
-    });
-
-    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
-    await sendWhatsAppMessage(
-      user.phone,
-      `✅ Data Purchase Successful!
-
-Phone: ${phoneNumber}
-Plan: ${dataDisplay} (${provider})
-Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
-${token ? `Token: ${token}` : ''}
-Reference: ${transactionId.substring(0, 10)}
-
-Thank you for using Bilscore!`
-    );
-  } else {
-    throw new Error(result.error || "Vendor transaction failed");
   }
 }
 
@@ -483,7 +255,7 @@ async function processElectricityPurchase(job: any) {
           totalDebited: amount,
           token: token,
           vendorReference: vendorReference,
-          vendor: mapVendorToEnum(result.vendor) || VtuVendor.VTPASS,
+          vendor: mapVendorToEnum(result.vendor),
           deliveredAt: new Date(),
           metadata: {
             ...currentTx?.metadata,
@@ -499,12 +271,12 @@ async function processElectricityPurchase(job: any) {
             customerId: customer.id,
             userId: userId,
             vtuTransactionId: transactionId,
-            transactionType: VtuType.ELECTRICITY_INSTANT,
+            transactionType: "ELECTRICITY_INSTANT",
             amount: amount,
             totalAmount: amount,
             product: discoCode,
             meterNumber: meterNumber,
-            status: TransactionStatus.SUCCESS,
+            status: "SUCCESS",
             metadata: {
               vendorName: result.vendor || 'unknown',
               vendorReference: vendorReference || '',
@@ -531,14 +303,6 @@ async function processElectricityPurchase(job: any) {
       }
     });
 
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.COMPLETED,
-        completedAt: new Date(),
-      },
-    });
-
     await sendWhatsAppMessage(
       user.phone,
       `✅ Electricity Purchase Successful!
@@ -548,6 +312,201 @@ DisCo: ${discoCode}
 Amount: NGN ${amount.toFixed(2)}
 ${customerName ? `Customer: ${customerName}` : ''}
 Token: ${token}
+Reference: ${transactionId.substring(0, 10)}
+
+Thank you for using Bilscore!`
+    );
+  } else {
+    throw new Error(result.error || "Vendor transaction failed");
+  }
+}
+
+// ============================================================
+// AIRTIME PURCHASE PROCESSOR
+// ============================================================
+
+async function processAirtimePurchase(job: any) {
+  const payload = job.payload;
+  const { transactionId, userId, phoneNumber, amount, detectedNetwork } = payload;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { wallet: true },
+  });
+
+  if (!user) throw new Error("User not found");
+
+  const wallet = user.wallet;
+  const walletBalance = Number(wallet?.walletBalance || 0);
+
+  const vendorService = getVendorService();
+  const result = await vendorService.buyAirtime(
+    { phoneNumber, amount, network: detectedNetwork },
+    userId
+  );
+
+  if (result.success) {
+    const token = result.data?.token || result.data?.purchased_code || null;
+    const vendorReference = result.vendorReference || null;
+
+    await prisma.$transaction(async (tx) => {
+      const currentTx = await tx.vtuTransaction.findUnique({
+        where: { id: transactionId },
+      });
+
+      if (currentTx?.status === TransactionStatus.SUCCESS) {
+        console.log(`[Job] Transaction ${transactionId} already completed. Skipping.`);
+        return;
+      }
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { walletBalance: { decrement: amount } },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          userId: userId,
+          type: "DEBIT",
+          amount: amount,
+          balanceBefore: walletBalance,
+          balanceAfter: walletBalance - amount,
+          reference: `VTU_${transactionId}`,
+          description: `Airtime purchase for ${phoneNumber}`,
+          status: "SUCCESS",
+          category: "AIRTIME",
+        },
+      });
+
+      await tx.vtuTransaction.update({
+        where: { id: transactionId },
+        data: {
+          status: TransactionStatus.SUCCESS,
+          totalDebited: amount,
+          token: token,
+          vendorReference: vendorReference,
+          vendor: mapVendorToEnum(result.vendor),
+          deliveredAt: new Date(),
+          metadata: {
+            ...currentTx?.metadata,
+            processed: true,
+            completedAt: new Date().toISOString(),
+          },
+        },
+      });
+    });
+
+    await sendWhatsAppMessage(
+      user.phone,
+      `✅ Airtime Purchase Successful!
+
+Phone: ${phoneNumber}
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+${token ? `Token: ${token}` : ''}
+Reference: ${transactionId.substring(0, 10)}
+
+Thank you for using Bilscore!`
+    );
+  } else {
+    throw new Error(result.error || "Vendor transaction failed");
+  }
+}
+
+// ============================================================
+// DATA PURCHASE PROCESSOR
+// ============================================================
+
+async function processDataPurchase(job: any) {
+  const payload = job.payload;
+  const { transactionId, userId, phoneNumber, planData, provider, detectedNetwork } = payload;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { wallet: true },
+  });
+
+  if (!user) throw new Error("User not found");
+
+  const amount = Number(planData.price);
+  const wallet = user.wallet;
+  const walletBalance = Number(wallet?.walletBalance || 0);
+
+  const vendorService = getVendorService();
+  const result = await vendorService.buyData(
+    {
+      phoneNumber,
+      planCode: planData.planCode || planData.data,
+      network: detectedNetwork,
+      amount: amount,
+    },
+    userId
+  );
+
+  if (result.success) {
+    const token = result.data?.token || result.data?.purchased_code || null;
+    const vendorReference = result.vendorReference || null;
+
+    await prisma.$transaction(async (tx) => {
+      const currentTx = await tx.vtuTransaction.findUnique({
+        where: { id: transactionId },
+      });
+
+      if (currentTx?.status === TransactionStatus.SUCCESS) {
+        console.log(`[Job] Transaction ${transactionId} already completed. Skipping.`);
+        return;
+      }
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { walletBalance: { decrement: amount } },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          userId: userId,
+          type: "DEBIT",
+          amount: amount,
+          balanceBefore: walletBalance,
+          balanceAfter: walletBalance - amount,
+          reference: `VTU_${transactionId}`,
+          description: `Data purchase for ${phoneNumber}`,
+          status: "SUCCESS",
+          category: "DATA",
+        },
+      });
+
+      await tx.vtuTransaction.update({
+        where: { id: transactionId },
+        data: {
+          status: TransactionStatus.SUCCESS,
+          totalDebited: amount,
+          token: token,
+          vendorReference: vendorReference,
+          vendor: mapVendorToEnum(result.vendor),
+          deliveredAt: new Date(),
+          metadata: {
+            ...currentTx?.metadata,
+            processed: true,
+            completedAt: new Date().toISOString(),
+          },
+        },
+      });
+    });
+
+    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+    await sendWhatsAppMessage(
+      user.phone,
+      `✅ Data Purchase Successful!
+
+Phone: ${phoneNumber}
+Plan: ${dataDisplay} (${provider})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+${token ? `Token: ${token}` : ''}
 Reference: ${transactionId.substring(0, 10)}
 
 Thank you for using Bilscore!`
@@ -628,7 +587,7 @@ async function processCablePurchase(job: any) {
           totalDebited: amount,
           token: token,
           vendorReference: vendorReference,
-          vendor: mapVendorToEnum(result.vendor) || VtuVendor.VTPASS,
+          vendor: mapVendorToEnum(result.vendor),
           deliveredAt: new Date(),
           metadata: {
             ...currentTx?.metadata,
@@ -637,14 +596,6 @@ async function processCablePurchase(job: any) {
           },
         },
       });
-    });
-
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.COMPLETED,
-        completedAt: new Date(),
-      },
     });
 
     await sendWhatsAppMessage(
@@ -658,7 +609,6 @@ Amount: NGN ${amount.toFixed(2)}
 ${token ? `Token: ${token}` : ''}
 Reference: ${transactionId.substring(0, 10)}
 
-Your subscription has been activated. Enjoy!
 Thank you for using Bilscore!`
     );
   } else {
@@ -746,7 +696,7 @@ async function processEducationPurchase(job: any) {
           totalDebited: amount,
           token: token,
           vendorReference: vendorReference,
-          vendor: mapVendorToEnum(result.vendor) || VtuVendor.VTPASS,
+          vendor: mapVendorToEnum(result.vendor),
           deliveredAt: new Date(),
           metadata: {
             ...currentTx?.metadata,
@@ -755,14 +705,6 @@ async function processEducationPurchase(job: any) {
           },
         },
       });
-    });
-
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.COMPLETED,
-        completedAt: new Date(),
-      },
     });
 
     await sendWhatsAppMessage(
