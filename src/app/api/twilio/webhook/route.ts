@@ -477,13 +477,19 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 // VERIFY DECODER WITH VTPASS
 // ============================================================
 
+// ============================================================
+// VERIFY DECODER WITH VTPASS - DIRECT CALL (NO INTERNAL API)
+// ============================================================
+
 async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
   try {
+    // Determine environment
     const isProduction = process.env.NODE_ENV === "production";
     const baseUrl = isProduction 
       ? "https://vtpass.com/api/merchant-verify"
       : "https://sandbox.vtpass.com/api/merchant-verify";
     
+    // Get API keys from environment
     const apiKey = isProduction 
       ? process.env.VTPASS_LIVE_API_KEY 
       : process.env.VTPASS_SANDBOX_API_KEY;
@@ -492,6 +498,20 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
       ? process.env.VTPASS_LIVE_SECRET_KEY
       : process.env.VTPASS_SANDBOX_SECRET_KEY;
 
+    // Build the verification payload
+    const payload = {
+      serviceID: serviceID,
+      billersCode: smartCardNumber,
+    };
+
+    console.log(`🔍 [Decoder Verify] Direct call:`, {
+      serviceID,
+      smartCardNumber,
+      baseUrl,
+      hasApiKey: !!apiKey,
+      hasSecretKey: !!secretKey,
+    });
+
     const response = await fetch(baseUrl, {
       method: "POST",
       headers: {
@@ -499,33 +519,54 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
         "api-key": apiKey || "",
         "secret-key": secretKey || "",
       },
-      body: JSON.stringify({
-        serviceID: serviceID,
-        billersCode: smartCardNumber,
-      }),
-      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+      const errorText = await response.text();
+      console.error(`[Decoder Verify] HTTP Error: ${response.status} - ${errorText}`);
+      return { 
+        success: false, 
+        error: `HTTP ${response.status}: ${response.statusText}` 
+      };
     }
 
     const data = await response.json();
+    console.log(`[Decoder Verify] Response code: ${data.code}`);
+    
     if (data.code === "000" && data.content) {
+      const content = data.content;
+      
       return {
         success: true,
         data: {
-          customerName: data.content.Customer_Name || data.content.customerName || "Unknown",
-          customerAddress: data.content.Address || data.content.address || "",
-          smartCardNumber: data.content.Smart_Card_Number || data.content.smartCardNumber || smartCardNumber,
-          provider: data.content.Provider || data.content.provider || "",
-          status: data.content.Status || data.content.status || "ACTIVE",
+          customerName: content.Customer_Name || content.customerName || content.name || "Unknown",
+          customerAddress: content.Address || content.address || "",
+          smartCardNumber: content.Smart_Card_Number || content.smartCardNumber || content.billersCode || smartCardNumber,
+          provider: content.Provider || content.provider || "",
+          status: content.Status || content.status || "ACTIVE",
+          packageName: content.Package_Name || content.packageName || "",
+          packageCode: content.Package_Code || content.packageCode || "",
+          dueDate: content.Due_Date || content.dueDate || null,
+          customerType: content.Customer_Type || content.customerType || "",
+          canVend: content.Can_Vend !== undefined ? content.Can_Vend : true,
+          subscriptionType: content.Subscription_Type || content.subscriptionType || "",
+          renewalDate: content.Renewal_Date || content.renewalDate || null,
         },
       };
+    } else {
+      return { 
+        success: false, 
+        error: data.response_description || data.message || "Decoder verification failed" 
+      };
     }
-    return { success: false, error: data.response_description || "Decoder verification failed" };
   } catch (error: any) {
-    return { success: false, error: error.message || "Network error" };
+    console.error('[Decoder Verify] Error:', error.message);
+    return { 
+      success: false, 
+      error: error.message || "Network error during verification" 
+    };
   }
 }
 
