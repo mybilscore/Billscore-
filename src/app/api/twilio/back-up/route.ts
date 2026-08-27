@@ -344,6 +344,10 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
   const normalized = vendorCode.toUpperCase();
   const vendorMap: Record<string, VtuVendor> = {
     'VTPASS': VtuVendor.VTPASS,
+    'GIDIGITAL': VtuVendor.GIDIGITAL,
+    'MONIEPOINT': VtuVendor.MONIEPOINT,
+    'FLUTTERWAVE_VTU': VtuVendor.FLUTTERWAVE_VTU,
+    'QUICKTELLER': VtuVendor.QUICKTELLER,
     'BILAL_SADA': VtuVendor.BILAL_SADA,
     'LEGITDATAWAY': VtuVendor.VTPASS,
     'BILALSADA': VtuVendor.BILAL_SADA,
@@ -473,6 +477,13 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 // VERIFY DECODER WITH VTPASS - WITH ALL THREE KEYS
 // ============================================================
 
+// ============================================================
+// VERIFY DECODER WITH VTPASS - FORCE SANDBOX MODE
+// ============================================================
+
+// ============================================================
+// VERIFY DECODER WITH VTPASS - FORCE SANDBOX MODE
+// ============================================================
 
 async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
   try {
@@ -944,11 +955,10 @@ ${customerEmail ? `Email: ${customerEmail}` : ''}
 Quick Buy QR Code:
 ${qrLink}
 
+Scan this QR code to quickly buy electricity for this meter.
+You can also find this QR code in your saved meters.
 
-🔹 Print this QR code and paste it on your meter
-🔹 Scan to quickly buy electricity anytime
-
-Type POWER to see all your meters and buy power!`;
+Type ELECTRIC to see all your meters and buy power!`;
     }
 
     await prisma.savedMeter.create({
@@ -984,10 +994,10 @@ ${customerEmail ? `Email: ${customerEmail}` : ''}
 Quick Buy QR Code:
 ${qrLink}
 
-🔹 Print this QR code and paste it on your meter
-🔹 Scan to quickly buy electricity anytime
+Scan this QR code to quickly buy electricity for this meter.
+You can also find this QR code in your saved meters.
 
-Type POWER to see all your meters and buy power!`;
+Type ELECTRIC to see all your meters and buy power!`;
   } catch (error) {
     console.error("Add meter error:", error);
     return formatErrorMessage(error);
@@ -1017,7 +1027,7 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
     };
     const serviceId = serviceMap[providerUpper] || 'dstv';
 
-    // Verify decoder using the fixed function
+    // ✅ Verify decoder using the fixed function
     const verificationResult = await verifyDecoderWithVTpass(serviceId, decoderNumber);
     
     let verificationMessage = "";
@@ -1035,7 +1045,7 @@ async function addDecoderWithVerification(userId: string, decoderNumber: string,
       decoderStatus = verificationResult.data?.status || null;
       
       verificationMessage = `
-Decoder Verified!
+✅ Decoder Verified!
 Customer: ${customerName || "Unknown"}
 Decoder: ${verificationResult.data?.smartCardNumber || decoderNumber}
 Status: ${decoderStatus || "ACTIVE"}`;
@@ -1146,7 +1156,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     message += `\n`;
   });
 
-  message += `To buy electricity: POWER [number] [amount]
+  message += `To buy electricity: ELECTRIC [number] [amount]
 To delete: DELETEMETER [meter_number]
 To set default: SETDEFAULTMETER [meter_number]`;
 
@@ -1569,7 +1579,7 @@ async function processDataPurchaseWithQueue(
 
     const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-    return `Processing your data purchase...!
+    return `✅ Data purchase queued!
 
 Phone: ${phoneNumber}
 Plan: ${dataDisplay} (${provider})
@@ -1646,7 +1656,7 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
     new Date()
   );
 
-  return `Education purchase queued!
+  return `✅ Education purchase queued!
 
 Product: ${productInfo.name}
 Quantity: ${quantity}
@@ -1732,7 +1742,6 @@ PIN [code] - Set transaction PIN
 Airtime & Data:
 AIRTIME [amount] - For YOUR number (no PIN)
 AIRTIME [phone] [amount] - For others (PIN required)
-
 DATA - Show available plans for your network
 DATA [index] - For YOUR number (no PIN)
 DATA [phone] - Show plans for another number
@@ -1746,6 +1755,23 @@ ELECTRIC [index] [amount] - Buy for saved meter (no PIN)
 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
+DISCOS - Show available DisCos
+SCHEDULE [index] [amount] [days] - Schedule electricity
+SUBSCRIPTIONS - View active schedules
+CANCEL [id] - Cancel subscription
+
+Cable TV (Your decoders - no PIN):
+CABLE - Show saved decoders
+CABLE [index] [package] - Subscribe
+ADDDECODER [decoder] [provider] [name] - Add decoder
+DECODERS - List saved decoders
+PACKAGES [provider] - Show packages
+
+Education:
+EDU [product] [quantity] - Buy education pins
+WAEC [quantity] - Buy WAEC pins
+JAMB [quantity] - Buy JAMB pins
+NECO [quantity] - Buy NECO pins
 
 Referral:
 REFERRAL - Get referral link
@@ -1981,7 +2007,7 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
 
         const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-        return ` Processing your data purchase...!
+        return `✅ Data purchase queued!
 
 Phone: ${normalizedTarget}
 Plan: ${dataDisplay} (${provider})
@@ -2048,9 +2074,9 @@ You'll receive a confirmation shortly.`;
       where: { referrerId: user.id },
     });
 
-    return `Balance: NGN ${Number(balance).toFixed(2)}
- Name: ${wallet?.accountName || user.fullName}
- Number: ${wallet?.accountNumber || 'N/A'}
+    return `Your Bilscore Balance: NGN ${Number(balance).toFixed(2)}
+Account Name: ${wallet?.accountName || user.fullName}
+Account Number: ${wallet?.accountNumber || 'N/A'}
 
 Quick Stats:
 Total Transactions: ${totalTxns}
@@ -2239,7 +2265,7 @@ Type HELP for available commands.`;
 
         const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-        return `Processing your data purchase..!
+        return `✅ Data purchase queued!
 
 Phone: ${normalizedTarget}
 Plan: ${dataDisplay} (${provider})
@@ -2324,7 +2350,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   const [, decoderNumber, provider, ...nameParts] = addParts;
   const name = nameParts.join(" ");
   
-  // Call the addDecoderWithVerification function
+  // ✅ Call the addDecoderWithVerification function
   const result = await addDecoderWithVerification(user.id, decoderNumber, provider, name);
   return result;
 }
@@ -2559,7 +2585,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
         new Date()
       );
 
-      return `Processing your airtime purchase..
+      return `✅ Airtime purchase queued!
 
 Phone: ${normalizedUserPhone}
 Amount: NGN ${amount.toFixed(2)}
@@ -2625,7 +2651,7 @@ You'll receive a confirmation shortly.`;
         new Date()
       );
 
-      return `Processing your airtime purchase..
+      return `✅ Airtime purchase queued!
 
 Phone: ${normalizedPhone}
 Amount: NGN ${amount.toFixed(2)}
@@ -2790,7 +2816,7 @@ You'll receive a confirmation shortly.`;
       return message;
     }
 
-    // CASE 1: ELECTRIC [amount] - Buy using default/saved meter (NO VERIFICATION)
+    // ✅ CASE 1: ELECTRIC [amount] - Buy using default/saved meter (NO VERIFICATION)
     if (parts.length === 2) {
       const amountStr = parts[1];
       const amount = parseFloat(amountStr);
@@ -2821,7 +2847,7 @@ You'll receive a confirmation shortly.`;
         return message;
       }
 
-      // Create transaction with PROCESSING status
+      // ✅ Create transaction with PROCESSING status
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -2850,7 +2876,7 @@ You'll receive a confirmation shortly.`;
         },
       });
 
-      //  Create background job
+      // ✅ Create background job
       await createJob(
         JobType.VTU_TRANSACTION,
         {
@@ -2874,8 +2900,8 @@ You'll receive a confirmation shortly.`;
         new Date()
       );
 
-      //  Send immediate acknowledgment
-      return `Processing your electricity purchase...
+      // ✅ Send immediate acknowledgment
+      return `✅ Electricity purchase queued!
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -2886,7 +2912,7 @@ Reference: ${transaction.id.substring(0, 10)}
 You'll receive a confirmation shortly.`;
     }
 
-    //  CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index (NO VERIFICATION)
+    // ✅ CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index (NO VERIFICATION)
     if (parts.length === 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -2911,7 +2937,7 @@ You'll receive a confirmation shortly.`;
       
       const selectedMeter = meters[index];
 
-      // Create transaction with PROCESSING status
+      // ✅ Create transaction with PROCESSING status
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -2940,7 +2966,7 @@ You'll receive a confirmation shortly.`;
         },
       });
 
-      //  Create background job
+      // ✅ Create background job
       await createJob(
         JobType.VTU_TRANSACTION,
         {
@@ -2964,8 +2990,8 @@ You'll receive a confirmation shortly.`;
         new Date()
       );
 
-      //  Send immediate acknowledgment
-      return `Processing your electricity purchase...
+      // ✅ Send immediate acknowledgment
+      return `✅ Electricity purchase queued!
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -3024,7 +3050,7 @@ You'll receive a confirmation shortly.`;
           },
         });
 
-        // Create background job
+        // ✅ Create background job
         await createJob(
           JobType.VTU_TRANSACTION,
           {
@@ -3049,7 +3075,7 @@ You'll receive a confirmation shortly.`;
         );
 
         // ✅ Send immediate acknowledgment
-        return `Processing your electricity purchase...
+        return `✅ Electricity purchase queued!
 
 Meter: ${existingMeter.meterNumber}
 DisCo: ${existingMeter.disco}
@@ -3109,7 +3135,7 @@ You'll receive a confirmation shortly.`;
         },
       });
 
-      // Create background job
+      // ✅ Create background job
       await createJob(
         JobType.VTU_TRANSACTION,
         {
@@ -3129,8 +3155,8 @@ You'll receive a confirmation shortly.`;
         new Date()
       );
 
-      // Send immediate acknowledgment
-      return `Processing your electricity purchase...
+      // ✅ Send immediate acknowledgment
+      return `✅ Electricity purchase queued!
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper} (${discoInfo.fullName})
@@ -3199,19 +3225,21 @@ Or try:
 BALANCE - Check your wallet
 AIRTIME [amount] - Buy airtime for YOUR number (no PIN)
 AIRTIME [phone] [amount] - Buy airtime for others (PIN required)
-
 DATA - Show available plans for your network
 DATA [index] - Buy data for YOUR number (no PIN)
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for others (PIN required)
 DATA ALL - View all pricing at https://bilscore.com/pricing
-
 ELECTRIC - See saved meters
 ELECTRIC [amount] - Buy electricity (your saved meter - no PIN)
 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
 ADDMETER [meter] [disco] [name] - Save a meter
+ADDDECODER [decoder] [provider] [name] - Save a decoder
 METERS - List your saved meters
-
+DECODERS - List your saved decoders
+SCHEDULE [index] [amount] [days] - Schedule electricity
+SUBSCRIPTIONS - View active schedules
+EDU [product] [quantity] - Buy education pins
 TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN`;
