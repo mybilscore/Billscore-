@@ -1,7 +1,15 @@
 // src/lib/vendors/bilalsada.types.ts
 
-// import { VtuType } from '@prisma/client';
 import { VtuType } from "@prisma/client";
+
+// ✅ Auth Config - Token only
+export interface BilalSadaAuthConfig {
+  // Token-based (from .env)
+  accessToken?: string;
+  
+  // Environment
+  mode?: 'sandbox' | 'simulation' | 'live';
+}
 
 export interface BilalSadaAuthResponse {
   status: string;
@@ -10,6 +18,7 @@ export interface BilalSadaAuthResponse {
   username: string;
 }
 
+// ✅ AIRTIME
 export interface BilalSadaAirtimeRequest {
   network: number;
   phone: string;
@@ -24,7 +33,7 @@ export interface BilalSadaAirtimeResponse {
   "request-id": string;
   amount: number;
   discount: number;
-  status: string;
+  status: "success" | "failed";
   message: string;
   phone_number: string;
   oldbal: string;
@@ -34,6 +43,7 @@ export interface BilalSadaAirtimeResponse {
   wallet_vending: string;
 }
 
+// ✅ DATA
 export interface BilalSadaDataRequest {
   network: number;
   phone: string;
@@ -47,7 +57,7 @@ export interface BilalSadaDataResponse {
   "request-id": string;
   amount: string;
   dataplan: string;
-  status: string;
+  status: "success" | "failed";
   message: string;
   response: string;
   phone_number: string;
@@ -58,6 +68,7 @@ export interface BilalSadaDataResponse {
   wallet_vending: string;
 }
 
+// ✅ ELECTRICITY
 export interface BilalSadaElectricityRequest {
   disco: number;
   meter_type: string;
@@ -72,7 +83,7 @@ export interface BilalSadaElectricityResponse {
   "request-id": string;
   amount: number;
   charges: number;
-  status: string;
+  status: "success" | "failed";
   message: string;
   meter_number: string;
   meter_type: string;
@@ -83,6 +94,7 @@ export interface BilalSadaElectricityResponse {
   wallet_vending: string;
 }
 
+// ✅ CABLE TV
 export interface BilalSadaCableRequest {
   cablename: string;
   cableplan: string;
@@ -94,7 +106,7 @@ export interface BilalSadaCableResponse {
   cablename: string;
   cableplan: string;
   amount: number;
-  status: string;
+  status: "success" | "failed";
   message: string;
   smart_card_number: string;
   "request-id": string;
@@ -103,43 +115,34 @@ export interface BilalSadaCableResponse {
   system: string;
 }
 
-// Network mapping
+// ✅ EXAM/RESULT CHECKER
+export interface BilalSadaExamRequest {
+  exam: number;
+  quantity: number;
+  "request-id": string;
+}
+
+export interface BilalSadaExamResponse {
+  username: string;
+  amount: number;
+  quantity: number;
+  message: string;
+  oldbal: string;
+  newbal: number;
+  date: string;
+  status: "success" | "failed";
+  "request-id": string;
+  pin: string;
+}
+
+// ✅ MAPPINGS
 export const BilalSadaNetworkMap = {
   MTN: 1,
-  GLO: 3,
   AIRTEL: 2,
- NINEMOBILE: 4,
+  GLO: 3,
+  NINEMOBILE: 4,
 } as const;
 
-// Data plan mapping (simplified - you'd expand this)
-export const BilalSadaDataPlanMap = {
-  MTN: {
-    '500MB': 1,
-    '1GB': 2,
-    '2GB': 3,
-    '5GB': 4,
-  },
-  GLO: {
-    '500MB': 220,
-    '1GB': 221,
-    '3GB': 224,
-    '5GB': 227,
-  },
-  AIRTEL: {
-    '500MB': 15,
-    '1GB': 16,
-    '2GB': 17,
-    '5GB': 18,
-  },
-  '9MOBILE': {
-    '500MB': 70,
-    '1GB': 71,
-    '2GB': 72,
-    '5GB': 73,
-  },
-} as const;
-
-// DISCO mapping
 export const BilalSadaDiscoMap = {
   IKEJA: 1,
   EKO: 2,
@@ -151,29 +154,14 @@ export const BilalSadaDiscoMap = {
   ABUJA: 8,
 } as const;
 
-// Cable mapping
 export const BilalSadaCableMap = {
-  GOTV: 1,
-  DSTV: 2,
-  STARTIMES: 3,
+  GOTV: "gotv",
+  DSTV: "dstv",
+  STARTIMES: "startimes",
 } as const;
 
-export interface BilalSadaConfig {
-  id: string;
-  name: string;
-  code: string;
-  apiBaseUrl: string;
-  authType: string;
-  authConfig: {
-    username: string;
-    password: string;
-    accessToken?: string;
-    tokenExpiry?: Date;
-  };
-  priority: number;
-  supportedServices: VtuType[];
-  isActive: boolean;
-  timeout: number;
-  maxRetries: number;
-  retryDelay: number;
-}
+export const BilalSadaExamMap = {
+  WAEC: 1,
+  NECO: 2,
+  NABTEB: 3,
+} as const;

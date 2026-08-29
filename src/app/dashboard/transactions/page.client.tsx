@@ -57,7 +57,7 @@ const BRAND_COLORS = {
   info: '#0D3B8E',
 };
 
-// Types
+// Types - ✅ Removed vendor field
 interface Transaction {
   id: string;
   type: string;
@@ -71,7 +71,6 @@ interface Transaction {
   meterNumber: string | null;
   meterType: string | null;
   token: string | null;
-  vendor: string | null;
   vendorReference: string | null;
   vendorCommission: number | null;
   scheduledFor: string | null;
@@ -211,12 +210,10 @@ const getTypeLabel = (type: string) => {
   return labels[type] || type;
 };
 
-// ✅ SIMPLE: Just return channelDisplay as-is
 const getDisplayChannel = (transaction: Transaction): string => {
   return transaction.channelDisplay || transaction.channel || "Unknown";
 };
 
-// Channel icon based on display text
 const getChannelIcon = (channel: string) => {
   const lower = channel.toLowerCase();
   if (lower.includes('whatsapp')) return <MessageSquare className="h-3.5 w-3.5 text-green-500" />;
@@ -284,7 +281,7 @@ const StatsCard = ({
   );
 };
 
-// Transaction Row Component
+// Transaction Row Component - ✅ Removed vendor
 const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -303,13 +300,12 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
                          transaction.balanceAfter !== undefined && 
                          !isNaN(transaction.balanceAfter);
 
-  // ✅ Just get the display channel
   const displayChannel = getDisplayChannel(transaction);
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-800 last:border-0">
       <div
-        className="grid grid-cols-13 gap-3 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+        className="grid grid-cols-12 gap-3 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {/* Type */}
@@ -374,7 +370,7 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
           </span>
         </div>
 
-        {/* ✅ Channel - Display as-is */}
+        {/* ✅ Channel - Replaced vendor column with channel only */}
         <div className="col-span-2 flex items-center">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getChannelColor(displayChannel)}`}>
             {getChannelIcon(displayChannel)}
@@ -416,7 +412,7 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
         </div>
       </div>
 
-      {/* Expanded Details */}
+      {/* Expanded Details - ✅ Removed vendor */}
       {isExpanded && (
         <div className="grid grid-cols-12 gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700">
           <div className="col-span-6 space-y-2">
@@ -447,7 +443,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </span>
             </div>
             
-            {/* ✅ Channel in expanded view */}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -534,13 +529,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
                     )}
                   </button>
                 </div>
-              </div>
-            )}
-            
-            {transaction.vendor && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500 dark:text-gray-400">Vendor</span>
-                <span className="text-gray-900 dark:text-white">{transaction.vendor}</span>
               </div>
             )}
             
@@ -817,7 +805,7 @@ export function TransactionsClient({
           </div>
 
           {showFilters && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Transaction Type
@@ -852,23 +840,6 @@ export function TransactionsClient({
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Channel
-                </label>
-                <select
-                  value={filterChannel}
-                  onChange={(e) => handleFilterChange("channel", e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                >
-                  <option value="all">All Channels</option>
-                  {channelOptions.map((channel) => (
-                    <option key={channel} value={channel}>
-                      {channel}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
           )}
         </div>
@@ -896,8 +867,8 @@ export function TransactionsClient({
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
             {viewMode === "list" ? (
               <div className="overflow-x-auto">
-                <div className="min-w-[900px]">
-                  <div className="grid grid-cols-13 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <div className="min-w-[800px]">
+                  <div className="grid grid-cols-12 gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
                     <div className="col-span-2">Type</div>
                     <div className="col-span-3">Product / Details</div>
                     <div className="col-span-2">Amount</div>
@@ -916,6 +887,7 @@ export function TransactionsClient({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
                 {transactions.map((transaction) => {
                   const displayChannel = getDisplayChannel(transaction);
+                  
                   return (
                     <div
                       key={transaction.id}
@@ -949,7 +921,6 @@ export function TransactionsClient({
                           </span>
                         </div>
                         
-                        {/* ✅ Channel in grid view */}
                         <div className="flex justify-between">
                           <span className="text-gray-500 dark:text-gray-400">Channel</span>
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${getChannelColor(displayChannel)}`}>

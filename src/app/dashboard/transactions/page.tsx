@@ -147,7 +147,7 @@ export default async function TransactionsPage() {
       meterNumber: tx.meterNumber,
       meterType: tx.meterType,
       token: tx.token,
-      vendor: tx.vendor,
+      // ✅ Remove vendor - we don't display it anymore
       vendorReference: tx.vendorReference,
       vendorCommission: toNumber(tx.vendorCommission),
       scheduledFor: tx.scheduledFor?.toISOString() || null,

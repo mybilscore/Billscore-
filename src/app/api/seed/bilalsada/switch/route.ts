@@ -9,30 +9,63 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { mode } = body;
 
-    if (!mode || !['simulation', 'live'].includes(mode)) {
+    // ✅ Valid modes - match your seed route
+    if (!mode || !['sandbox', 'simulation', 'live'].includes(mode)) {
       return NextResponse.json({
         success: false,
-        error: "Invalid mode. Must be 'simulation' or 'live'",
-        validOptions: ['simulation', 'live'],
+        error: "Invalid mode. Must be 'sandbox', 'simulation', or 'live'",
+        validOptions: ['sandbox', 'simulation', 'live'],
       }, { status: 400 });
     }
 
     console.log(`🔄 [BilalSada Switch] Switching to ${mode} mode...`);
+    console.log(`📁 Reading configuration from .env file...`);
 
-    // Get credentials based on mode
-    const username = process.env.BILAL_SADA_USERNAME || 'mijinyawa01';
-    const password = process.env.BILAL_SADA_PASSWORD || 'your-password';
-    
-    const apiBaseUrl = mode === 'simulation' 
-      ? 'https://simulation.bilalsada.com'
-      : process.env.BILAL_SADA_API_URL || 'https://bilalsada.com';
+    // ✅ Read directly from .env (same as seed route)
+    const accessToken = process.env.BILAL_SADA_ACCESS_TOKEN;
+    const tokenExpiry = process.env.BILAL_SADA_TOKEN_EXPIRY;
+    const username = process.env.BILAL_SADA_USERNAME;
+    const password = process.env.BILAL_SADA_PASSWORD;
+    const apiBaseUrl = process.env.BILAL_SADA_API_URL || 'https://bilalsadasub.com';
+    const envMode = process.env.BILAL_SADA_MODE || 'sandbox';
 
-    console.log(`🌐 [BilalSada Switch] Mode: ${mode}`);
-    console.log(`🌐 [BilalSada Switch] API Base URL: ${apiBaseUrl}`);
-    console.log(`🔑 [BilalSada Switch] Username: ${username}`);
-    console.log(`🔑 [BilalSada Switch] Password: ${password ? '✅ Set' : '❌ Missing'}`);
+    // ✅ Log what's configured
+    console.log(`🔑 Token in .env: ${accessToken ? '✅ Found' : '❌ Not found'}`);
+    console.log(`🔑 Username in .env: ${username ? '✅ Found' : '❌ Not found'}`);
+    console.log(`🔑 Password in .env: ${password ? '✅ Found' : '❌ Not found'}`);
+    console.log(`🌐 API URL: ${apiBaseUrl}`);
+    console.log(`🌐 Mode: ${envMode}`);
 
-    // Find existing BilalSada vendor
+    // ✅ Validate .env configuration (same as seed)
+    const hasToken = !!accessToken;
+    const hasCredentials = !!(username && password);
+
+    if (!hasToken && !hasCredentials) {
+      return NextResponse.json({
+        success: false,
+        error: 'Missing authentication in .env file',
+        message: 'You must set either BILAL_SADA_ACCESS_TOKEN OR BILAL_SADA_USERNAME and BILAL_SADA_PASSWORD in your .env file',
+        required: [
+          'BILAL_SADA_ACCESS_TOKEN (for token-based auth) OR',
+          'BILAL_SADA_USERNAME and BILAL_SADA_PASSWORD (for credentials-based auth)'
+        ],
+        example: `
+          # Token-based auth:
+          BILAL_SADA_ACCESS_TOKEN=your_token_here
+          
+          # OR Credentials-based auth:
+          BILAL_SADA_USERNAME=your_username
+          BILAL_SADA_PASSWORD=your_password
+        `,
+        currentStatus: {
+          hasToken,
+          hasUsername: !!username,
+          hasPassword: !!password,
+        }
+      }, { status: 400 });
+    }
+
+    // ✅ Find existing BilalSada vendor
     const existingVendor = await prisma.vendor.findUnique({
       where: { code: 'BILAL_SADA' },
     });
@@ -41,37 +74,54 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         error: "BilalSada vendor not found. Please seed first.",
-        suggestion: "Run: POST /api/seed/bilalsada with { mode: 'simulation' }",
+        suggestion: "Run: POST /api/seed/bilalsada with { mode: 'sandbox' }",
       }, { status: 404 });
     }
 
-    // Update vendor with new mode configuration
+    // ✅ Build auth config from .env (same as seed)
+    const authConfig: any = {
+      mode: mode,
+    };
+
+    // ✅ Token takes priority if both are set (same as seed)
+    if (accessToken) {
+      authConfig.accessToken = accessToken;
+      if (tokenExpiry) {
+        authConfig.tokenExpiry = new Date(tokenExpiry);
+      }
+      console.log(`🔑 [Switch] Using token from .env: ${accessToken.substring(0, 15)}...`);
+    } else if (username && password) {
+      authConfig.username = username;
+      authConfig.password = password;
+      authConfig.autoRefresh = true;
+      console.log(`🔑 [Switch] Using credentials from .env`);
+      console.log(`🔑 [Switch] Username: ${username}`);
+      console.log(`🔑 [Switch] Auto-refresh: Enabled`);
+    }
+
+    console.log(`🌐 [Switch] API Base URL: ${apiBaseUrl}`);
+    console.log(`🌐 [Switch] Mode: ${mode}`);
+
+    // ✅ Update vendor with new mode configuration
     const updatedVendor = await prisma.vendor.update({
       where: { code: 'BILAL_SADA' },
       data: {
         name: `BilalSada ${mode.charAt(0).toUpperCase() + mode.slice(1)}`,
         apiBaseUrl: apiBaseUrl,
-        authConfig: {
-          username: username,
-          password: password,
-          mode: mode,
-        },
+        authConfig: authConfig,
         metadata: {
           ...(existingVendor.metadata as any || {}),
           mode: mode,
           lastSwitchedAt: new Date().toISOString(),
           switchedFrom: (existingVendor.metadata as any)?.mode || 'unknown',
-          credentials: {
-            usernameSet: !!username,
-            passwordSet: !!password,
-          },
+          authMethod: authConfig.accessToken ? 'TOKEN' : 'CREDENTIALS',
         },
       },
     });
 
     console.log(`✅ [BilalSada Switch] Successfully switched to ${mode}`);
 
-    // Also update all vendor services to reflect the mode
+    // ✅ Update vendor services to reflect the mode
     await prisma.vendorService.updateMany({
       where: { vendorId: updatedVendor.id },
       data: {
@@ -101,15 +151,24 @@ export async function POST(request: NextRequest) {
           status: completeVendor?.status,
           priority: completeVendor?.priority,
           mode: mode,
+          authMethod: authConfig.accessToken ? 'TOKEN' : 'CREDENTIALS',
           services: completeVendor?.services.map(s => ({
             serviceType: s.serviceType,
             isActive: s.isActive,
             priority: s.priority,
-            metadata: s.metadata,
           })),
           metadata: completeVendor?.metadata,
         },
-        mode: mode,
+        envStatus: {
+          tokenConfigured: !!accessToken,
+          credentialsConfigured: !!(username && password),
+          apiUrlConfigured: !!process.env.BILAL_SADA_API_URL,
+          modeConfigured: !!process.env.BILAL_SADA_MODE,
+        },
+        nextSteps: {
+          testAirtime: 'POST /api/vendor/bilalsada/airtime',
+          testData: 'POST /api/vendor/bilalsada/data',
+        },
       },
     });
 
@@ -134,20 +193,25 @@ export async function GET() {
       return NextResponse.json({
         success: false,
         message: 'BilalSada vendor not configured',
+        suggestion: 'Run POST /api/seed/bilalsada to configure',
       }, { status: 404 });
     }
 
+    // ✅ Read from .env to show status
+    const accessToken = process.env.BILAL_SADA_ACCESS_TOKEN;
+    const username = process.env.BILAL_SADA_USERNAME;
+    const password = process.env.BILAL_SADA_PASSWORD;
+    const apiUrl = process.env.BILAL_SADA_API_URL;
+
+    // ✅ Determine current mode from metadata or authConfig
     const currentMode = (vendor.metadata as any)?.mode || 
                         (vendor.authConfig as any)?.mode || 
-                        'unknown';
-
-    const isSimulation = currentMode === 'simulation' || 
-                         vendor.apiBaseUrl?.includes('simulation');
+                        'sandbox';
 
     return NextResponse.json({
       success: true,
       data: {
-        currentMode: isSimulation ? 'simulation' : 'live',
+        currentMode: currentMode,
         vendor: {
           id: vendor.id,
           name: vendor.name,
@@ -155,23 +219,22 @@ export async function GET() {
           apiBaseUrl: vendor.apiBaseUrl,
           status: vendor.status,
           priority: vendor.priority,
-          mode: currentMode,
-          isSimulation: isSimulation,
+          authMethod: vendor.authConfig?.accessToken ? 'TOKEN' : 'CREDENTIALS',
           services: vendor.services.map(s => ({
             serviceType: s.serviceType,
             isActive: s.isActive,
             priority: s.priority,
           })),
-          metadata: vendor.metadata,
-          authConfig: {
-            mode: (vendor.authConfig as any)?.mode,
-          },
         },
-        environmentVariables: {
-          usernameSet: !!process.env.BILAL_SADA_USERNAME,
-          passwordSet: !!process.env.BILAL_SADA_PASSWORD,
+        envStatus: {
+          tokenConfigured: !!accessToken,
+          credentialsConfigured: !!(username && password),
+          apiUrlConfigured: !!apiUrl,
+          apiUrl: apiUrl || 'https://bilalsadasub.com (default)',
+          modeConfigured: !!process.env.BILAL_SADA_MODE,
         },
         nextSteps: {
+          switchToSandbox: 'POST /api/seed/bilalsada/switch with { "mode": "sandbox" }',
           switchToSimulation: 'POST /api/seed/bilalsada/switch with { "mode": "simulation" }',
           switchToLive: 'POST /api/seed/bilalsada/switch with { "mode": "live" }',
         },
@@ -179,6 +242,7 @@ export async function GET() {
     });
 
   } catch (error: any) {
+    console.error('❌ [BilalSada Switch] GET error:', error);
     return NextResponse.json({
       success: false,
       error: error.message || 'Failed to fetch BilalSada status',

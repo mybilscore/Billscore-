@@ -305,14 +305,12 @@ async function processElectricityPurchase(job: any) {
 
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Electricity Purchase Successful!
+      `Electricity Purchase Successful!
 
-Meter: ${meterNumber}
-DisCo: ${discoCode}
-Amount: NGN ${amount.toFixed(2)}
-${customerName ? `Customer: ${customerName}` : ''}
-Token: ${token}
-Reference: ${transactionId.substring(0, 10)}
+        Amount: NGN ${amount.toFixed(2)}
+        ${customerName ? `Customer: ${customerName}` : ''}
+        Token: ${token}
+        Reference: ${transactionId.substring(0, 10)}
 
 Thank you for using Bilscore!`
     );
@@ -399,7 +397,7 @@ async function processAirtimePurchase(job: any) {
 
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Airtime Purchase Successful!
+      `Airtime Purchase Successful!
 
 Phone: ${phoneNumber}
 Amount: NGN ${amount.toFixed(2)}
@@ -500,7 +498,7 @@ async function processDataPurchase(job: any) {
 
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Data Purchase Successful!
+      `Data Purchase Successful!
 
 Phone: ${phoneNumber}
 Plan: ${dataDisplay} (${provider})
@@ -600,7 +598,7 @@ async function processCablePurchase(job: any) {
 
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Cable Subscription Successful!
+      `Cable Subscription Successful!
 
 Decoder: ${decoderNumber}
 Provider: ${provider}
@@ -709,7 +707,7 @@ async function processEducationPurchase(job: any) {
 
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Education Purchase Successful!
+      `Education Purchase Successful!
 
 Product: ${productInfo.name}
 Quantity: ${quantity}

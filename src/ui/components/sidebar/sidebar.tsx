@@ -217,16 +217,16 @@ export default function Sidebar({
       href: "/dashboard/summary/e-schedule", 
       icon: Repeat 
     },
-    { 
-      title: "Bulk Purchases", 
-      href: "", 
-      icon: Package 
-    },
-    { 
-      title: "API Purchases", 
-      href: "", 
-      icon: Database 
-    },
+    // { 
+    //   title: "Bulk Purchases", 
+    //   href: "", 
+    //   icon: Package 
+    // },
+    // { 
+    //   title: "API Purchases", 
+    //   href: "", 
+    //   icon: Database 
+    // },
   ];
 
   const baseNavItems: NavItem[] = [

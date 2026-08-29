@@ -1,78 +1,117 @@
 // src/lib/vendors/types.ts
 
-import { VtuVendor, VtuType, VendorAuthType } from '@prisma/client';
+import { VtuType, NetworkProvider } from '@prisma/client';
 
-export { VtuVendor, VtuType, VendorAuthType };
+// ============================================================
+// ✅ ADD THIS - VtuVendor Enum
+// ============================================================
+export enum VtuVendor {
+  VTPASS = 'VTPASS',
+  BILAL_SADA = 'BILAL_SADA',
+  GIDIGITAL = 'GIDIGITAL',
+  MONIEPOINT = 'MONIEPOINT',
+  FLUTTERWAVE_VTU = 'FLUTTERWAVE_VTU',
+  QUICKTELLER = 'QUICKTELLER',
+}
+
+// ============================================================
+// VENDOR TYPES
+// ============================================================
 
 export interface VendorConfig {
   id: string;
   name: string;
-  code: VtuVendor;
+  code: string;
   apiBaseUrl: string;
   authType: VendorAuthType;
   authConfig: Record<string, any>;
   priority: number;
-  supportedServices: VtuType[];
   isActive: boolean;
   timeout: number;
   maxRetries: number;
   retryDelay: number;
 }
 
+export enum VendorAuthType {
+  API_KEY = 'API_KEY',
+  BEARER_TOKEN = 'BEARER_TOKEN',
+  BASIC_AUTH = 'BASIC_AUTH',
+  OAUTH2 = 'OAUTH2',
+  NONE = 'NONE',
+}
+
 export interface VendorRequest<T = any> {
   service: VtuType;
   endpoint: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   data?: T;
   headers?: Record<string, string>;
-  params?: Record<string, string>;
+  retryCount?: number;
 }
 
-// ✅ Enhanced with switching info
 export interface VendorResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
-  statusCode: number;
-  vendor: VtuVendor;
+  statusCode?: number;
+  vendor?: VtuVendor | string;
   vendorReference?: string;
-  vendorSwitched?: boolean;      // ✅ New: Was vendor switched?
-  switchedFrom?: VtuVendor[];    // ✅ New: Which vendors failed?
   rawResponse?: any;
   metadata?: Record<string, any>;
+  vendorSwitched?: boolean;
+  switchedFrom?: string[];
+  vendorErrors?: string[];
 }
+
+// ============================================================
+// REQUEST TYPES
+// ============================================================
 
 export interface VendorAirtimeRequest {
   phoneNumber: string;
-  amount: number;
   network: string;
+  amount: number;
+  planType?: string;
+  bypass?: boolean;
 }
 
 export interface VendorDataRequest {
   phoneNumber: string;
-  planCode: string;
   network: string;
+  planCode: string;
   amount?: number;
+  bypass?: boolean;
 }
 
 export interface VendorElectricityRequest {
   meterNumber: string;
-  amount: number;
   discoCode: string;
-  meterType?: 'PREPAID' | 'POSTPAID';
+  meterType: string;
+  amount: number;
+  bypass?: boolean;
 }
 
 export interface VendorCableTVRequest {
   decoderNumber: string;
-  packageCode: string;
   provider: string;
-  amount?: number;
+  packageCode: string;
+  bypass?: boolean;
 }
 
 export interface VendorEducationRequest {
   serviceId: string;
   variationCode: string;
-  amount: number;
-  quantity: number;
-  phone: string;
+  quantity?: number;
+  bypass?: boolean;
+}
+
+// ============================================================
+// VENDOR HEALTH
+// ============================================================
+
+export interface VendorHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  responseTime: number;
+  lastCheck: Date;
+  error?: string;
 }

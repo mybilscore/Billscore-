@@ -1,4 +1,5 @@
-// app/dashboard/buy/data/page.client.tsx - COMPLETE UPDATED WITH BRAND COLOR CATEGORY BUTTONS ONLY
+// app/dashboard/buy/data/page.client.tsx - COMPLETE WITH MODAL & NO PHONE VALIDATION
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -36,6 +37,7 @@ import {
   CalendarRange,
   CalendarCheck,
   CalendarClock,
+  X,
 } from "lucide-react";
 
 interface Plan {
@@ -128,6 +130,191 @@ const formatDate = (dateString: string | null) => {
   if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
   if (days < 365) return `${Math.floor(days / 30)} months ago`;
   return `${Math.floor(days / 365)} years ago`;
+};
+
+// ✅ SUCCESS MODAL COMPONENT
+const SuccessModal = ({
+  isOpen,
+  onClose,
+  transactionId,
+  phoneNumber,
+  amount,
+  provider,
+  plan,
+  onBuyMore,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  transactionId: string;
+  phoneNumber: string;
+  amount: number;
+  provider: string;
+  plan: string;
+  onBuyMore?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  // Auto-close after 10 seconds
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        {/* Success Icon with animation */}
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 animate-bounce">
+          <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
+        </div>
+
+        {/* Title */}
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Data Purchase Successful! 🎉
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Your data bundle has been sent successfully
+        </p>
+
+        {/* Transaction Details */}
+        <div className="mb-6 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-800/50">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Provider</span>
+            <span className="font-medium text-gray-900 dark:text-white">{provider}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Phone Number</span>
+            <span className="font-medium text-gray-900 dark:text-white">{phoneNumber || "Not provided"}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Plan</span>
+            <span className="font-medium text-gray-900 dark:text-white">{plan}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Amount</span>
+            <span className="font-bold text-green-600 dark:text-green-400">
+              {formatCurrency(amount)}
+            </span>
+          </div>
+          {transactionId && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Transaction ID</span>
+              <span className="font-mono text-xs text-gray-600 dark:text-gray-300">
+                {transactionId.slice(0, 8)}...{transactionId.slice(-6)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Done
+          </button>
+          {onBuyMore && (
+            <button
+              onClick={() => {
+                onBuyMore();
+                onClose();
+              }}
+              className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Buy More Data
+            </button>
+          )}
+        </div>
+
+        {/* Auto-close indicator */}
+        <p className="mt-3 text-center text-[10px] text-gray-400">
+          This window will close automatically in a few seconds
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ✅ ERROR MODAL COMPONENT
+const ErrorModal = ({
+  isOpen,
+  onClose,
+  error,
+  onRetry,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  error: string;
+  onRetry?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        {/* Error Icon */}
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+          <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
+        </div>
+
+        {/* Title */}
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Purchase Failed
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          We couldn't complete your data purchase
+        </p>
+
+        {/* Error Details */}
+        <div className="mb-6 rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
+          <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              if (onRetry) onRetry();
+              onClose();
+            }}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              window.location.href = "/support";
+            }}
+            className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Contact Support
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Detect network from phone number
@@ -357,52 +544,6 @@ const PlanCard = ({
   );
 };
 
-// Status Message Component
-const StatusMessage = ({ 
-  error, 
-  success, 
-  transactionId 
-}: { 
-  error: string; 
-  success: boolean; 
-  transactionId: string;
-}) => {
-  if (!error && !success) return null;
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/30 dark:bg-red-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-red-700 dark:text-red-400">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (success) {
-    return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-medium text-green-700 dark:text-green-400">
-              Data purchase successful!
-            </p>
-            {transactionId && (
-              <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
-                ID: {transactionId}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-};
-
 export function DataClient({
   user: initialUser,
   providers,
@@ -433,6 +574,18 @@ export function DataClient({
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
   const [pinError, setPinError] = useState<string>("");
+  
+  // ✅ Modal states
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    transactionId: string;
+    phoneNumber: string;
+    amount: number;
+    provider: string;
+    plan: string;
+  } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
   
   // Dropdown states
   const [showDropdown, setShowDropdown] = useState(false);
@@ -641,10 +794,11 @@ export function DataClient({
       return;
     }
 
-    if (!phoneNumber || phoneNumber.length < 10) {
-      setError("Please enter a valid phone number");
-      return;
-    }
+    // ✅ REMOVED: Phone number validation - now optional
+    // if (!phoneNumber || phoneNumber.length < 10) {
+    //   setError("Please enter a valid phone number");
+    //   return;
+    // }
 
     if (!user.hasWallet) {
       setError("You need a wallet to make purchases");
@@ -666,7 +820,7 @@ export function DataClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phoneNumber: phoneNumber,
+          phoneNumber: phoneNumber || "", // Send empty string if not provided
           planCode: selectedPlan.planCode,
           provider: currentProvider?.code || "MTN",
           amount: selectedPlan.price,
@@ -682,15 +836,26 @@ export function DataClient({
       }
 
       setSuccess(true);
-      setTransactionId(result.data?.transactionId || result.data?.reference);
+      const txId = result.data?.transactionId || result.data?.reference || "";
+      setTransactionId(txId);
       setTransactionData({
         amount: selectedPlan.price,
-        phoneNumber: phoneNumber,
+        phoneNumber: phoneNumber || "Not provided",
         provider: currentProvider?.name || "MTN",
         plan: selectedPlan.data,
       });
       setPin("");
       setShowDropdown(false);
+
+      // ✅ Store success data for modal
+      setSuccessData({
+        transactionId: txId,
+        phoneNumber: phoneNumber || "Not provided",
+        amount: selectedPlan.price,
+        provider: currentProvider?.name || "MTN",
+        plan: selectedPlan.data,
+      });
+      setShowSuccessModal(true);
 
       // Refresh user balance
       const balanceResponse = await fetch("/api/user/balance");
@@ -710,16 +875,10 @@ export function DataClient({
         setFilteredCustomers(customersResult.data.customers);
       }
 
-      // Auto-clear success after 5 seconds
-      setTimeout(() => {
-        setSuccess(false);
-      }, 5000);
-
     } catch (err: any) {
       setError(err.message || "Purchase failed. Please try again.");
-      setTimeout(() => {
-        setError("");
-      }, 5000);
+      setErrorMessage(err.message || "Purchase failed. Please try again.");
+      setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
@@ -746,11 +905,6 @@ export function DataClient({
           <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Get the best data bundles from all networks
-            {/* {vendorInfo && (
-              <span className="text-xs text-gray-400 ml-2">
-                • Powered by {vendorInfo.name}
-              </span>
-            )} */}
           </p>
         </div>
 
@@ -775,7 +929,7 @@ export function DataClient({
                     value={phoneNumber}
                     onChange={handlePhoneChange}
                     onFocus={handleInputFocus}
-                    placeholder="Enter phone number or search recent"
+                    placeholder="Enter phone number or search recent (optional)"
                     maxLength={11}
                     className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-4 py-3 text-lg font-medium focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
@@ -788,6 +942,7 @@ export function DataClient({
                         {filteredCustomers.length} matches
                       </span>
                     )}
+                    <span className="text-[10px] text-gray-400">(optional)</span>
                     <span>{phoneNumber.length}/11</span>
                   </div>
                 </div>
@@ -878,6 +1033,11 @@ export function DataClient({
                     Could not detect network. Please select manually.
                   </p>
                 )}
+                {!phoneNumber && (
+                  <p className="mt-2 text-[10px] text-gray-400">
+                    ℹ️ Phone number is optional - you can proceed without it
+                  </p>
+                )}
               </div>
             </div>
 
@@ -962,145 +1122,139 @@ export function DataClient({
                 Order Summary
               </h3>
               
-              <StatusMessage 
-                error={error} 
-                success={success} 
-                transactionId={transactionId} 
-              />
+              {/* No StatusMessage - replaced with modals */}
 
-              {!error && !success && (
-                <div className="space-y-3 text-sm">
-                  {/* Phone Number */}
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Recipient</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {phoneNumber || "Not entered"}
-                    </span>
+              <div className="space-y-3 text-sm">
+                {/* Phone Number */}
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Recipient</span>
                   </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {phoneNumber || "Not provided (optional)"}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      {currentProvider?.iconPath && (
-                        <div className="h-6 w-6 relative">
-                          <img 
-                            src={currentProvider.iconPath} 
-                            alt={currentProvider.name}
-                            className="h-6 w-6 object-contain"
-                          />
-                        </div>
-                      )}
-                      <span className="text-gray-600 dark:text-gray-400">Network</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {currentProvider?.name || "Not selected"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Category</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {currentCategory?.name || "Not selected"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Wifi className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Plan</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPlan?.data || "Not selected"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Validity</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPlan?.validity || "Not selected"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Amount</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPlan ? formatCurrency(selectedPlan.price) : "Not selected"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
-                    </div>
-                    <span className={`font-medium ${user.walletBalance >= (selectedPlan?.price || 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {formatCurrency(user.walletBalance)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-3 mt-2">
-                    <span className="font-semibold text-gray-900 dark:text-white">Total</span>
-                    <span className="text-xl font-bold text-[#1e293b] dark:text-white">
-                      {selectedPlan ? formatCurrency(selectedPlan.price) : "—"}
-                    </span>
-                  </div>
-
-                  {/* Transaction PIN Input */}
-                  <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                      Transaction PIN
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type={showPin ? "text" : "password"}
-                        value={pin}
-                        onChange={handlePinChange}
-                        placeholder="Enter 4-6 digit PIN"
-                        maxLength={6}
-                        className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
-                          pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
-                        } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPin(!showPin)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {pinError && (
-                      <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
-                        {pinError}
-                      </p>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    {currentProvider?.iconPath && (
+                      <div className="h-6 w-6 relative">
+                        <img 
+                          src={currentProvider.iconPath} 
+                          alt={currentProvider.name}
+                          className="h-6 w-6 object-contain"
+                        />
+                      </div>
                     )}
-                    <p className="mt-1 text-xs text-gray-400">
-                      Enter your 4-6 digit transaction PIN to confirm this purchase
+                    <span className="text-gray-600 dark:text-gray-400">Network</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {currentProvider?.name || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Briefcase className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Category</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {currentCategory?.name || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Wifi className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Plan</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedPlan?.data || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Validity</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedPlan?.validity || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Amount</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedPlan ? formatCurrency(selectedPlan.price) : "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
+                  </div>
+                  <span className={`font-medium ${user.walletBalance >= (selectedPlan?.price || 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(user.walletBalance)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-3 mt-2">
+                  <span className="font-semibold text-gray-900 dark:text-white">Total</span>
+                  <span className="text-xl font-bold text-[#1e293b] dark:text-white">
+                    {selectedPlan ? formatCurrency(selectedPlan.price) : "—"}
+                  </span>
+                </div>
+
+                {/* Transaction PIN Input */}
+                <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Transaction PIN
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={pin}
+                      onChange={handlePinChange}
+                      placeholder="Enter 4-6 digit PIN"
+                      maxLength={6}
+                      className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
+                        pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
+                      } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {pinError && (
+                    <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {pinError}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-400">
+                    Enter your 4-6 digit transaction PIN to confirm this purchase
+                  </p>
+                </div>
+
+                {selectedPlan && user.walletBalance < selectedPlan.price && (
+                  <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      Insufficient balance. You need {formatCurrency(selectedPlan.price - user.walletBalance)} more.
                     </p>
                   </div>
-
-                  {selectedPlan && user.walletBalance < selectedPlan.price && (
-                    <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        Insufficient balance. You need {formatCurrency(selectedPlan.price - user.walletBalance)} more.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
 
               <button
                 onClick={handlePurchase}
@@ -1154,6 +1308,10 @@ export function DataClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
+                  Phone number is optional - you can proceed without it
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
                   Transaction PIN required for security
                 </li>
               </ul>
@@ -1161,6 +1319,34 @@ export function DataClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ SUCCESS MODAL */}
+      {successData && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+          }}
+          transactionId={successData.transactionId}
+          phoneNumber={successData.phoneNumber}
+          amount={successData.amount}
+          provider={successData.provider}
+          plan={successData.plan}
+          onBuyMore={resetForm}
+        />
+      )}
+
+      {/* ✅ ERROR MODAL */}
+      <ErrorModal
+        isOpen={showErrorModal}
+        onClose={() => {
+          setShowErrorModal(false);
+        }}
+        error={errorMessage}
+        onRetry={() => {
+          handlePurchase();
+        }}
+      />
     </div>
   );
 }
