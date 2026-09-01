@@ -1,4 +1,4 @@
-// app/api/vendors/education/purchase/route.ts - FIXED VERSION WITH channelDisplay
+// app/api/vendors/education/purchase/route.ts - COMPLETE UPDATED WITH CORRECT VTpass CODES
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -35,6 +35,39 @@ function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
   }
   if (!isDev && !isDebug) return;
   console.log(`✅ ${message}`, data || '');
+}
+
+// ============================================================
+// VTpass Education Service ID & Variation Code Mapping
+// ============================================================
+
+// ✅ VTpass Service IDs
+const VTpassServiceIDs: Record<string, string> = {
+  'waec': 'waec',
+  'waec-result': 'waec',
+  'waec-registration': 'waec-registration',
+  'neco': 'neco',
+  'jamb': 'jamb',
+};
+
+// ✅ VTpass Variation Codes (with the typo fix for WAEC Registration)
+const VTpassVariationCodes: Record<string, string> = {
+  'waec': 'waec',
+  'waec-result': 'waec',
+  // ✅ FIX: VTpass uses "registraion" (typo) not "registration"
+  'waec-registration': 'waec-registraion',
+  'neco': 'neco',
+  'jamb': 'jamb',
+};
+
+// ✅ Get the correct service ID for VTpass
+function getVTPassServiceID(serviceId: string): string {
+  return VTpassServiceIDs[serviceId] || serviceId;
+}
+
+// ✅ Get the correct variation code for VTpass
+function getVTPassVariationCode(serviceId: string): string {
+  return VTpassVariationCodes[serviceId] || serviceId;
 }
 
 // ============================================================
@@ -639,12 +672,32 @@ export async function POST(request: NextRequest) {
     try {
       const vendorService = getVendorService();
 
+      // ✅ Build request data
       const requestData: any = {
         serviceId: serviceId,
         variationCode: variationCode,
         phone: phone || user.phone,
         quantity: quantity || 1,
       };
+
+      // ✅ Check if using VTpass - apply correct codes
+      const isVTpass = process.env.ACTIVE_VENDOR === 'VTPASS' || 
+                       vendorService.getVendorInstance?.('VTPASS') !== undefined;
+
+      if (isVTpass || true) {
+        // ✅ Use correct VTpass service ID and variation code
+        const vtpassServiceId = getVTPassServiceID(serviceId);
+        const vtpassVariationCode = getVTPassVariationCode(serviceId);
+        
+        requestData.serviceId = vtpassServiceId;
+        requestData.variationCode = vtpassVariationCode;
+        
+        log('info', 'Using VTpass service mapping', {
+          originalServiceId: serviceId,
+          vtpassServiceId,
+          vtpassVariationCode,
+        });
+      }
 
       if (serviceId === 'jamb' && billersCode) {
         requestData.billersCode = billersCode;
@@ -653,6 +706,8 @@ export async function POST(request: NextRequest) {
       if (totalAmount > 0) {
         requestData.amount = totalAmount;
       }
+
+      log('info', 'Education purchase request', requestData);
 
       const result = await vendorService.buyEducation(requestData, user.id);
 
@@ -755,7 +810,7 @@ export async function POST(request: NextRequest) {
             netProfit: (vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0,
             totalCommission: (vendorCommission || 0) + ((vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0),
             effectiveRate: finalAmount > 0 ? ((vendorCommission || 0) / finalAmount) * 100 : 0,
-            // channelDisplay already set on creation
+            channelDisplay: CHANNEL_DISPLAY,
             metadata: {
               ...transaction.metadata,
               vendorName: result.vendor,
@@ -838,6 +893,8 @@ export async function POST(request: NextRequest) {
           : `✅ WAEC Registration PIN purchased successfully!`;
       } else if (serviceId === 'jamb') {
         message = `✅ JAMB PIN purchased successfully!`;
+      } else if (serviceId === 'neco') {
+        message = `✅ NECO PIN purchased successfully!`;
       } else {
         message = quantity > 1 
           ? `✅ ${quantity} ${serviceId} PINs purchased successfully!`
@@ -881,7 +938,7 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           vendorId: vendorId || undefined,
-          // channelDisplay already set on creation
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
             error: vendorError.message,

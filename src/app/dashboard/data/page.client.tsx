@@ -1,4 +1,4 @@
-// app/dashboard/buy/data/page.client.tsx - COMPLETE WITH MODAL & NO PHONE VALIDATION
+// app/dashboard/buy/data/page.client.tsx - Complete with both VTpass and BilalSada support
 
 "use client";
 
@@ -7,8 +7,6 @@ import { useRouter } from "next/navigation";
 import {
   Phone,
   Wifi,
-  Zap,
-  Tv,
   Check,
   ArrowRight,
   AlertCircle,
@@ -18,26 +16,17 @@ import {
   Clock,
   Shield,
   Sparkles,
-  ShoppingBag,
-  History,
-  ChevronDown,
-  ChevronUp,
-  Star,
-  Tag,
-  Gift,
+  Briefcase,
   Lock,
   Eye,
   EyeOff,
-  Layers,
-  Search,
   Calendar,
-  Briefcase,
-  Sun,
   CalendarDays,
   CalendarRange,
   CalendarCheck,
   CalendarClock,
   X,
+  History,
 } from "lucide-react";
 
 interface Plan {
@@ -51,6 +40,13 @@ interface Plan {
   description?: string;
   amountMB?: number;
   planType?: string;
+  // ✅ VTpass specific fields
+  network?: string;
+  variation_code?: string;
+  variation_name?: string;
+  variation_id?: string;
+  amount?: number;
+  service_id?: string;
 }
 
 interface Category {
@@ -66,6 +62,9 @@ interface Provider {
   color: string;
   iconPath: string;
   categories: Category[];
+  // ✅ VTpass specific
+  network?: string;
+  service_type?: string;
 }
 
 interface Customer {
@@ -117,21 +116,6 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-const formatDate = (dateString: string | null) => {
-  if (!dateString) return "Never";
-  const date = new Date(dateString);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-  if (days < 365) return `${Math.floor(days / 30)} months ago`;
-  return `${Math.floor(days / 365)} years ago`;
-};
-
 // ✅ SUCCESS MODAL COMPONENT
 const SuccessModal = ({
   isOpen,
@@ -154,7 +138,6 @@ const SuccessModal = ({
 }) => {
   if (!isOpen) return null;
 
-  // Auto-close after 10 seconds
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(() => {
@@ -167,7 +150,6 @@ const SuccessModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
-        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
@@ -175,12 +157,10 @@ const SuccessModal = ({
           <X className="h-5 w-5" />
         </button>
 
-        {/* Success Icon with animation */}
         <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 animate-bounce">
           <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
         </div>
 
-        {/* Title */}
         <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
           Data Purchase Successful! 🎉
         </h3>
@@ -188,7 +168,6 @@ const SuccessModal = ({
           Your data bundle has been sent successfully
         </p>
 
-        {/* Transaction Details */}
         <div className="mb-6 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-800/50">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-500 dark:text-gray-400">Provider</span>
@@ -218,7 +197,6 @@ const SuccessModal = ({
           )}
         </div>
 
-        {/* Action Buttons */}
         <div className="flex flex-col gap-2">
           <button
             onClick={onClose}
@@ -239,7 +217,6 @@ const SuccessModal = ({
           )}
         </div>
 
-        {/* Auto-close indicator */}
         <p className="mt-3 text-center text-[10px] text-gray-400">
           This window will close automatically in a few seconds
         </p>
@@ -265,7 +242,6 @@ const ErrorModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
-        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
@@ -273,12 +249,10 @@ const ErrorModal = ({
           <X className="h-5 w-5" />
         </button>
 
-        {/* Error Icon */}
         <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
           <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
         </div>
 
-        {/* Title */}
         <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
           Purchase Failed
         </h3>
@@ -286,12 +260,10 @@ const ErrorModal = ({
           We couldn't complete your data purchase
         </p>
 
-        {/* Error Details */}
         <div className="mb-6 rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
           <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
         </div>
 
-        {/* Action Buttons */}
         <div className="flex flex-col gap-2">
           <button
             onClick={() => {
@@ -322,31 +294,13 @@ const detectNetworkFromPhone = (phone: string, networks: NetworkInfo[] = []) => 
   if (!phone || phone.length < 4) return null;
 
   const prefixes: { [key: string]: string } = {
-    '070': 'MTN',
-    '080': 'MTN',
-    '081': 'MTN',
-    '090': 'MTN',
-    '091': 'MTN',
-    '0701': 'AIRTEL',
-    '0708': 'AIRTEL',
-    '0802': 'AIRTEL',
-    '0808': 'AIRTEL',
-    '0812': 'AIRTEL',
-    '0901': 'AIRTEL',
-    '0902': 'AIRTEL',
-    '0907': 'AIRTEL',
-    '0805': 'GLO',
-    '0807': 'GLO',
-    '0811': 'GLO',
-    '0815': 'GLO',
-    '0905': 'GLO',
-    '0909': 'GLO',
-    '0809': 'NINEMOBILE',
-    '0817': 'NINEMOBILE',
-    '0818': 'NINEMOBILE',
-    '0908': 'NINEMOBILE',
-    '0903': 'NINEMOBILE',
-    '0904': 'NINEMOBILE',
+    '070': 'MTN', '080': 'MTN', '081': 'MTN', '090': 'MTN', '091': 'MTN',
+    '0701': 'AIRTEL', '0708': 'AIRTEL', '0802': 'AIRTEL', '0808': 'AIRTEL',
+    '0812': 'AIRTEL', '0901': 'AIRTEL', '0902': 'AIRTEL', '0907': 'AIRTEL',
+    '0805': 'GLO', '0807': 'GLO', '0811': 'GLO', '0815': 'GLO',
+    '0905': 'GLO', '0909': 'GLO',
+    '0809': 'NINEMOBILE', '0817': 'NINEMOBILE', '0818': 'NINEMOBILE',
+    '0908': 'NINEMOBILE', '0903': 'NINEMOBILE', '0904': 'NINEMOBILE',
   };
 
   const prefix = phone.slice(0, 4);
@@ -390,7 +344,7 @@ const ServiceDetection = ({
   );
 };
 
-// Provider Button - ORIGINAL STYLE (no changes)
+// Provider Button
 const ProviderButton = ({
   provider,
   isSelected,
@@ -451,7 +405,7 @@ const ProviderButton = ({
   );
 };
 
-// UPDATED: Category Button - Compact with brand color
+// Category Button
 const CategoryButton = ({
   category,
   isSelected,
@@ -466,7 +420,7 @@ const CategoryButton = ({
   const getIcon = (name: string) => {
     const icons: { [key: string]: React.ReactNode } = {
       'SME': <Briefcase className="h-3 w-3" />,
-      'Daily': <Sun className="h-3 w-3" />,
+      'Daily': <Calendar className="h-3 w-3" />,
       'Weekly': <CalendarDays className="h-3 w-3" />,
       'Monthly': <CalendarRange className="h-3 w-3" />,
       '2 Monthly': <CalendarCheck className="h-3 w-3" />,
@@ -593,6 +547,18 @@ export function DataClient({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // ✅ Determine if using VTpass
+  const isVTpass = vendorInfo?.code === 'VTPASS' || vendorInfo?.code === 'VT_PASS';
+  const isBilalSada = vendorInfo?.code === 'BILAL_SADA' || vendorInfo?.code === 'BILALSADA';
+
+  // ✅ Log vendor info for debugging
+  useEffect(() => {
+    console.log('📊 [DataClient] Vendor Info:', vendorInfo);
+    console.log('📊 [DataClient] Is VTpass:', isVTpass);
+    console.log('📊 [DataClient] Is BilalSada:', isBilalSada);
+    console.log('📊 [DataClient] Providers:', providers.length);
+  }, [vendorInfo, isVTpass, isBilalSada, providers]);
+
   const currentProvider = providers.find((p) => p.id === selectedProvider);
   const currentCategory = currentProvider?.categories.find(c => c.id === selectedCategory);
   const plans = currentCategory?.plans || [];
@@ -617,7 +583,9 @@ export function DataClient({
       
       if (detected) {
         const matchedProvider = providers.find(p => 
-          p.name === detected.name || p.code === detected.code
+          p.name === detected.name || 
+          p.code === detected.code ||
+          p.network === detected.network
         );
         if (matchedProvider) {
           setSelectedProvider(matchedProvider.id);
@@ -725,7 +693,6 @@ export function DataClient({
     setPinError("");
   };
 
-  // Handle selecting a customer from dropdown
   const handleSelectCustomer = (customer: Customer) => {
     setPhoneNumber(customer.phone);
     setShowDropdown(false);
@@ -733,14 +700,12 @@ export function DataClient({
     setPinError("");
   };
 
-  // Handle input focus
   const handleInputFocus = () => {
     if (filteredCustomers.length > 0) {
       setShowDropdown(true);
     }
   };
 
-  // Handle input change
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, "");
     setPhoneNumber(value);
@@ -772,6 +737,7 @@ export function DataClient({
     setPinError("");
   };
 
+  // ✅ Handle purchase with both vendors
   const handlePurchase = async () => {
     // Validate PIN
     if (!pin || pin.length < 4) {
@@ -794,12 +760,6 @@ export function DataClient({
       return;
     }
 
-    // ✅ REMOVED: Phone number validation - now optional
-    // if (!phoneNumber || phoneNumber.length < 10) {
-    //   setError("Please enter a valid phone number");
-    //   return;
-    // }
-
     if (!user.hasWallet) {
       setError("You need a wallet to make purchases");
       return;
@@ -816,22 +776,47 @@ export function DataClient({
     setPinError("");
 
     try {
+      // ✅ Build request based on vendor type
+      const requestBody: any = {
+        phoneNumber: phoneNumber || "",
+        planCode: selectedPlan.planCode,
+        provider: currentProvider?.code || "MTN",
+        amount: selectedPlan.price,
+        pin: pin,
+        planId: selectedPlan.id,
+        vendorCode: vendorInfo?.code || 'UNKNOWN',
+      };
+
+      // ✅ For VTpass, add extra fields
+      if (isVTpass) {
+        requestBody.variationCode = selectedPlan.variation_code || selectedPlan.planCode;
+        requestBody.serviceId = selectedPlan.service_id || currentProvider?.network || currentProvider?.code;
+        requestBody.vendor = 'VTPASS';
+        requestBody.variationName = selectedPlan.variation_name || selectedPlan.name;
+        requestBody.serviceType = selectedPlan.service_type || 'data';
+        console.log('📊 [Purchase] VTpass request:', requestBody);
+      }
+
+      // ✅ For BilalSada, use standard fields
+      if (isBilalSada) {
+        requestBody.vendor = 'BILAL_SADA';
+        console.log('📊 [Purchase] BilalSada request:', requestBody);
+      }
+
       const response = await fetch("/api/vendors/data/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phoneNumber: phoneNumber || "", // Send empty string if not provided
-          planCode: selectedPlan.planCode,
-          provider: currentProvider?.code || "MTN",
-          amount: selectedPlan.price,
-          pin: pin,
-          planId: selectedPlan.id,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
 
       if (!response.ok || !result.success) {
+        // ✅ Handle specific VTpass errors
+        if (result.error?.toLowerCase().includes('insufficient') || 
+            result.error?.toLowerCase().includes('balance')) {
+          throw new Error('Insufficient balance in vendor wallet. Please try again later.');
+        }
         throw new Error(result.error || "Purchase failed");
       }
 
@@ -844,8 +829,6 @@ export function DataClient({
         provider: currentProvider?.name || "MTN",
         plan: selectedPlan.data,
       });
-      setPin("");
-      setShowDropdown(false);
 
       // ✅ Store success data for modal
       setSuccessData({
@@ -896,16 +879,28 @@ export function DataClient({
   }
 
   const isAutoDetected = detectedNetwork && providers.find(p => p.name === detectedNetwork.name)?.id === selectedProvider;
+  const isPayDisabled = !selectedPlan || !selectedCategory || user.walletBalance < (selectedPlan?.price || 0) || !pin || pin.length < 4;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
       <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Get the best data bundles from all networks
-          </p>
+        {/* Header with Vendor Badge */}
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Get the best data bundles from all networks
+            </p>
+          </div>
+          {vendorInfo && (
+            <div className="flex items-center gap-2 rounded-full bg-[#1e293b] px-3 py-1.5 text-xs text-white">
+              <span className="font-medium">Active:</span>
+              <span>{vendorInfo.name}</span>
+              <span className="text-[10px] opacity-60">
+                ({isVTpass ? 'VTpass' : isBilalSada ? 'BilalSada' : vendorInfo.code})
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1004,7 +999,7 @@ export function DataClient({
                 detectedNetwork={detectedNetwork} 
               />
 
-              {/* Network Selection - ORIGINAL STYLE */}
+              {/* Network Selection */}
               <div className="mt-4">
                 <div className="flex items-center justify-between mb-3">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1041,7 +1036,7 @@ export function DataClient({
               </div>
             </div>
 
-            {/* UPDATED: Categories - Compact buttons with brand color */}
+            {/* Categories */}
             {currentProvider && currentProvider.categories.length > 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-3">
@@ -1058,7 +1053,6 @@ export function DataClient({
                   </span>
                 </div>
                 
-                {/* Categories as compact buttons */}
                 <div className="flex flex-wrap gap-2">
                   {currentProvider.categories.map((category) => (
                     <CategoryButton
@@ -1079,7 +1073,7 @@ export function DataClient({
               </div>
             )}
 
-            {/* Data Plans - 5 columns */}
+            {/* Data Plans */}
             {currentCategory && plans.length > 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-3">
@@ -1121,11 +1115,8 @@ export function DataClient({
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Order Summary
               </h3>
-              
-              {/* No StatusMessage - replaced with modals */}
 
               <div className="space-y-3 text-sm">
-                {/* Phone Number */}
                 <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-gray-400" />
@@ -1258,7 +1249,7 @@ export function DataClient({
 
               <button
                 onClick={handlePurchase}
-                disabled={isLoading || !user.hasWallet || !selectedPlan || !selectedCategory || user.walletBalance < (selectedPlan?.price || 0) || !pin || pin.length < 4}
+                disabled={isLoading || isPayDisabled}
                 className="w-full mt-4 rounded-xl bg-[#1e293b] py-4 text-lg font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#1e293b]/20"
               >
                 {isLoading ? (
@@ -1313,6 +1304,10 @@ export function DataClient({
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
                   Transaction PIN required for security
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-[#1e293b]">•</span>
+                  Active vendor: <strong>{vendorInfo?.name || 'Unknown'}</strong>
                 </li>
               </ul>
             </div>

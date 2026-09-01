@@ -1,24 +1,24 @@
 // src/app/api/mobile/vendors/airtime/purchase/route.ts
-// OPTIMIZED VERSION - Parallel queries, selective fields, minimal logging
+// UPDATED: channelDisplay = "MOBILE_APP" - Matches web version structure
 
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "jsonwebtoken";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { CacheService } from "~/lib/cache/cache.service";
-import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus } from "@prisma/client";
+import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, RefundStatus, ChannelType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 const JWT_SECRET = process.env.MOBILE_JWT_SECRET || process.env.AUTH_SECRET || "your-secret-key";
 
 // ============================================================
-// MINIMAL LOGGING
+// LOGGING UTILITY
 // ============================================================
 
 const isDev = process.env.NODE_ENV === 'development';
 const isDebug = process.env.DEBUG === 'true';
 
-function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
+function log(level: 'info' | 'warn' | 'error' | 'debug', message: string, data?: any) {
   if (level === 'error') {
     console.error(`❌ ${message}`, data || '');
     return;
@@ -27,12 +27,13 @@ function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
     console.warn(`⚠️ ${message}`, data || '');
     return;
   }
-  if (!isDev && !isDebug) return;
+  if (level === 'debug' && !isDebug) return;
+  if (!isDev && level === 'info') return;
   console.log(`✅ ${message}`, data || '');
 }
 
 // ============================================================
-// HELPERS
+// NETWORK MAPPING
 // ============================================================
 
 const networkMap: Record<string, NetworkProvider> = {
@@ -106,7 +107,7 @@ async function authenticateMobile(request: NextRequest) {
 }
 
 // ============================================================
-// REFUND HELPER
+// REFUND HELPER FUNCTIONS
 // ============================================================
 
 async function processRefund(
@@ -117,6 +118,8 @@ async function processRefund(
   reasonCode: string = "VENDOR_FAILURE",
   initiatedBy: string = "SYSTEM"
 ) {
+  log('debug', `Processing refund for transaction ${transaction.id}`);
+
   const existingRefund = await prisma.refund.findFirst({
     where: { 
       transactionId: transaction.id,
@@ -124,13 +127,18 @@ async function processRefund(
     }
   });
 
-  if (existingRefund) return existingRefund;
+  if (existingRefund) {
+    log('debug', `Refund already exists for transaction ${transaction.id}`);
+    return existingRefund;
+  }
 
   const wallet = await prisma.wallet.findUnique({
     where: { userId: user.id },
   });
 
-  if (!wallet) throw new Error("Wallet not found");
+  if (!wallet) {
+    throw new Error("Wallet not found");
+  }
 
   const refundReference = `REF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
@@ -240,6 +248,8 @@ async function processRefund(
       });
     });
 
+    log('debug', `Refund ${refund.id} completed`);
+
     await prisma.refundNotification.create({
       data: {
         refundId: refund.id,
@@ -270,6 +280,15 @@ async function processRefund(
       },
     });
 
+    await prisma.refundAuditLog.create({
+      data: {
+        refundId: refund.id,
+        action: 'FAILED',
+        performedBy: 'SYSTEM',
+        notes: `Refund failed: ${error.message}`,
+      },
+    });
+
     throw error;
   }
 }
@@ -292,12 +311,10 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = decoded.userId || decoded.id;
-
-    // 2. Parse request body
     const body = await request.json();
     let { phoneNumber, amount, network, pin } = body;
 
-    // 3. Validate request
+    // 2. Validate request
     if (!phoneNumber || phoneNumber.length < 10) {
       return NextResponse.json({
         success: false,
@@ -331,7 +348,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // 4. PARALLEL FETCH: user + customer + balance
+    // STATIC CHANNEL CONFIGURATION
+    // ============================================================
+    const CHANNEL_ENUM = ChannelType.MOBILE_APP;
+    const CHANNEL_DISPLAY = "MOBILE_APP";
+
+    // ============================================================
+    // OPTIMIZATION: PARALLEL FETCH user + customer + balance
     // ============================================================
 
     const [cachedUser, cachedCustomer, cachedBalance] = await Promise.all([
@@ -344,8 +367,9 @@ export async function POST(request: NextRequest) {
     let customer = cachedCustomer;
     let walletBalance = cachedBalance?.balance;
 
-    // Fallback to database if cache misses
+    // If user not in cache, fetch from DB with selective fields
     if (!user) {
+      log('debug', `Cache miss for user ${userId}, fetching from DB`);
       const dbUser = await prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -386,7 +410,9 @@ export async function POST(request: NextRequest) {
       CacheService.setUser(userId, user).catch(() => {});
     }
 
+    // If customer not in cache, fetch from DB
     if (!customer) {
+      log('debug', `Cache miss for customer ${phoneNumber}, fetching from DB`);
       customer = await prisma.customer.findUnique({
         where: {
           userId_phone: {
@@ -414,6 +440,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // If balance not in cache, get from wallet
     if (walletBalance === undefined || walletBalance === null) {
       const wallet = user.wallet;
       walletBalance = wallet ? Number(wallet.walletBalance) : 0;
@@ -427,35 +454,53 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // 5. CREATE TRANSACTION RECORD
+    // CREATE TRANSACTION RECORD USING RAW SQL (ensures channelDisplay is inserted)
     // ============================================================
 
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.AIRTIME,
-        product: network,
-        amount: amount,
-        totalDebited: 0,
-        phoneNumber: phoneNumber,
-        network: networkEnum,
-        status: TransactionStatus.PENDING,
-        channel: "MOBILE_APP",
-        metadata: {
+    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    
+    // Use raw SQL to insert the transaction with channelDisplay
+    await prisma.$executeRaw`
+      INSERT INTO vtu_transactions (
+        id, userId, transactionType, product, amount, totalDebited, 
+        phoneNumber, network, status, channel, channelDisplay, 
+        metadata, createdAt, updatedAt
+      ) VALUES (
+        ${transactionId}, ${user.id}, ${VtuType.AIRTIME}, ${network}, 
+        ${amount}, 0, ${phoneNumber}, ${networkEnum}, ${TransactionStatus.PENDING}, 
+        ${CHANNEL_ENUM}, ${CHANNEL_DISPLAY}, 
+        ${JSON.stringify({
           source: "MobileAirtimeAPI",
+          service: "AIRTIME",
           timestamp: new Date().toISOString(),
           network: network,
+          networkEnum: networkEnum,
           customerId: customer.id,
           pinVerified: false,
+          attemptStage: "INITIALIZED",
           wasDebited: false,
-        },
-      },
+          refundProcessed: false,
+          channel: "MOBILE_APP",
+          channelDisplay: CHANNEL_DISPLAY,
+        })}, 
+        ${new Date()}, ${new Date()}
+      )
+    `;
+
+    // Fetch the created transaction
+    const transaction = await prisma.vtuTransaction.findUnique({
+      where: { id: transactionId },
     });
 
+    if (!transaction) {
+      throw new Error("Failed to create transaction");
+    }
+
     // ============================================================
-    // 6. PIN VERIFICATION
+    // PIN VERIFICATION
     // ============================================================
 
+    // Check PIN lock
     if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
       const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
       
@@ -475,6 +520,28 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await prisma.customerTransaction.create({
+        data: {
+          customerId: customer.id,
+          userId: user.id,
+          vtuTransactionId: transaction.id,
+          transactionType: VtuType.AIRTIME,
+          amount: amount,
+          totalAmount: amount,
+          product: network,
+          phoneNumber: phoneNumber,
+          network: networkEnum,
+          status: TransactionStatus.FAILED,
+          notes: `Account locked: ${remainingMinutes} minutes remaining`,
+          metadata: {
+            failureReason: "ACCOUNT_LOCKED",
+            pinVerified: false,
+            remainingMinutes: remainingMinutes,
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+
       return NextResponse.json({
         success: false,
         error: `Account locked. Please try again in ${remainingMinutes} minute(s).`,
@@ -482,6 +549,7 @@ export async function POST(request: NextRequest) {
       }, { status: 403 });
     }
 
+    // Check if PIN is set
     if (!user.pinHash) {
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
@@ -499,6 +567,27 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await prisma.customerTransaction.create({
+        data: {
+          customerId: customer.id,
+          userId: user.id,
+          vtuTransactionId: transaction.id,
+          transactionType: VtuType.AIRTIME,
+          amount: amount,
+          totalAmount: amount,
+          product: network,
+          phoneNumber: phoneNumber,
+          network: networkEnum,
+          status: TransactionStatus.FAILED,
+          notes: "No transaction PIN set",
+          metadata: {
+            failureReason: "NO_PIN_SET",
+            pinVerified: false,
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+
       return NextResponse.json({
         success: false,
         error: "You don't have a transaction PIN set. Please set one in your profile.",
@@ -506,6 +595,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Verify PIN
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
       const updatedUser = await prisma.user.update({
@@ -552,6 +642,29 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await prisma.customerTransaction.create({
+        data: {
+          customerId: customer.id,
+          userId: user.id,
+          vtuTransactionId: transaction.id,
+          transactionType: VtuType.AIRTIME,
+          amount: amount,
+          totalAmount: amount,
+          product: network,
+          phoneNumber: phoneNumber,
+          network: networkEnum,
+          status: TransactionStatus.FAILED,
+          notes: `Invalid PIN: ${attemptsLeft} attempts remaining`,
+          metadata: {
+            failureReason: "INVALID_PIN",
+            pinVerified: false,
+            pinAttempts: updatedUser.pinAttempts,
+            attemptsLeft: attemptsLeft,
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+
       return NextResponse.json({
         success: false,
         error: errorMessage,
@@ -560,7 +673,7 @@ export async function POST(request: NextRequest) {
       }, { status: statusCode });
     }
 
-    // PIN verified
+    // PIN verified - update transaction
     await prisma.vtuTransaction.update({
       where: { id: transaction.id },
       data: {
@@ -582,7 +695,7 @@ export async function POST(request: NextRequest) {
     });
 
     // ============================================================
-    // 7. Check balance
+    // Check balance
     // ============================================================
 
     if (walletBalance < amount) {
@@ -604,6 +717,29 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await prisma.customerTransaction.create({
+        data: {
+          customerId: customer.id,
+          userId: user.id,
+          vtuTransactionId: transaction.id,
+          transactionType: VtuType.AIRTIME,
+          amount: amount,
+          totalAmount: amount,
+          product: network,
+          phoneNumber: phoneNumber,
+          network: networkEnum,
+          status: TransactionStatus.FAILED,
+          notes: `Insufficient balance: ${walletBalance} available, ${amount} required`,
+          metadata: {
+            failureReason: "INSUFFICIENT_BALANCE",
+            pinVerified: true,
+            walletBalance: walletBalance,
+            requiredAmount: amount,
+            failedAt: new Date().toISOString(),
+          },
+        },
+      });
+
       return NextResponse.json({
         success: false,
         error: `Insufficient balance. Available: ₦${walletBalance.toFixed(2)}`,
@@ -612,15 +748,18 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // 8. VENDOR PURCHASE WITH TIMEOUT
+    // PROCEED WITH VENDOR PURCHASE
     // ============================================================
 
     let vendorId: string | null = null;
     let vendorEnum: VtuVendor | null = null;
+    let wasDebited = false;
+    
     let vendorCommission: number | null = null;
     let vendorTotalAmount: number | null = null;
     let commissionRate: number | null = null;
     let commissionType: string | null = null;
+    let commissionComputation: string | null = null;
     let commissionDetails: any = null;
     let costPrice: number | null = null;
     let grossProfit: number | null = null;
@@ -655,6 +794,7 @@ export async function POST(request: NextRequest) {
           commissionDetails = result.metadata.commissionDetails;
           commissionRate = commissionDetails.rate ? parseFloat(commissionDetails.rate) : null;
           commissionType = commissionDetails.rate_type || null;
+          commissionComputation = commissionDetails.computation_type || null;
         }
         
         costPrice = vendorTotalAmount ?? amount;
@@ -663,8 +803,13 @@ export async function POST(request: NextRequest) {
         platformCommission = grossProfit;
       }
 
-      vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
+      // Map vendor to enum
+      vendorEnum = mapVendorToEnum(result.vendor);
+      if (!vendorEnum) {
+        vendorEnum = VtuVendor.VTPASS;
+      }
 
+      // Get vendor ID
       if (result.vendor) {
         const vendorRecord = await prisma.vendor.findFirst({
           where: { code: result.vendor as string },
@@ -675,236 +820,403 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      if (!result.success) {
-        throw new Error(result.error || "Vendor purchase failed");
-      }
+      if (result.success) {
+        wasDebited = true;
 
-      // ============================================================
-      // 9. SUCCESS - Complete transaction
-      // ============================================================
-
-      // Update customer stats
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: {
-          totalTransactions: { increment: 1 },
-          totalSpent: { increment: amount },
-          lastTransactionAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-
-      // Complete transaction
-      await prisma.$transaction([
-        prisma.wallet.update({
-          where: { id: user.wallet!.id },
+        // Update customer stats
+        await prisma.customer.update({
+          where: { id: customer.id },
           data: {
-            walletBalance: {
-              decrement: amount,
+            totalTransactions: { increment: 1 },
+            totalSpent: { increment: amount },
+            lastTransactionAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        // Complete transaction - all in one transaction
+        await prisma.$transaction([
+          prisma.wallet.update({
+            where: { id: user.wallet!.id },
+            data: {
+              walletBalance: {
+                decrement: amount,
+              },
             },
-          },
-        }),
-        prisma.walletTransaction.create({
-          data: {
-            walletId: user.wallet!.id,
-            userId: user.id,
-            type: "DEBIT",
-            amount: amount,
-            balanceBefore: walletBalance,
-            balanceAfter: walletBalance - amount,
-            reference: `VTU_${transaction.id}`,
-            description: `Airtime purchase for ${phoneNumber} (${network})`,
-            status: TransactionStatus.SUCCESS,
-            category: "AIRTIME",
-          },
-        }),
-        prisma.vtuTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            status: TransactionStatus.SUCCESS,
-            totalDebited: amount,
-            vendorReference: result.vendorReference,
-            vendorId: vendorId || undefined,
-            vendor: vendorEnum,
-            token: result.data?.token,
-            deliveredAt: new Date(),
-            vendorCommission: vendorCommission,
-            vendorTotalAmount: vendorTotalAmount,
-            commissionRate: commissionRate,
-            commissionType: commissionType,
-            commissionMetadata: commissionDetails,
-            costPrice: costPrice,
-            sellingPrice: amount,
-            grossProfit: grossProfit,
-            profitMargin: profitMargin,
-            platformCommission: platformCommission,
-            platformTotalAmount: amount,
-            netProfit: grossProfit,
-            totalCommission: (vendorCommission || 0) + (platformCommission || 0),
-            effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
-            metadata: {
-              ...transaction.metadata,
-              vendorResponse: result.data,
-              vendorName: result.vendor,
+          }),
+          prisma.walletTransaction.create({
+            data: {
+              walletId: user.wallet!.id,
+              userId: user.id,
+              type: "DEBIT",
+              amount: amount,
+              balanceBefore: walletBalance,
+              balanceAfter: walletBalance - amount,
+              reference: `VTU_${transaction.id}`,
+              description: `Airtime purchase for ${phoneNumber} (${network})`,
+              status: TransactionStatus.SUCCESS,
+              category: "AIRTIME",
+            },
+          }),
+          prisma.vtuTransaction.update({
+            where: { id: transaction.id },
+            data: {
+              status: TransactionStatus.SUCCESS,
+              totalDebited: amount,
               vendorReference: result.vendorReference,
-              vendorSwitched: result.vendorSwitched,
-              switchedFrom: result.switchedFrom,
-              commission: {
-                vendorCommission,
-                vendorTotalAmount,
-                commissionRate,
-                commissionType,
-                commissionDetails: commissionDetails,
-                platformCommission: platformCommission,
-                grossProfit: grossProfit,
-                profitMargin: profitMargin,
-                costPrice: costPrice,
-                sellingPrice: amount,
+              vendorId: vendorId || undefined,
+              vendor: vendorEnum,
+              token: result.data?.token,
+              deliveredAt: new Date(),
+              vendorCommission: vendorCommission,
+              vendorTotalAmount: vendorTotalAmount,
+              commissionRate: commissionRate,
+              commissionType: commissionType,
+              commissionComputation: commissionComputation,
+              commissionMetadata: commissionDetails,
+              costPrice: costPrice,
+              sellingPrice: amount,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
+              platformCommission: platformCommission,
+              platformTotalAmount: amount,
+              netProfit: grossProfit,
+              totalCommission: (vendorCommission || 0) + (platformCommission || 0),
+              effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+              // channelDisplay already set from initial creation
+              metadata: {
+                ...transaction.metadata,
+                vendorResponse: result.data,
+                vendorName: result.vendor,
+                vendorReference: result.vendorReference,
+                vendorSwitched: result.vendorSwitched,
+                switchedFrom: result.switchedFrom,
+                responseDescription: result.data?.responseDescription,
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  commissionComputation,
+                  commissionDetails: commissionDetails,
+                  platformCommission: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                  costPrice: costPrice,
+                  sellingPrice: amount,
+                },
+                success: true,
+                pinVerified: true,
+                completedAt: new Date().toISOString(),
+                wasDebited: true,
               },
-              success: true,
-              pinVerified: true,
-              completedAt: new Date().toISOString(),
-              wasDebited: true,
             },
-          },
-        }),
-        prisma.customerTransaction.create({
+          }),
+          prisma.customerTransaction.create({
+            data: {
+              customerId: customer.id,
+              userId: user.id,
+              vtuTransactionId: transaction.id,
+              transactionType: VtuType.AIRTIME,
+              amount: amount,
+              totalAmount: amount,
+              product: network,
+              phoneNumber: phoneNumber,
+              network: networkEnum,
+              status: TransactionStatus.SUCCESS,
+              commissionAmount: vendorCommission || 0,
+              commissionRate: commissionRate || 0,
+              commissionPaid: true,
+              commissionPaidAt: new Date(),
+              metadata: {
+                vendorName: result.vendor || 'unknown',
+                vendorReference: result.vendorReference || '',
+                vendorSwitched: result.vendorSwitched || false,
+                switchedFrom: result.switchedFrom || [],
+                pinVerified: true,
+                completedAt: new Date().toISOString(),
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  platformProfit: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                },
+              },
+            },
+          }),
+        ]);
+
+        // Invalidate cache
+        await Promise.all([
+          CacheService.invalidateWallet(user.id),
+          CacheService.invalidateUser(user.id),
+          CacheService.invalidateCustomer(user.id, phoneNumber),
+        ]);
+
+        const totalTime = Date.now() - startTime;
+        log('info', `Mobile transaction ${transaction.id} completed in ${totalTime}ms`);
+
+        return NextResponse.json({
+          success: true,
           data: {
-            customerId: customer.id,
-            userId: user.id,
-            vtuTransactionId: transaction.id,
-            transactionType: VtuType.AIRTIME,
+            transactionId: transaction.id,
+            reference: transaction.id,
+            vendorReference: result.vendorReference,
             amount: amount,
-            totalAmount: amount,
-            product: network,
+            network: network,
             phoneNumber: phoneNumber,
-            network: networkEnum,
-            status: TransactionStatus.SUCCESS,
-            commissionAmount: vendorCommission || 0,
-            commissionRate: commissionRate || 0,
-            commissionPaid: true,
-            commissionPaidAt: new Date(),
-            metadata: {
-              vendorName: result.vendor || 'unknown',
-              vendorReference: result.vendorReference || '',
-              vendorSwitched: result.vendorSwitched || false,
-              switchedFrom: result.switchedFrom || [],
-              pinVerified: true,
-              completedAt: new Date().toISOString(),
-              commission: {
-                vendorCommission,
-                vendorTotalAmount,
-                commissionRate,
-                commissionType,
-                platformProfit: platformCommission,
-                grossProfit: grossProfit,
-                profitMargin: profitMargin,
-              },
+            customerId: customer.id,
+            isNewCustomer: customer.totalTransactions === 0,
+            customerName: customer.fullName,
+            vendor: result.vendor,
+            vendorSwitched: result.vendorSwitched,
+            switchedFrom: result.switchedFrom,
+            totalTime: totalTime,
+            channel: CHANNEL_DISPLAY,
+            commission: {
+              vendorCommission: vendorCommission,
+              vendorTotalAmount: vendorTotalAmount,
+              commissionRate: commissionRate,
+              platformProfit: platformCommission,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
             },
+            ...result.data,
           },
-        }),
-      ]);
-
-      // Invalidate cache
-      await Promise.all([
-        CacheService.invalidateWallet(user.id),
-        CacheService.invalidateUser(user.id),
-        CacheService.invalidateCustomer(user.id, phoneNumber),
-      ]);
-
-      const totalTime = Date.now() - startTime;
-      log('info', `Mobile transaction ${transaction.id} completed in ${totalTime}ms`);
-
-      return NextResponse.json({
-        success: true,
-        data: {
+        });
+      } else {
+        await handleVendorFailure(transaction, customer, user, network, networkEnum, phoneNumber, amount, result, vendorEnum, vendorId);
+        
+        return NextResponse.json({
+          success: false,
+          error: result.error || "Vendor transaction failed",
           transactionId: transaction.id,
-          reference: transaction.id,
-          vendorReference: result.vendorReference,
-          amount: amount,
-          network: network,
-          phoneNumber: phoneNumber,
-          customerId: customer.id,
-          isNewCustomer: customer.totalTransactions === 0,
-          customerName: customer.fullName,
           vendor: result.vendor,
-          vendorSwitched: result.vendorSwitched,
-          switchedFrom: result.switchedFrom,
-          totalTime: totalTime,
-          commission: {
-            vendorCommission: vendorCommission,
-            vendorTotalAmount: vendorTotalAmount,
-            commissionRate: commissionRate,
-            platformProfit: platformCommission,
-            grossProfit: grossProfit,
-            profitMargin: profitMargin,
-          },
-          ...result.data,
-        },
-      });
-
-    } catch (vendorError: any) {
-      // Vendor failed - no debit occurred
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: TransactionStatus.FAILED,
-          totalDebited: 0,
-          vendor: vendorEnum || VtuVendor.VTPASS,
-          vendorReference: null,
-          selectedVendorId: vendorId,
-          failedVendors: [],
-          metadata: {
-            ...transaction.metadata,
-            error: vendorError.message || "Vendor transaction failed",
-            failedAt: new Date().toISOString(),
-            wasDebited: false,
-          },
-        },
-      });
-
-      await prisma.customerTransaction.create({
-        data: {
-          customerId: customer.id,
-          userId: user.id,
-          vtuTransactionId: transaction.id,
-          transactionType: VtuType.AIRTIME,
-          amount: amount,
-          totalAmount: amount,
-          product: network,
-          phoneNumber: phoneNumber,
-          network: networkEnum,
-          status: TransactionStatus.FAILED,
-          notes: `Failed: ${vendorError.message || "Vendor transaction failed"}`,
-          metadata: {
-            failureReason: vendorError.message,
-            failedAt: new Date().toISOString(),
-          },
-        },
-      });
-
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: {
-          totalTransactions: { increment: 1 },
-          lastTransactionAt: new Date(),
-        },
-      });
-
-      log('error', 'Mobile airtime purchase failed', vendorError.message);
-
+          vendorReference: result.vendorReference,
+        }, { status: 500 });
+      }
+    } catch (error: any) {
+      await handleUnexpectedError(transaction, customer, user, network, networkEnum, phoneNumber, amount, error, vendorEnum, vendorId);
+      
       return NextResponse.json({
         success: false,
-        error: vendorError.message || "Vendor transaction failed",
+        error: error.message || "Purchase failed. Please try again.",
         transactionId: transaction.id,
       }, { status: 500 });
     }
-
   } catch (error: any) {
-    log('error', 'Top-level error', error.message);
+    log('error', `Top-level error: ${error.message}`);
     return NextResponse.json({
       success: false,
       error: error.message || "An unexpected error occurred",
     }, { status: 500 });
   }
+}
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+async function handleVendorFailure(
+  transaction: any,
+  customer: any,
+  user: any,
+  network: string,
+  networkEnum: NetworkProvider,
+  phoneNumber: string,
+  amount: number,
+  result: any,
+  vendorEnum: VtuVendor | null,
+  vendorId: string | null
+) {
+  log('error', `Vendor purchase failed: ${result.error}`);
+
+  const wasDebited = transaction.totalDebited > 0;
+
+  await prisma.vtuTransaction.update({
+    where: { id: transaction.id },
+    data: {
+      status: TransactionStatus.FAILED,
+      totalDebited: wasDebited ? transaction.totalDebited : 0,
+      vendor: vendorEnum,
+      vendorReference: result.vendorReference || null,
+      selectedVendorId: vendorId,
+      vendorPriorityUsed: result.vendorPriorityUsed || 0,
+      fallbackAttempts: {
+        increment: 1,
+      },
+      failedVendors: result.vendorErrors || [],
+      refundStatus: wasDebited ? RefundStatus.PENDING : RefundStatus.NONE,
+      // channelDisplay already set on creation
+      metadata: {
+        ...transaction.metadata,
+        error: result.error,
+        vendor: result.vendor,
+        vendorErrors: result.vendorErrors || [],
+        vendorSwitched: result.vendorSwitched || false,
+        switchedFrom: result.switchedFrom || [],
+        failedAt: new Date().toISOString(),
+        pinVerified: true,
+        vendorAttempts: result.attempts || 1,
+        responseData: result.data || null,
+        wasDebited: wasDebited,
+        requiresRefund: wasDebited,
+      },
+    },
+  });
+
+  if (wasDebited) {
+    try {
+      await processRefund(
+        transaction,
+        user,
+        transaction.totalDebited,
+        `Vendor failure: ${result.error || 'Transaction failed after debit'}`,
+        "VENDOR_FAILURE"
+      );
+    } catch (refundError) {
+      log('error', `Refund failed: ${refundError.message}`);
+    }
+  }
+
+  await prisma.customerTransaction.create({
+    data: {
+      customerId: customer.id,
+      userId: user.id,
+      vtuTransactionId: transaction.id,
+      transactionType: VtuType.AIRTIME,
+      amount: amount,
+      totalAmount: amount,
+      product: network,
+      phoneNumber: phoneNumber,
+      network: networkEnum,
+      status: TransactionStatus.FAILED,
+      notes: `Failed: ${result.error || 'Vendor transaction failed'}${wasDebited ? ' (Refund processed)' : ''}`,
+      metadata: {
+        vendorName: result.vendor || 'unknown',
+        vendorReference: result.vendorReference || '',
+        vendorSwitched: result.vendorSwitched || false,
+        switchedFrom: result.switchedFrom || [],
+        pinVerified: true,
+        failureReason: result.error,
+        vendorErrors: result.vendorErrors || [],
+        failedAt: new Date().toISOString(),
+        refundProcessed: wasDebited,
+      },
+    },
+  });
+
+  await prisma.customer.update({
+    where: { id: customer.id },
+    data: {
+      totalTransactions: { increment: 1 },
+      lastTransactionAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
+
+  await Promise.all([
+    CacheService.invalidateWallet(user.id),
+    CacheService.invalidateUser(user.id),
+    CacheService.invalidateCustomer(user.id, phoneNumber),
+  ]);
+}
+
+async function handleUnexpectedError(
+  transaction: any,
+  customer: any,
+  user: any,
+  network: string,
+  networkEnum: NetworkProvider,
+  phoneNumber: string,
+  amount: number,
+  error: any,
+  vendorEnum: VtuVendor | null,
+  vendorId: string | null
+) {
+  log('error', `Unexpected error: ${error.message}`);
+
+  const wasDebited = transaction.totalDebited > 0;
+
+  await prisma.vtuTransaction.update({
+    where: { id: transaction.id },
+    data: {
+      status: TransactionStatus.FAILED,
+      totalDebited: wasDebited ? transaction.totalDebited : 0,
+      vendor: vendorEnum || VtuVendor.VTPASS,
+      selectedVendorId: vendorId,
+      fallbackAttempts: {
+        increment: 1,
+      },
+      refundStatus: wasDebited ? RefundStatus.PENDING : RefundStatus.NONE,
+      // channelDisplay already set on creation
+      metadata: {
+        ...transaction.metadata,
+        error: error.message || "Unknown error",
+        errorStack: isDev ? error.stack : undefined,
+        failedAt: new Date().toISOString(),
+        pinVerified: true,
+        errorType: error.name || 'UnknownError',
+        errorCode: error.code || null,
+        wasDebited: wasDebited,
+        requiresRefund: wasDebited,
+      },
+    },
+  });
+
+  if (wasDebited) {
+    try {
+      await processRefund(
+        transaction,
+        user,
+        transaction.totalDebited,
+        `System error: ${error.message || 'Unexpected error after debit'}`,
+        "SYSTEM_ERROR"
+      );
+    } catch (refundError) {
+      log('error', `Refund failed: ${refundError.message}`);
+    }
+  }
+
+  await prisma.customerTransaction.create({
+    data: {
+      customerId: customer.id,
+      userId: user.id,
+      vtuTransactionId: transaction.id,
+      transactionType: VtuType.AIRTIME,
+      amount: amount,
+      totalAmount: amount,
+      product: network,
+      phoneNumber: phoneNumber,
+      network: networkEnum,
+      status: TransactionStatus.FAILED,
+      notes: `System Error: ${error.message || 'Unknown error'}${wasDebited ? ' (Refund processed)' : ''}`,
+      metadata: {
+        pinVerified: true,
+        failureReason: error.message,
+        errorType: error.name,
+        errorCode: error.code,
+        failedAt: new Date().toISOString(),
+        refundProcessed: wasDebited,
+      },
+    },
+  });
+
+  await prisma.customer.update({
+    where: { id: customer.id },
+    data: {
+      totalTransactions: { increment: 1 },
+      lastTransactionAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
+
+  await Promise.all([
+    CacheService.invalidateWallet(user.id),
+    CacheService.invalidateUser(user.id),
+    CacheService.invalidateCustomer(user.id, phoneNumber),
+  ]);
 }

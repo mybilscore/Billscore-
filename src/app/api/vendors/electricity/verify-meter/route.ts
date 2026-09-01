@@ -1,8 +1,85 @@
-// app/api/vendors/electricity/verify-meter/route.ts
+// app/api/vendors/electricity/verify-meter/route.ts - COMPLETE UPDATED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { VtuType, VendorStatus } from "@prisma/client";
+
+// ✅ BilalSada DisCo Mapping - Correct IDs (1-8)
+const BILAL_SADA_DISCO_IDS: Record<string, number> = {
+  // Full names
+  'Ikeja Electric': 1,
+  'Eko Electric': 2,
+  'Kano Electric': 3,
+  'Port Harcourt Electric': 4,
+  'Jos Electric': 5,
+  'Ibadan Electric': 6,
+  'Kaduna Electric': 7,
+  'Abuja Electricity': 8,
+  // Short names
+  'IKEJA': 1,
+  'EKO': 2,
+  'KANO': 3,
+  'PORTHARCOURT': 4,
+  'JOS': 5,
+  'IBADAN': 6,
+  'KADUNA': 7,
+  'ABUJA': 8,
+  // Codes
+  'IE': 1,
+  'EKEDC': 2,
+  'KEDCO': 3,
+  'PHED': 4,
+  'JED': 5,
+  'IBEDC': 6,
+  'KAEDCO': 7,
+  'AEDC': 8,
+  // Lowercase
+  'ikeja': 1,
+  'eko': 2,
+  'kano': 3,
+  'portharcourt': 4,
+  'jos': 5,
+  'ibadan': 6,
+  'kaduna': 7,
+  'abuja': 8,
+};
+
+// ✅ Get BilalSada DisCo ID
+function getBilalSadaDiscoId(discoInput: any): number {
+  // If it's already a number between 1-8, use it
+  if (typeof discoInput === 'number') {
+    if (discoInput >= 1 && discoInput <= 8) {
+      return discoInput;
+    }
+  }
+  
+  if (typeof discoInput === 'string') {
+    // Try to match by name
+    const matched = BILAL_SADA_DISCO_IDS[discoInput];
+    if (matched) {
+      return matched;
+    }
+    
+    // Try to match by code (uppercase)
+    const upper = discoInput.toUpperCase();
+    for (const [key, value] of Object.entries(BILAL_SADA_DISCO_IDS)) {
+      if (key.toUpperCase() === upper) {
+        return value;
+      }
+    }
+    
+    // Try partial match
+    for (const [key, value] of Object.entries(BILAL_SADA_DISCO_IDS)) {
+      if (key.toUpperCase().includes(upper) || upper.includes(key.toUpperCase())) {
+        return value;
+      }
+    }
+  }
+  
+  // Default to Ikeja (1) if not found
+  console.warn(`⚠️ [BilalSada] Unknown disco: ${discoInput}, defaulting to 1 (Ikeja)`);
+  return 1;
+}
 
 // ✅ Types
 interface VtpassVerificationResponse {
@@ -18,16 +95,6 @@ interface VtpassVerificationResponse {
     Can_Vend?: boolean;
     Phone?: string;
     Email?: string;
-    customerName?: string;
-    address?: string;
-    meterNumber?: string;
-    meterType?: string;
-    status?: string;
-    dueDate?: string;
-    customerType?: string;
-    canVend?: boolean;
-    phone?: string;
-    email?: string;
   };
   response_description?: string;
   message?: string;
@@ -73,6 +140,7 @@ export async function POST(request: NextRequest) {
       meterNumber,
       meterType,
       disco,
+      discoType: typeof disco,
     });
 
     // ✅ Get active vendor for electricity
@@ -100,11 +168,10 @@ export async function POST(request: NextRequest) {
 
     // ✅ Only handle BilalSada (since it's the active vendor)
     if (activeVendor.code === 'BILAL_SADA') {
-      // ✅ Use disco from request, ensure it's a valid number (1-8)
-      let discoId = disco || body.discoId || 1;
-      discoId = Math.min(Math.max(Number(discoId), 1), 8);
+      // ✅ Get correct disco ID for BilalSada
+      const discoId = getBilalSadaDiscoId(disco);
       
-      console.log(`[Verify Meter] Using BilalSada discoId: ${discoId}`);
+      console.log(`[Verify Meter] Using BilalSada discoId: ${discoId} (from input: ${disco})`);
       
       const result = await verifyWithBilalSada(meterNumber, discoId, meterType || 'prepaid');
       return NextResponse.json(result);

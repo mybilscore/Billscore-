@@ -1,7 +1,9 @@
-// app/dashboard/buy/data/page.tsx
+// app/dashboard/buy/data/page.tsx - Complete fixed
+
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
 import { DataClient } from "./page.client";
+import { VtuType, PlanStatus } from "@prisma/client";
 
 // Helper function to generate virtual account number
 function generateVirtualAccountNumber(): string {
@@ -9,26 +11,16 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// ✅ Map plan to category based on validity (same as API route)
+// ✅ Map plan to category based on validity
 function getPlanCategory(plan: any): string {
-  // If plan has explicit category, use it
-  if (plan.category) {
-    return plan.category;
-  }
+  if (plan.category) return plan.category;
 
-  // If planType is SME, keep as SME
-  if (plan.planType?.toUpperCase() === 'SME') {
-    return 'SME';
-  }
+  if (plan.planType?.toUpperCase() === 'SME') return 'SME';
 
-  // For GIFTING or other types, determine by validity
   const validity = plan.validity || 0;
   const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
 
-  // Map based on validity duration
-  if (unit === 'HOURS' || unit === 'MINUTES') {
-    return 'Hourly';
-  }
+  if (unit === 'HOURS' || unit === 'MINUTES') return 'Hourly';
   
   if (unit === 'DAYS') {
     if (validity <= 1) return 'Daily';
@@ -46,15 +38,11 @@ function getPlanCategory(plan: any): string {
     return 'Monthly';
   }
   
-  if (unit === 'YEARS') {
-    if (validity <= 1) return 'Yearly';
-    return 'Yearly';
-  }
+  if (unit === 'YEARS') return 'Yearly';
 
   return 'Monthly';
 }
 
-// ✅ Sort categories in specific order
 function sortCategories(categories: any[]) {
   const order: Record<string, number> = {
     'SME': 0,
@@ -74,32 +62,303 @@ function sortCategories(categories: any[]) {
   });
 }
 
-// ✅ Fetch plans from active vendor
-async function fetchActiveVendorPlans() {
+// ✅ Fetch VTpass plans directly
+async function fetchVTPassPlans(networkParam: string | null) {
   try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-    const url = `${apiUrl}/vendors/plans`;
-    console.log(`📊 [DATA] Fetching plans from: ${url}`);
+    console.log('📊 [VTPass] Fetching VTpass plans...');
     
-    const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-    });
+    const isProduction = process.env.NODE_ENV === 'production';
+    const baseUrl = isProduction 
+      ? 'https://vtpass.com/api'
+      : 'https://sandbox.vtpass.com/api';
+    
+    const apiKey = process.env.VTPASS_SANDBOX_API_KEY || process.env.VTPASS_LIVE_API_KEY;
+    const secretKey = process.env.VTPASS_SANDBOX_SECRET_KEY || process.env.VTPASS_LIVE_SECRET_KEY;
+    const publicKey = process.env.VTPASS_SANDBOX_PUBLIC_KEY || process.env.VTPASS_LIVE_PUBLIC_KEY;
 
-    if (!response.ok) {
-      console.error(`Failed to fetch plans: ${response.status} ${response.statusText}`);
-      return null;
+    // ✅ Determine which service IDs to fetch
+    let serviceIds: string[] = [];
+    
+    if (networkParam) {
+      const serviceIdMap: Record<string, string> = {
+        'MTN': 'mtn-data',
+        'GLO': 'glo-data',
+        'AIRTEL': 'airtel-data',
+        '9MOBILE': 'etisalat-data',
+        'NINEMOBILE': 'etisalat-data',
+      };
+      const upperNetwork = networkParam.toUpperCase();
+      const serviceId = serviceIdMap[upperNetwork];
+      if (serviceId) {
+        serviceIds = [serviceId];
+      } else {
+        serviceIds = ['mtn-data', 'glo-data', 'airtel-data', 'etisalat-data'];
+      }
+    } else {
+      serviceIds = ['mtn-data', 'glo-data', 'airtel-data', 'etisalat-data'];
     }
 
-    const data = await response.json();
-    console.log(`📊 [DATA] API Response success: ${data.success}, plans: ${data.data?.plans?.length || 0}`);
+    let allPlans: any[] = [];
     
-    return data.success ? data.data : null;
+    for (const serviceId of serviceIds) {
+      try {
+        const url = `${baseUrl}/service-variations?serviceID=${serviceId}`;
+        console.log(`📊 [VTPass] Fetching: ${url}`);
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'api-key': apiKey || '',
+            'secret-key': secretKey || '',
+            'public-key': publicKey || '',
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(30000),
+        });
+
+        console.log(`📊 [VTPass] Response status: ${response.status}`);
+        
+        const responseText = await response.text();
+        console.log(`📊 [VTPass] Response sample: ${responseText.substring(0, 500)}`);
+        
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (e) {
+          console.warn(`⚠️ [VTPass] Could not parse JSON for ${serviceId}`);
+          continue;
+        }
+
+        // ✅ Check for successful response
+        if (data.response_description === "000" && data.content) {
+          // ✅ Extract variations - handle both "variations" and "varations"
+          const variations = data.content?.variations || data.content?.varations || [];
+          console.log(`📊 [VTPass] Found ${variations.length} variations for ${serviceId}`);
+          
+          // ✅ Log first variation to debug
+          if (variations.length > 0) {
+            console.log(`📊 [VTPass] First variation:`, JSON.stringify(variations[0], null, 2));
+          }
+          
+          const mappedPlans = variations.map((v: any, index: number) => {
+            // ✅ CORRECT: Use variation_amount for price
+            const price = parseFloat(v.variation_amount) || 0;
+            
+            // Get network from service ID
+            let networkName = 'MTN';
+            if (serviceId.includes('glo')) networkName = 'GLO';
+            else if (serviceId.includes('airtel')) networkName = 'AIRTEL';
+            else if (serviceId.includes('etisalat')) networkName = '9MOBILE';
+            
+            // ✅ Extract data amount from variation name
+            const name = v.name || '';
+            let dataAmount = '0MB';
+            let amountMB = 0;
+            
+            // Try to extract MB/GB from name
+            const dataMatch = name.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
+            if (dataMatch) {
+              const num = parseFloat(dataMatch[1]);
+              const unit = dataMatch[2].toUpperCase();
+              amountMB = unit === 'GB' ? num * 1024 : num;
+              dataAmount = `${num}${unit}`;
+            } else {
+              // Fallback: use price to estimate
+              const p = price;
+              if (p <= 50) { amountMB = 25; dataAmount = '25MB'; }
+              else if (p <= 100) { amountMB = 50; dataAmount = '50MB'; }
+              else if (p <= 200) { amountMB = 100; dataAmount = '100MB'; }
+              else if (p <= 300) { amountMB = 200; dataAmount = '200MB'; }
+              else if (p <= 500) { amountMB = 350; dataAmount = '350MB'; }
+              else if (p <= 1000) { amountMB = 750; dataAmount = '750MB'; }
+              else if (p <= 1500) { amountMB = 1024; dataAmount = '1GB'; }
+              else if (p <= 2000) { amountMB = 2048; dataAmount = '2GB'; }
+              else if (p <= 3000) { amountMB = 3072; dataAmount = '3GB'; }
+              else if (p <= 5000) { amountMB = 5120; dataAmount = '5GB'; }
+              else if (p <= 10000) { amountMB = 10240; dataAmount = '10GB'; }
+              else { amountMB = Math.floor(p / 2); dataAmount = `${amountMB}MB`; }
+            }
+
+            // Extract validity from name
+            let validityDays = 30;
+            const dayMatch = name.match(/(\d+)\s*(day|days|hr|hrs|month|months|year|years)/i);
+            if (dayMatch) {
+              const num = parseInt(dayMatch[1]);
+              const unit = dayMatch[2].toLowerCase();
+              if (unit.includes('day')) {
+                validityDays = num;
+              } else if (unit.includes('month')) {
+                validityDays = num * 30;
+              } else if (unit.includes('year')) {
+                validityDays = num * 365;
+              } else if (unit.includes('hr')) {
+                validityDays = 1;
+              }
+            }
+
+            // Determine category
+            let categoryName = 'Monthly';
+            const lowerName = name.toLowerCase();
+            
+            if (lowerName.includes('sme')) {
+              categoryName = 'SME';
+            } else if (validityDays <= 1) {
+              categoryName = 'Daily';
+            } else if (validityDays <= 7) {
+              categoryName = 'Weekly';
+            } else if (validityDays <= 30) {
+              categoryName = 'Monthly';
+            } else if (validityDays <= 60) {
+              categoryName = '2 Monthly';
+            } else if (validityDays > 60) {
+              categoryName = 'Yearly';
+            }
+
+            // ✅ Generate unique ID using variation_code + network + index
+            const uniqueId = `${serviceId}-${v.variation_code || v.id || index}-${networkName}`;
+
+            return {
+              id: uniqueId,
+              name: name || `${dataAmount} Data`,
+              data: dataAmount,
+              price: price,
+              validity: `${validityDays} days`,
+              planCode: v.variation_code || v.id || uniqueId,
+              vendorPrice: price,
+              description: name || '',
+              amountMB: amountMB,
+              planType: categoryName,
+              network: networkName,
+              service_type: serviceId,
+              variation_code: v.variation_code || '',
+              variation_name: name || '',
+              validity_days: validityDays,
+            };
+          });
+          
+          // ✅ Filter out plans with price 0
+          const filteredPlans = mappedPlans.filter(p => p.price > 0);
+          console.log(`📊 [VTPass] Mapped ${filteredPlans.length} plans with price > 0 for ${serviceId}`);
+          allPlans = [...allPlans, ...filteredPlans];
+        } else {
+          console.warn(`⚠️ [VTPass] Failed to fetch ${serviceId}:`, data.response_description || data.code || 'Unknown error');
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch ${serviceId} plans:`, e);
+      }
+    }
+
+    console.log(`📊 [VTPass] Total plans fetched: ${allPlans.length}`);
+    return allPlans;
   } catch (error) {
-    console.error('Error fetching plans:', error);
-    return null;
+    console.error('Error fetching VTpass plans:', error);
+    return [];
+  }
+}
+
+// ✅ Get active vendor
+async function getActiveVendor() {
+  const vendorService = await prisma.vendorService.findFirst({
+    where: {
+      serviceType: VtuType.DATA,
+      isActive: true,
+    },
+    include: {
+      vendor: true,
+    },
+    orderBy: {
+      priority: 'asc',
+    },
+  });
+
+  return vendorService;
+}
+
+// ✅ Format plans into grouped structure
+function formatPlans(plans: any[], networkConfigs: any[]) {
+  const groupedByNetwork: Record<string, any> = {};
+
+  for (const plan of plans) {
+    let networkKey = plan.network?.toLowerCase() || 'mtn';
+    let networkName = plan.network || 'MTN';
+    
+    // Try to find network config
+    const config = networkConfigs.find(n => 
+      n.network === networkName || 
+      n.code === networkName ||
+      n.displayName === networkName
+    );
+    
+    if (config) {
+      networkName = config.displayName || networkName;
+    }
+
+    if (!groupedByNetwork[networkKey]) {
+      groupedByNetwork[networkKey] = {
+        id: networkKey,
+        name: networkName,
+        code: networkName,
+        color: config?.color || '#000000',
+        iconPath: config?.logo || `/networks/${networkKey}.jpg`,
+        categories: {},
+        network: plan.network,
+        service_type: plan.service_type || 'data',
+      };
+    }
+
+    // Determine category
+    let categoryName = plan.planType || 'Monthly';
+
+    if (!groupedByNetwork[networkKey].categories[categoryName]) {
+      groupedByNetwork[networkKey].categories[categoryName] = {
+        id: categoryName.toLowerCase().replace(/\s+/g, '_'),
+        name: categoryName,
+        plans: [],
+      };
+    }
+
+    // Add plan to category
+    groupedByNetwork[networkKey].categories[categoryName].plans.push({
+      id: plan.id || plan.planCode || `${networkKey}-${categoryName}-${plan.price}`,
+      name: plan.name || plan.variation_name || plan.data,
+      data: plan.data || `${plan.amountMB || 0}MB`,
+      price: typeof plan.price === 'number' ? plan.price : parseFloat(plan.price) || 0,
+      validity: typeof plan.validity === 'string' ? plan.validity : `${plan.validity_days || 30} days`,
+      planCode: plan.planCode || plan.variation_code || plan.id,
+      vendorPrice: typeof plan.vendorPrice === 'number' ? plan.vendorPrice : parseFloat(plan.vendorPrice) || 0,
+      description: plan.description || '',
+      amountMB: plan.amountMB || 0,
+      planType: plan.planType || categoryName,
+      variation_code: plan.variation_code || plan.planCode,
+      variation_name: plan.variation_name || plan.name,
+      service_id: plan.service_type || 'data',
+      network: plan.network,
+    });
+  }
+
+  // Convert to array and sort categories
+  return Object.keys(groupedByNetwork).map((key) => ({
+    ...groupedByNetwork[key],
+    categories: sortCategories(
+      Object.keys(groupedByNetwork[key].categories).map((catKey) => ({
+        id: groupedByNetwork[key].categories[catKey].id,
+        name: catKey,
+        plans: groupedByNetwork[key].categories[catKey].plans,
+      }))
+    ),
+  }));
+}
+
+// ✅ Get network configs
+async function getNetworkConfigs() {
+  try {
+    return await prisma.networkConfig.findMany({
+      where: { isActive: true },
+      orderBy: { priority: 'asc' },
+    });
+  } catch (error) {
+    console.error('Error fetching network configs:', error);
+    return [];
   }
 }
 
@@ -174,161 +433,66 @@ export default async function DataPage() {
     walletBalance: walletBalance,
   };
 
-  // ✅ Fetch plans from API
-  const plansData = await fetchActiveVendorPlans();
-  
-  // ✅ Extract providers from the response
-  let providers = plansData?.plans || [];
-  let networks = plansData?.networks || [];
-  let vendorInfo = plansData?.vendor || null;
+  // ✅ Get active vendor
+  const vendorService = await getActiveVendor();
+  let vendorInfo = null;
+  let providers: any[] = [];
+  let networks: any[] = [];
 
-  // ✅ Fallback: If no providers from API, query database directly
-  if (providers.length === 0) {
-    console.log('⚠️ [DATA] No providers from /vendors/plans, trying direct database...');
-    
-    try {
-      const vendorService = await prisma.vendorService.findFirst({
+  if (vendorService) {
+    vendorInfo = {
+      id: vendorService.vendor.id,
+      name: vendorService.vendor.name,
+      code: vendorService.vendor.code,
+    };
+
+    console.log(`📊 [DATA] Active vendor: ${vendorInfo.name} (${vendorInfo.code})`);
+
+    // ✅ Get network configs
+    const networkConfigs = await getNetworkConfigs();
+
+    // ✅ Fetch plans based on vendor
+    let plans: any[] = [];
+
+    if (vendorInfo.code === 'VTPASS' || vendorInfo.code === 'VT_PASS') {
+      console.log('📊 [DATA] Fetching VTpass plans...');
+      plans = await fetchVTPassPlans(null);
+    } else {
+      console.log(`📊 [DATA] Fetching ${vendorInfo.code} plans from database...`);
+      const dbPlans = await prisma.dataPlan.findMany({
         where: {
-          serviceType: "DATA",
+          vendorId: vendorService.vendorId,
           isActive: true,
+          status: PlanStatus.ACTIVE,
         },
+        orderBy: [
+          { network: 'asc' },
+          { amountMB: 'asc' },
+        ],
         include: {
-          vendor: true,
-        },
-        orderBy: {
-          priority: 'asc',
+          networkConfig: true,
         },
       });
-
-      if (vendorService) {
-        const plans = await prisma.dataPlan.findMany({
-          where: {
-            vendorId: vendorService.vendorId,
-            isActive: true,
-            status: "ACTIVE",
-          },
-          orderBy: [
-            { network: 'asc' },
-            { amountMB: 'asc' },
-          ],
-          include: {
-            networkConfig: true,
-          },
-        });
-
-        if (plans.length > 0) {
-          const groupedByNetwork: Record<string, any> = {};
-          
-          for (const plan of plans) {
-            const networkKey = plan.network;
-            if (!groupedByNetwork[networkKey]) {
-              groupedByNetwork[networkKey] = {
-                id: networkKey.toLowerCase(),
-                name: plan.networkConfig?.displayName || networkKey,
-                code: plan.networkConfig?.code || networkKey,
-                color: plan.networkConfig?.color || '#000000',
-                iconPath: plan.networkConfig?.logo || `/networks/${networkKey.toLowerCase()}.jpg`,
-                categories: {},
-              };
-            }
-
-            // ✅ Determine category based on plan attributes
-            const categoryName = getPlanCategory(plan);
-            
-            if (!groupedByNetwork[networkKey].categories[categoryName]) {
-              groupedByNetwork[networkKey].categories[categoryName] = {
-                id: categoryName.toLowerCase().replace(/\s+/g, '_'),
-                name: categoryName,
-                plans: [],
-              };
-            }
-
-            // Get validity display
-            let validityDisplay = '';
-            if (plan.validity && plan.validityUnit) {
-              const unit = plan.validityUnit.toLowerCase();
-              const val = plan.validity;
-              if (val === 1) {
-                validityDisplay = `1 ${unit.slice(0, -1)}`;
-              } else {
-                validityDisplay = `${val} ${unit}`;
-              }
-            }
-
-            groupedByNetwork[networkKey].categories[categoryName].plans.push({
-              id: plan.id,
-              name: plan.name,
-              data: plan.amountMB >= 1024 
-                ? `${(plan.amountMB / 1024).toFixed(1)}GB` 
-                : `${plan.amountMB}MB`,
-              price: Number(plan.ourPrice),
-              validity: validityDisplay || `${plan.validity} ${plan.validityUnit}`.toLowerCase(),
-              planCode: plan.vendorPlanId,
-              vendorPrice: Number(plan.vendorPrice),
-              description: plan.description,
-              amountMB: plan.amountMB,
-              planType: plan.planType,
-            });
-          }
-
-          // Sort plans within each category by amountMB
-          for (const networkKey in groupedByNetwork) {
-            for (const categoryKey in groupedByNetwork[networkKey].categories) {
-              groupedByNetwork[networkKey].categories[categoryKey].plans.sort((a: any, b: any) => {
-                return (a.amountMB || 0) - (b.amountMB || 0);
-              });
-            }
-          }
-
-          providers = Object.keys(groupedByNetwork).map((key) => ({
-            ...groupedByNetwork[key],
-            categories: sortCategories(
-              Object.keys(groupedByNetwork[key].categories).map((catKey) => ({
-                id: groupedByNetwork[key].categories[catKey].id,
-                name: catKey,
-                plans: groupedByNetwork[key].categories[catKey].plans,
-              }))
-            ),
-          }));
-
-          const networkConfigs = await prisma.networkConfig.findMany({
-            where: { isActive: true },
-            orderBy: { priority: 'asc' },
-          });
-          networks = networkConfigs.map(n => ({
-            id: n.id,
-            name: n.displayName,
-            code: n.code,
-            color: n.color,
-            logo: n.logo,
-            network: n.network,
-          }));
-
-          vendorInfo = {
-            id: vendorService.vendor.id,
-            name: vendorService.vendor.name,
-            code: vendorService.vendor.code,
-          };
-
-          console.log(`✅ [DATA] Fallback: Found ${providers.length} providers with ${plans.length} plans`);
-        }
-      }
-    } catch (error) {
-      console.error('❌ [DATA] Fallback error:', error);
+      plans = dbPlans;
     }
-  }
 
-  // ✅ If still no providers, use empty array
-  if (providers.length === 0) {
-    console.warn('⚠️ [DATA] No providers found, using empty array');
-    providers = [];
+    // ✅ Format plans
+    providers = formatPlans(plans, networkConfigs);
+    networks = networkConfigs.map(n => ({
+      id: n.id,
+      name: n.displayName,
+      code: n.code,
+      color: n.color,
+      logo: n.logo,
+      network: n.network,
+    }));
+
+    console.log(`📊 [DATA] Providers loaded: ${providers.length}`);
+    console.log(`📊 [DATA] Networks loaded: ${networks.length}`);
   }
 
   const defaultProvider = providers.length > 0 ? providers[0].id : "mtn";
 
-  console.log(`📤 [DATA] Providers loaded: ${providers.length}`);
-  console.log(`📤 [DATA] Networks loaded: ${networks.length}`);
-  console.log(`📤 [DATA] Vendor: ${vendorInfo?.name || 'None'}`);
   console.log("✅ [DATA] Data page load complete!");
 
   return (

@@ -1,24 +1,42 @@
-// src/app/api/mobile/auth/reset-password/route.ts - FIXED
+// app/api/mobile/auth/reset-password/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { hash } from "bcrypt";
 
-// ✅ Ensure POST is exported correctly
 export async function POST(req: NextRequest) {
   try {
     const { email, otp, newPassword } = await req.json();
 
+    // Validate required fields
     if (!email || !otp || !newPassword) {
       return NextResponse.json(
-        { error: "Email, OTP, and new password are required" },
+        { 
+          success: false,
+          error: "Email, OTP, and new password are required" 
+        },
         { status: 400 }
       );
     }
 
+    // Validate password strength
     if (newPassword.length < 6) {
       return NextResponse.json(
-        { error: "Password must be at least 6 characters" },
+        { 
+          success: false,
+          error: "Password must be at least 6 characters" 
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate OTP format (6 digits)
+    if (!/^\d{6}$/.test(otp)) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: "OTP must be 6 digits" 
+        },
         { status: 400 }
       );
     }
@@ -35,9 +53,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (!user) {
-      console.log(`❌ No user found for email: ${email}`);
+      console.log(`❌ [MOBILE] No user found for email: ${email}`);
       return NextResponse.json(
-        { error: "Invalid or expired reset code" },
+        { 
+          success: false,
+          error: "Invalid or expired reset code" 
+        },
         { status: 400 }
       );
     }
@@ -53,14 +74,17 @@ export async function POST(req: NextRequest) {
     });
 
     if (!resetRecord) {
-      console.log(`❌ Invalid or expired OTP for user: ${user.email}`);
+      console.log(`❌ [MOBILE] Invalid or expired OTP for user: ${user.email}`);
       return NextResponse.json(
-        { error: "Invalid or expired reset code" },
+        { 
+          success: false,
+          error: "Invalid or expired reset code" 
+        },
         { status: 400 }
       );
     }
 
-    console.log(`✅ Valid OTP found for user: ${user.email}`);
+    console.log(`✅ [MOBILE] Valid OTP found for user: ${user.email}`);
 
     // Hash the new password
     const hashedPassword = await hash(newPassword, 10);
@@ -73,7 +97,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(`✅ Password updated for user: ${user.email}`);
+    console.log(`✅ [MOBILE] Password updated for user: ${user.email}`);
 
     // Mark the reset record as used
     await prisma.passwordReset.update({
@@ -90,31 +114,25 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(`✅ Password reset successful for user: ${user.email}`);
+    console.log(`✅ [MOBILE] Password reset successful for user: ${user.email}`);
 
     return NextResponse.json({
       success: true,
       message: "Password reset successful",
+      data: {
+        email: user.email,
+        resetAt: new Date().toISOString(),
+      }
     });
 
   } catch (error) {
-    console.error("❌ Reset password error:", error);
+    console.error("❌ [MOBILE] Reset password error:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { 
+        success: false,
+        error: "An unexpected error occurred" 
+      },
       { status: 500 }
     );
   }
-}
-
-// ✅ Add OPTIONS handler for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Max-Age': '86400',
-    },
-  });
 }

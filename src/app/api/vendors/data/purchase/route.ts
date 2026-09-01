@@ -1,4 +1,4 @@
-// app/api/vendors/data/purchase/route.ts - WITH channelDisplay SET TO "WEB_APP"
+// app/api/vendors/data/purchase/route.ts - Fixed for both VTpass and BilalSada
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -9,7 +9,7 @@ import { TransactionStatus, VtuType, CustomerType, NetworkProvider, VtuVendor, R
 import { compare } from "bcrypt";
 
 // ============================================================
-// MINIMAL LOGGING - Only errors and warnings in production
+// MINIMAL LOGGING
 // ============================================================
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
     const sessionUser = await requireAuth("/auth/sign-in");
     
     const body = await request.json();
-    let { phoneNumber, planCode, provider, amount, pin, planId } = body;
+    let { phoneNumber, planCode, provider, amount, pin, planId, variationCode, vendor } = body;
 
     // Validate request
     if (!phoneNumber || phoneNumber.length < 10) {
@@ -409,6 +409,26 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // CHECK IF PLAN EXISTS IN DATABASE (for BilalSada)
+    // ============================================================
+    
+    // ✅ Only try to find dataPlanId if planId is provided
+    let dataPlanId: string | undefined = undefined;
+    
+    if (planId) {
+      // For BilalSada, planId is the database ID
+      const dataPlan = await prisma.dataPlan.findUnique({
+        where: { id: planId },
+        select: { id: true },
+      });
+      if (dataPlan) {
+        dataPlanId = dataPlan.id;
+      } else {
+        log('warn', `DataPlan with id ${planId} not found in database - likely VTpass plan`);
+      }
+    }
+
+    // ============================================================
     // CREATE TRANSACTION RECORD - channelDisplay = "WEB_APP"
     // ============================================================
     
@@ -425,7 +445,7 @@ export async function POST(request: NextRequest) {
         status: TransactionStatus.PENDING,
         channel: ChannelType.WEB_APP,
         channelDisplay: CHANNEL_DISPLAY,
-        dataPlanId: planId || null,
+        dataPlanId: dataPlanId, // ✅ Only set if plan exists in DB
         metadata: {
           source: "DataAPI",
           timestamp: new Date().toISOString(),
@@ -435,6 +455,10 @@ export async function POST(request: NextRequest) {
           pinVerified: false,
           channel: "WEB_APP",
           channelDisplay: CHANNEL_DISPLAY,
+          // ✅ Store vendor info
+          vendor: vendor || 'UNKNOWN',
+          variationCode: variationCode || planCode,
+          isVTpass: vendor === 'VTPASS' || vendor === 'VT_PASS',
         },
       },
     });
@@ -604,15 +628,22 @@ export async function POST(request: NextRequest) {
     try {
       const vendorService = getVendorService();
 
-      const result = await vendorService.buyData(
-        {
-          phoneNumber: phoneNumber,
-          planCode: planCode,
-          network: provider,
-          amount: amount,
-        },
-        user.id
-      );
+      // ✅ Build request based on vendor type
+      const requestData: any = {
+        phoneNumber: phoneNumber,
+        planCode: planCode,
+        network: provider,
+        amount: amount,
+      };
+
+      // ✅ If VTpass, add variationCode
+      if (vendor === 'VTPASS' || vendor === 'VT_PASS') {
+        requestData.variationCode = variationCode || planCode;
+        requestData.vendor = 'VTPASS';
+        log('info', 'Using VTpass vendor for data purchase', { variationCode: requestData.variationCode });
+      }
+
+      const result = await vendorService.buyData(requestData, user.id);
 
       vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
 

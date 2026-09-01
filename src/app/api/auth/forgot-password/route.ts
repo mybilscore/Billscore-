@@ -1,16 +1,20 @@
-// app/api/auth/forgot-password/route.ts
+// src/app/api/mobile/auth/forgot-password/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { sendPasswordResetEmail } from "~/lib/email";
 
+// ✅ Make sure this is a named export, not default
 export async function POST(req: NextRequest) {
   try {
     const { email } = await req.json();
 
     if (!email) {
       return NextResponse.json(
-        { error: "Email is required" },
+        { 
+          success: false,
+          error: "Email is required" 
+        },
         { status: 400 }
       );
     }
@@ -19,12 +23,15 @@ export async function POST(req: NextRequest) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { error: "Please enter a valid email address" },
+        { 
+          success: false,
+          error: "Please enter a valid email address" 
+        },
         { status: 400 }
       );
     }
 
-    // Find user by email - just get id, email, and fullName
+    // Find user by email
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       select: {
@@ -34,8 +41,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(`🔍 Password reset requested for email: ${email}`);
-    console.log(`📊 User found: ${!!user}`);
+    console.log(`🔍 [MOBILE] Password reset requested for email: ${email}`);
+    console.log(`📊 [MOBILE] User found: ${!!user}`);
 
     // If user exists, send reset code
     if (user) {
@@ -60,14 +67,13 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      console.log(`✅ Password reset record created with ID: ${passwordReset.id}`);
-      console.log(`🔑 OTP: ${otp} (will expire at ${expiresAt})`);
+      console.log(`✅ [MOBILE] Password reset record created with ID: ${passwordReset.id}`);
+      console.log(`🔑 [MOBILE] OTP: ${otp} (will expire at ${expiresAt})`);
 
-      // Use fullName directly from User model
       const userName = user.fullName || user.email?.split('@')[0] || "User";
 
-      console.log(`📧 Sending password reset email to: ${user.email}`);
-      console.log(`👤 User name: ${userName}`);
+      console.log(`📧 [MOBILE] Sending password reset email to: ${user.email}`);
+      console.log(`👤 [MOBILE] User name: ${userName}`);
       
       // Send email with OTP
       const emailSent = await sendPasswordResetEmail(
@@ -78,26 +84,45 @@ export async function POST(req: NextRequest) {
       );
 
       if (emailSent) {
-        console.log(`✅ Password reset email sent successfully to ${user.email}`);
+        console.log(`✅ [MOBILE] Password reset email sent successfully to ${user.email}`);
       } else {
-        console.error(`❌ Failed to send password reset email to ${user.email}`);
-        console.error(`📧 Check: RESEND_API_KEY=${!!process.env.RESEND_API_KEY}, EMAIL_FROM=${process.env.EMAIL_FROM}`);
+        console.error(`❌ [MOBILE] Failed to send password reset email to ${user.email}`);
       }
     } else {
-      console.log(`❌ No user found for email: ${email}`);
+      console.log(`❌ [MOBILE] No user found for email: ${email}`);
     }
 
     // Always return success to prevent user enumeration
     return NextResponse.json({
       success: true,
       message: "If an account exists with this email, a reset code has been sent.",
+      data: {
+        email: email,
+        otpSent: !!user,
+      }
     });
 
   } catch (error) {
-    console.error("❌ Forgot password error:", error);
+    console.error("❌ [MOBILE] Forgot password error:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred. Please try again later." },
+      { 
+        success: false,
+        error: "An unexpected error occurred. Please try again later." 
+      },
       { status: 500 }
     );
   }
+}
+
+// ✅ Add OPTIONS handler
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Max-Age': '86400',
+    },
+  });
 }

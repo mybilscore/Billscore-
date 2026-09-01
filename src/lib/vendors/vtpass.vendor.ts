@@ -1,4 +1,4 @@
-// src/lib/vendors/vtpass.vendor.ts - Complete Updated with Environment Support
+// src/lib/vendors/vtpass.vendor.ts - Complete Updated with Fixed Electricity Service ID Mapping
 
 import { BaseVendor } from './base.vendor';
 import {
@@ -17,7 +17,7 @@ interface VTPassAuthConfig {
   publicKey?: string;
   username?: string;
   password?: string;
-  environment?: string; // ✅ Add environment field
+  environment?: string;
 }
 
 interface VTPassPayRequest {
@@ -64,6 +64,15 @@ interface VTPassResponse {
   tokens?: string[];
   cards?: Array<{ Serial: string; Pin: string }>;
   Pin?: string;
+  customerName?: string;
+  customerAddress?: string;
+  meterNumber?: string;
+  token?: string;
+  tokenAmount?: number;
+  exchangeReference?: string;
+  units?: string;
+  tariff?: string;
+  debtAmount?: number;
 }
 
 export class VTPassVendor extends BaseVendor {
@@ -79,7 +88,6 @@ export class VTPassVendor extends BaseVendor {
     
     this.authConfig = config.authConfig as VTPassAuthConfig;
     
-    // ✅ Detect environment from authConfig or metadata
     this.environment = this.authConfig?.environment || 
                        (config.metadata as any)?.environment || 
                        'sandbox';
@@ -139,7 +147,6 @@ export class VTPassVendor extends BaseVendor {
   transformRequest<T>(request: VendorRequest<T>): any {
     console.log(`🔄 [VTPassVendor] Transforming request for: ${request.service} (${this.environment})`);
     
-    // ✅ For merchant-verify, don't transform the data, just pass it through
     if (request.endpoint.includes('merchant-verify')) {
       console.log(`🔄 [VTPassVendor] Skipping transformation for merchant-verify`);
       return request.data;
@@ -226,11 +233,9 @@ export class VTPassVendor extends BaseVendor {
     };
   }
 
-  // ✅ Updated Education transform with proper VTpass fields
   private transformEducationRequest(data: any): VTPassPayRequest {
     console.log(`📚 [VTPassVendor] Education request:`, data);
     
-    // Map service IDs to VTpass format
     const serviceMap: Record<string, string> = {
       'waec': 'waec',
       'waec-registration': 'waec-registration',
@@ -241,7 +246,6 @@ export class VTPassVendor extends BaseVendor {
 
     const serviceID = serviceMap[data.serviceId] || data.serviceId;
     
-    // ✅ Build payload according to VTpass docs
     const payload: VTPassPayRequest = {
       request_id: this.generateRequestId(),
       serviceID: serviceID,
@@ -250,12 +254,10 @@ export class VTPassVendor extends BaseVendor {
       quantity: data.quantity || 1,
     };
 
-    // ✅ For JAMB, billersCode is required (Profile ID)
     if (serviceID === 'jamb' && data.billersCode) {
       payload.billersCode = data.billersCode;
     }
 
-    // ✅ Amount is optional - VTpass uses variation_code to determine price
     if (data.amount) {
       payload.amount = data.amount.toString();
     }
@@ -268,7 +270,6 @@ export class VTPassVendor extends BaseVendor {
     
     const vtpassResponse = response as VTPassResponse;
     
-    // ✅ Check if this is a merchant-verify response
     if (vtpassResponse.code === '000' && vtpassResponse.content && !vtpassResponse.content?.transactions) {
       console.log(`✅ [VTPassVendor] Merchant verification success`);
       return {
@@ -290,34 +291,27 @@ export class VTPassVendor extends BaseVendor {
       
       const transaction = vtpassResponse.content?.transactions;
       
-      // ✅ Extract tokens/cards for education
       let tokens: string[] = [];
       let token: string = '';
       let cards: Array<{ Serial: string; Pin: string }> = [];
       
-      // ✅ Check for different response formats for education
-      // 1. Direct tokens array
       if (vtpassResponse.tokens && vtpassResponse.tokens.length > 0) {
         tokens = vtpassResponse.tokens;
         token = tokens[0];
       }
       
-      // 2. Cards array (WAEC Result Checker)
       if (vtpassResponse.cards && vtpassResponse.cards.length > 0) {
         cards = vtpassResponse.cards;
         tokens = vtpassResponse.cards.map(c => c.Pin);
         token = vtpassResponse.cards[0]?.Pin || '';
       }
       
-      // 3. Single Pin field (JAMB)
       if (vtpassResponse.Pin && !token) {
         token = vtpassResponse.Pin;
         tokens = [token];
       }
       
-      // 4. Purchased code with tokens
       if (vtpassResponse.purchased_code && !token) {
-        // Try to extract token from purchased_code
         const codeMatch = vtpassResponse.purchased_code.match(/[0-9]{10,}/g);
         if (codeMatch && codeMatch.length > 0) {
           tokens = codeMatch;
@@ -328,6 +322,19 @@ export class VTPassVendor extends BaseVendor {
         }
       }
       
+      // ✅ Extract electricity specific fields
+      const electricityData = {
+        token: vtpassResponse.token || token,
+        tokenAmount: vtpassResponse.tokenAmount,
+        exchangeReference: vtpassResponse.exchangeReference,
+        units: vtpassResponse.units,
+        tariff: vtpassResponse.tariff,
+        debtAmount: vtpassResponse.debtAmount,
+        customerName: vtpassResponse.customerName || transaction?.name || '',
+        customerAddress: vtpassResponse.customerAddress || '',
+        meterNumber: vtpassResponse.meterNumber || '',
+      };
+      
       return {
         success: true,
         data: {
@@ -337,14 +344,19 @@ export class VTPassVendor extends BaseVendor {
           token: token,
           tokens: tokens.length > 0 ? tokens : undefined,
           cards: cards.length > 0 ? cards : undefined,
-          customerName: transaction?.name || '',
-          customerAddress: '',
-          units: '',
+          customerName: electricityData.customerName,
+          customerAddress: electricityData.customerAddress,
+          units: electricityData.units || '',
           reference: vtpassResponse.requestId,
           responseDescription: vtpassResponse.response_description || 'TRANSACTION SUCCESSFUL',
           productName: transaction?.product_name,
           commission: transaction?.commission,
           totalAmount: transaction?.total_amount,
+          // ✅ Electricity specific fields
+          tokenAmount: electricityData.tokenAmount,
+          exchangeReference: electricityData.exchangeReference,
+          tariff: electricityData.tariff,
+          debtAmount: electricityData.debtAmount,
         },
         vendor: VtuVendor.VTPASS,
         vendorReference: vtpassResponse.requestId,
@@ -359,6 +371,12 @@ export class VTPassVendor extends BaseVendor {
           cards: cards,
           pin: token,
           environment: this.environment,
+          // ✅ Electricity specific metadata
+          tokenAmount: electricityData.tokenAmount,
+          exchangeReference: electricityData.exchangeReference,
+          units: electricityData.units,
+          tariff: electricityData.tariff,
+          debtAmount: electricityData.debtAmount,
         },
       };
     }
@@ -387,7 +405,6 @@ export class VTPassVendor extends BaseVendor {
     
     let endpoint = request.endpoint;
     
-    // Map to correct VTpass endpoints
     if (request.service === VtuType.AIRTIME || 
         request.service === VtuType.DATA || 
         request.service === VtuType.ELECTRICITY_INSTANT || 
@@ -401,7 +418,7 @@ export class VTPassVendor extends BaseVendor {
     } else if (request.endpoint.includes('service-categories') || request.endpoint === '/service-categories') {
       endpoint = '/service-categories';
     } else if (request.endpoint.includes('service-variations') || request.endpoint === '/service-variations') {
-      endpoint = request.endpoint; // Preserve query params
+      endpoint = request.endpoint;
     } else if (request.endpoint.includes('merchant-verify') || request.endpoint === '/merchant-verify') {
       endpoint = '/merchant-verify';
     }
@@ -417,12 +434,10 @@ export class VTPassVendor extends BaseVendor {
       
       let transformedData = request.data;
       
-      // ✅ Only transform for POST requests that are not merchant-verify
       if (request.method === 'POST' && request.data && Object.keys(request.data).length > 0) {
         if (!request.endpoint.includes('merchant-verify')) {
           transformedData = this.transformRequest(request);
         } else {
-          // For merchant-verify, use data as-is
           console.log(`🔍 [VTPassVendor] Using merchant-verify data as-is:`, request.data);
         }
       } else if (request.method === 'GET') {
@@ -537,7 +552,6 @@ export class VTPassVendor extends BaseVendor {
     });
   }
 
-  // ✅ Updated Education purchase with proper VTpass fields
   async buyEducation(request: any): Promise<VendorResponse> {
     console.log(`📚 [VTPassVendor] buyEducation called (${this.environment})`);
     console.log(`📚 [VTPassVendor] Request:`, request);
@@ -549,7 +563,6 @@ export class VTPassVendor extends BaseVendor {
     });
   }
 
-  // ✅ JAMB Profile verification
   async verifyJAMBProfile(profileId: string, variationCode: string): Promise<VendorResponse> {
     console.log(`📚 [VTPassVendor] Verifying JAMB Profile: ${profileId} (${this.environment})`);
     return this.makeRequest({
@@ -659,23 +672,109 @@ export class VTPassVendor extends BaseVendor {
     return serviceId;
   }
 
+  // ✅ FIXED: Complete Electricity Service ID Mapping
   private getElectricityServiceId(disco: string): string {
     if (!disco) {
       console.warn(`⚠️ [VTPassVendor] No disco provided for electricity, defaulting to 'ikeja-electric'`);
       return 'ikeja-electric';
     }
     
+    // ✅ Complete mapping with all variations
     const mapping: Record<string, string> = {
-      'ABUJA': 'abuja-electric',
-      'PHED': 'poredc-electric',
+      // Ikeja Electric (IKEDC)
       'IKEDC': 'ikeja-electric',
+      'IKEJA': 'ikeja-electric',
+      'IKEJA ELECTRIC': 'ikeja-electric',
+      'IKEJA ELECTRICITY': 'ikeja-electric',
+      'IKEJA ELECTRIC DISTRIBUTION COMPANY': 'ikeja-electric',
+      
+      // Eko Electric (EKEDC)
       'EKEDC': 'eko-electric',
+      'EKO': 'eko-electric',
+      'EKO ELECTRIC': 'eko-electric',
+      'EKO ELECTRICITY': 'eko-electric',
+      'EKO ELECTRIC DISTRIBUTION COMPANY': 'eko-electric',
+      
+      // Abuja Electricity (AEDC)
+      'AEDC': 'abuja-electric',
+      'ABUJA': 'abuja-electric',
+      'ABUJA ELECTRIC': 'abuja-electric',
+      'ABUJA ELECTRICITY': 'abuja-electric',
+      'ABUJA ELECTRIC DISTRIBUTION COMPANY': 'abuja-electric',
+      
+      // Port Harcourt Electric (PHED)
+      'PHED': 'portharcourt-electric',
+      'PORTHARCOURT': 'portharcourt-electric',
+      'PORTHARCOURT ELECTRIC': 'portharcourt-electric',
+      'PORTHARCOURT ELECTRICITY': 'portharcourt-electric',
+      'PORT HARCOURT': 'portharcourt-electric',
+      'PHCN': 'portharcourt-electric',
+      
+      // Jos Electric (JED)
+      'JED': 'jos-electric',
+      'JOS': 'jos-electric',
+      'JOS ELECTRIC': 'jos-electric',
+      'JOS ELECTRICITY': 'jos-electric',
+      'JOS ELECTRIC DISTRIBUTION COMPANY': 'jos-electric',
       'JEDPLC': 'jos-electric',
+      
+      // Kano Electric (KEDCO)
       'KEDCO': 'kano-electric',
+      'KANO': 'kano-electric',
+      'KANO ELECTRIC': 'kano-electric',
+      'KANO ELECTRICITY': 'kano-electric',
+      'KANO ELECTRIC DISTRIBUTION COMPANY': 'kano-electric',
+      
+      // Ibadan Electric (IBEDC)
+      'IBEDC': 'ibadan-electric',
+      'IBADAN': 'ibadan-electric',
+      'IBADAN ELECTRIC': 'ibadan-electric',
+      'IBADAN ELECTRICITY': 'ibadan-electric',
+      'IBADAN ELECTRIC DISTRIBUTION COMPANY': 'ibadan-electric',
+      
+      // Kaduna Electric (KAEDCO)
+      'KAEDCO': 'kaduna-electric',
+      'KADUNA': 'kaduna-electric',
+      'KADUNA ELECTRIC': 'kaduna-electric',
+      'KADUNA ELECTRICITY': 'kaduna-electric',
+      'KADUNA ELECTRIC DISTRIBUTION COMPANY': 'kaduna-electric',
+      
+      // Benin Electric (BEDC)
+      'BEDC': 'benin-electric',
+      'BENIN': 'benin-electric',
+      'BENIN ELECTRIC': 'benin-electric',
+      'BENIN ELECTRICITY': 'benin-electric',
+      'BENIN ELECTRIC DISTRIBUTION COMPANY': 'benin-electric',
+      
+      // Enugu Electric (EEDC)
+      'EEDC': 'enugu-electric',
+      'ENUGU': 'enugu-electric',
+      'ENUGU ELECTRIC': 'enugu-electric',
+      'ENUGU ELECTRICITY': 'enugu-electric',
+      'ENUGU ELECTRIC DISTRIBUTION COMPANY': 'enugu-electric',
     };
-    const serviceId = mapping[disco.toUpperCase()] || disco.toLowerCase();
-    console.log(`🔍 [VTPassVendor] Electricity service ID for ${disco}: ${serviceId}`);
-    return serviceId;
+    
+    const upperDisco = disco.toUpperCase().trim();
+    
+    // ✅ Try exact match first
+    let serviceId = mapping[upperDisco];
+    
+    if (serviceId) {
+      console.log(`🔍 [VTPassVendor] Electricity service ID for ${disco}: ${serviceId}`);
+      return serviceId;
+    }
+    
+    // ✅ Try partial match
+    for (const [key, value] of Object.entries(mapping)) {
+      if (key.includes(upperDisco) || upperDisco.includes(key)) {
+        console.log(`🔍 [VTPassVendor] Electricity service ID for ${disco} (partial match): ${value}`);
+        return value;
+      }
+    }
+    
+    // ✅ Default to Ikeja
+    console.warn(`⚠️ [VTPassVendor] Unknown disco: ${disco}, defaulting to 'ikeja-electric'`);
+    return 'ikeja-electric';
   }
 
   private getCableServiceId(provider: string): string {
@@ -735,6 +834,7 @@ export class VTPassVendor extends BaseVendor {
       '008': 'Duplicate transaction',
       '009': 'Transaction pending',
       '010': 'Invalid service',
+      '012': 'Product does not exist',
       '016': 'Transaction failed',
       '083': 'System error - please contact support',
       '100': 'Invalid API key or authentication failed',
@@ -757,17 +857,14 @@ export class VTPassVendor extends BaseVendor {
     return errorMap[code] || description || 'Transaction failed';
   }
 
-  // ✅ Get current environment
   getEnvironment(): string {
     return this.environment;
   }
 
-  // ✅ Check if using sandbox
   isSandbox(): boolean {
     return this.environment === 'sandbox';
   }
 
-  // ✅ Check if using live
   isLive(): boolean {
     return this.environment === 'live';
   }

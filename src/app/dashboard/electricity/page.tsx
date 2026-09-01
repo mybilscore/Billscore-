@@ -1,4 +1,4 @@
-// app/dashboard/buy/electricity/page.tsx
+// app/dashboard/buy/electricity/page.tsx - Complete updated with all DisCos
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
@@ -11,7 +11,8 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// ✅ BilalSada Native Discos - With correct display names
+// ✅ Complete BilalSada Native Discos - With correct discoId values (1-11)
+// Based on BilalSada's API documentation
 const BILAL_SADA_DISCOS = [
   {
     id: "ikeja",
@@ -38,16 +39,16 @@ const BILAL_SADA_DISCOS = [
     discoId: 2,
   },
   {
-    id: "kano",
-    name: "Kano Electric",
-    code: "KANO",
-    displayName: "Kano Electric (KEDCO)",
-    region: "Kano",
-    logo: "🔋",
-    color: "#008000",
-    meterTypes: ["Prepaid"],
-    serviceID: "kano-electric",
-    discoId: 3,
+    id: "abuja",
+    name: "Abuja Electricity",
+    code: "ABUJA",
+    displayName: "Abuja Electricity (AEDC)",
+    region: "FCT",
+    logo: "💡",
+    color: "#8B0000",
+    meterTypes: ["Prepaid", "Postpaid"],
+    serviceID: "abuja-electric",
+    discoId: 8,
   },
   {
     id: "portharcourt",
@@ -74,6 +75,18 @@ const BILAL_SADA_DISCOS = [
     discoId: 5,
   },
   {
+    id: "kano",
+    name: "Kano Electric",
+    code: "KANO",
+    displayName: "Kano Electric (KEDCO)",
+    region: "Kano",
+    logo: "🔋",
+    color: "#008000",
+    meterTypes: ["Prepaid"],
+    serviceID: "kano-electric",
+    discoId: 3,
+  },
+  {
     id: "ibadan",
     name: "Ibadan Electric",
     code: "IBADAN",
@@ -98,6 +111,47 @@ const BILAL_SADA_DISCOS = [
     discoId: 7,
   },
   {
+    id: "benin",
+    name: "Benin Electric",
+    code: "BENIN",
+    displayName: "Benin Electric (BEDC)",
+    region: "Edo",
+    logo: "⚡",
+    color: "#FF6B00",
+    meterTypes: ["Prepaid", "Postpaid"],
+    serviceID: "benin-electric",
+    discoId: 9,
+  },
+  {
+    id: "enugu",
+    name: "Enugu Electric",
+    code: "ENUGU",
+    displayName: "Enugu Electric (EEDC)",
+    region: "Enugu",
+    logo: "💡",
+    color: "#2E7D32",
+    meterTypes: ["Prepaid", "Postpaid"],
+    serviceID: "enugu-electric",
+    discoId: 10,
+  },
+  {
+    id: "yola",
+    name: "Yola Electric",
+    code: "YOLA",
+    displayName: "Yola Electric (YEDC)",
+    region: "Adamawa",
+    logo: "🔌",
+    color: "#4A148C",
+    meterTypes: ["Prepaid"],
+    serviceID: "yola-electric",
+    discoId: 11,
+  },
+];
+
+// ✅ Complete VTpass Discos - With all available DisCos
+// Based on VTpass documentation
+const VTPASS_DISCOS = [
+  {
     id: "abuja",
     name: "Abuja Electricity",
     code: "ABUJA",
@@ -107,23 +161,7 @@ const BILAL_SADA_DISCOS = [
     color: "#8B0000",
     meterTypes: ["Prepaid", "Postpaid"],
     serviceID: "abuja-electric",
-    discoId: 8,
-  },
-];
-
-// ✅ VTpass Discos - With correct display names
-const VTPASS_DISCOS = [
-  {
-    id: "ikeja",
-    name: "Ikeja Electric",
-    code: "IKEJA",
-    displayName: "Ikeja Electric (IE)",
-    region: "Lagos",
-    logo: "⚡",
-    color: "#FF6B00",
-    meterTypes: ["Prepaid", "Postpaid"],
-    serviceID: "ikeja-electric",
-    discoId: "ikeja-electric",
+    discoId: "abuja-electric",
   },
   {
     id: "eko",
@@ -138,16 +176,40 @@ const VTPASS_DISCOS = [
     discoId: "eko-electric",
   },
   {
-    id: "abuja",
-    name: "Abuja Electricity",
-    code: "ABUJA",
-    displayName: "Abuja Electricity (AEDC)",
-    region: "FCT",
-    logo: "💡",
-    color: "#8B0000",
+    id: "ikeja",
+    name: "Ikeja Electric",
+    code: "IKEJA",
+    displayName: "Ikeja Electric (IE)",
+    region: "Lagos",
+    logo: "⚡",
+    color: "#FF6B00",
     meterTypes: ["Prepaid", "Postpaid"],
-    serviceID: "abuja-electric",
-    discoId: "abuja-electric",
+    serviceID: "ikeja-electric",
+    discoId: "ikeja-electric",
+  },
+  {
+    id: "ibadan",
+    name: "Ibadan Electric",
+    code: "IBADAN",
+    displayName: "Ibadan Electric (IBEDC)",
+    region: "Oyo",
+    logo: "💡",
+    color: "#FF4500",
+    meterTypes: ["Prepaid"],
+    serviceID: "ibadan-electric",
+    discoId: "ibadan-electric",
+  },
+  {
+    id: "kaduna",
+    name: "Kaduna Electric",
+    code: "KADUNA",
+    displayName: "Kaduna Electric (KAEDCO)",
+    region: "Kaduna",
+    logo: "🔌",
+    color: "#4B0082",
+    meterTypes: ["Prepaid"],
+    serviceID: "kaduna-electric",
+    discoId: "kaduna-electric",
   },
   {
     id: "kano",
@@ -186,28 +248,40 @@ const VTPASS_DISCOS = [
     discoId: "jos-electric",
   },
   {
-    id: "ibadan",
-    name: "Ibadan Electric",
-    code: "IBADAN",
-    displayName: "Ibadan Electric (IBEDC)",
-    region: "Oyo",
-    logo: "💡",
-    color: "#FF4500",
-    meterTypes: ["Prepaid"],
-    serviceID: "ibadan-electric",
-    discoId: "ibadan-electric",
+    id: "benin",
+    name: "Benin Electric",
+    code: "BENIN",
+    displayName: "Benin Electric (BEDC)",
+    region: "Edo",
+    logo: "⚡",
+    color: "#FF6B00",
+    meterTypes: ["Prepaid", "Postpaid"],
+    serviceID: "benin-electric",
+    discoId: "benin-electric",
   },
   {
-    id: "kaduna",
-    name: "Kaduna Electric",
-    code: "KADUNA",
-    displayName: "Kaduna Electric (KAEDCO)",
-    region: "Kaduna",
+    id: "enugu",
+    name: "Enugu Electric",
+    code: "ENUGU",
+    displayName: "Enugu Electric (EEDC)",
+    region: "Enugu",
+    logo: "💡",
+    color: "#2E7D32",
+    meterTypes: ["Prepaid", "Postpaid"],
+    serviceID: "enugu-electric",
+    discoId: "enugu-electric",
+  },
+  {
+    id: "yola",
+    name: "Yola Electric",
+    code: "YOLA",
+    displayName: "Yola Electric (YEDC)",
+    region: "Adamawa",
     logo: "🔌",
-    color: "#4B0082",
+    color: "#4A148C",
     meterTypes: ["Prepaid"],
-    serviceID: "kaduna-electric",
-    discoId: "kaduna-electric",
+    serviceID: "yola-electric",
+    discoId: "yola-electric",
   },
 ];
 

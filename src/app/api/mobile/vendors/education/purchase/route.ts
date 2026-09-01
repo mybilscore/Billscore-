@@ -1,5 +1,5 @@
 // src/app/api/mobile/vendors/education/purchase/route.ts
-// FIXED - Better timeout handling with retry logic
+// UPDATED - User-friendly error messages
 
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "jsonwebtoken";
@@ -81,6 +81,53 @@ function formatCurrency(amount: number) {
     currency: "NGN",
     minimumFractionDigits: 0,
   }).format(amount);
+}
+
+// ✅ User-friendly error message mapper
+function getUserFriendlyError(error: any): string {
+  const message = typeof error === 'string' ? error : error?.message || '';
+  const lowerMessage = message.toLowerCase();
+
+  // Vendor balance errors
+  if (lowerMessage.includes('insufficient wallet balance') || 
+      lowerMessage.includes('insufficient balance') ||
+      lowerMessage.includes('wallet balance')) {
+    return 'The service provider is currently unable to process your request. Please try again later.';
+  }
+
+  // Authentication errors
+  if (lowerMessage.includes('token invalid') || 
+      lowerMessage.includes('authentication failed') ||
+      lowerMessage.includes('auth error') ||
+      lowerMessage.includes('unauthorized')) {
+    return 'Service provider authentication failed. Please try again later.';
+  }
+
+  // Network/connection errors
+  if (lowerMessage.includes('timeout') || 
+      lowerMessage.includes('network') ||
+      lowerMessage.includes('connection')) {
+    return 'Network timeout. Please check your connection and try again.';
+  }
+
+  // All vendors failed
+  if (lowerMessage.includes('all vendors failed') || 
+      lowerMessage.includes('no vendors available')) {
+    return 'All service providers are currently unavailable. Please try again later.';
+  }
+
+  // Service specific errors
+  if (lowerMessage.includes('does not support')) {
+    return 'This service is currently not available. Please try another option.';
+  }
+
+  // JAMB specific
+  if (lowerMessage.includes('jamb') || lowerMessage.includes('profile')) {
+    return 'Unable to verify JAMB profile. Please check your Profile ID and try again.';
+  }
+
+  // Default fallback - generic friendly message
+  return 'Unable to complete your purchase at this time. Please try again later.';
 }
 
 // ============================================================
@@ -279,6 +326,11 @@ export async function POST(request: NextRequest) {
     // 2. Parse request body
     const body = await request.json();
     const { serviceId, variationCode, amount, quantity, phone, billersCode, pin } = body;
+
+    // ============================================================
+    // STATIC CHANNEL - Always MOBILE_APP for mobile routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "MOBILE_APP";
 
     // 3. Validate request
     if (!serviceId) {
@@ -507,7 +559,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // 7. CREATE TRANSACTION RECORD
+    // 7. CREATE TRANSACTION RECORD - channelDisplay = "MOBILE_APP"
     // ============================================================
 
     const transaction = await prisma.vtuTransaction.create({
@@ -522,6 +574,7 @@ export async function POST(request: NextRequest) {
         networkPlan: variationCode,
         status: TransactionStatus.PENDING,
         channel: ChannelType.MOBILE_APP,
+        channelDisplay: CHANNEL_DISPLAY,
         isBulkPurchase: quantity > 1,
         bulkQuantity: quantity > 1 ? quantity : undefined,
         metadata: {
@@ -532,12 +585,14 @@ export async function POST(request: NextRequest) {
           billersCode: billersCode,
           pinVerified: true,
           wasDebited: false,
+          channel: "MOBILE_APP",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
 
     // ============================================================
-    // 8. VENDOR PURCHASE - NO TIMEOUT FOR SANDBOX
+    // 8. VENDOR PURCHASE
     // ============================================================
 
     let vendorId: string | null = null;
@@ -569,7 +624,6 @@ export async function POST(request: NextRequest) {
       }
 
       // 🔥 For sandbox, don't use timeout - let it complete naturally
-      // For production, you can add a timeout
       const isSandbox = process.env.VT_PASS_ENV === 'sandbox' || !process.env.VT_PASS_ENV;
       
       let result;
@@ -686,6 +740,7 @@ export async function POST(request: NextRequest) {
             netProfit: (vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0,
             totalCommission: (vendorCommission || 0) + ((vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0),
             effectiveRate: finalAmount > 0 ? ((vendorCommission || 0) / finalAmount) * 100 : 0,
+            channelDisplay: CHANNEL_DISPLAY,
             metadata: {
               ...transaction.metadata,
               vendorName: result.vendor,
@@ -705,6 +760,8 @@ export async function POST(request: NextRequest) {
                 commissionRate,
                 platformProfit: (vendorTotalAmount !== null) ? finalAmount - vendorTotalAmount : 0,
               },
+              channel: "MOBILE_APP",
+              channelDisplay: CHANNEL_DISPLAY,
             },
           },
         }),
@@ -791,6 +848,7 @@ export async function POST(request: NextRequest) {
           token: token,
           tokens: tokens,
           cards: cards,
+          channel: CHANNEL_DISPLAY,
           commission: {
             vendorCommission,
             vendorTotalAmount,
@@ -802,6 +860,16 @@ export async function POST(request: NextRequest) {
       });
 
     } catch (vendorError: any) {
+      // ✅ Extract the original error message for logging
+      const originalError = vendorError.message || 'Unknown vendor error';
+      log('error', 'Mobile education purchase failed', originalError);
+      
+      // ✅ Get user-friendly error message
+      const userFriendlyError = getUserFriendlyError(vendorError);
+      
+      // Log the mapping for debugging
+      log('info', `Mapped error: "${originalError}" -> "${userFriendlyError}"`);
+
       // Vendor failed - no debit occurred
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
@@ -810,11 +878,15 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           vendorId: vendorId || undefined,
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
-            error: vendorError.message,
+            error: originalError,
+            userFriendlyError: userFriendlyError,
             failedAt: new Date().toISOString(),
             wasDebited: false,
+            channel: "MOBILE_APP",
+            channelDisplay: CHANNEL_DISPLAY,
           },
         },
       });
@@ -831,7 +903,7 @@ export async function POST(request: NextRequest) {
           phoneNumber: phone || user.phone,
           planName: variationCode,
           status: TransactionStatus.FAILED,
-          notes: `Failed: ${vendorError.message}`,
+          notes: `Failed: ${userFriendlyError}`,
           metadata: {
             serviceId: serviceId,
             variationCode: variationCode,
@@ -839,6 +911,8 @@ export async function POST(request: NextRequest) {
             billersCode: billersCode,
             source: "MobileEducationAPI",
             wasDebited: false,
+            originalError: originalError,
+            userFriendlyError: userFriendlyError,
           },
         },
       });
@@ -851,20 +925,23 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      log('error', 'Mobile education purchase failed', vendorError.message);
-
+      // ✅ Return user-friendly error to the mobile app
       return NextResponse.json({
         success: false,
-        error: vendorError.message || "Failed to purchase education pin",
+        error: userFriendlyError,
         transactionId: transaction.id,
       }, { status: 500 });
     }
 
   } catch (error: any) {
     log('error', 'Top-level error', error.message);
+    
+    // ✅ Get user-friendly error for unexpected errors
+    const userFriendlyError = getUserFriendlyError(error);
+    
     return NextResponse.json({
       success: false,
-      error: error.message || "Failed to purchase education pin",
+      error: userFriendlyError,
     }, { status: 500 });
   }
 }

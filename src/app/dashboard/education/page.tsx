@@ -1,4 +1,4 @@
-// app/dashboard/buy/education/page.tsx
+// app/dashboard/buy/education/page.tsx - Updated to get actual variation codes from VTpass
 
 import { requireAuth } from "~/lib/auth";
 import { prisma } from "~/lib/db";
@@ -10,31 +10,42 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// ✅ Fetch Education Products dynamically from VTpass API
+// ✅ Fetch Education Products dynamically from VTpass API with correct variation codes
 async function fetchEducationProductsFromVTpass(): Promise<any[]> {
   try {
     const isProduction = process.env.NODE_ENV === "production";
     const baseUrl = isProduction 
-      ? "https://vtpass.com/api/service-categories"
-      : "https://sandbox.vtpass.com/api/service-categories";
+      ? "https://vtpass.com/api"
+      : "https://sandbox.vtpass.com/api";
     
-    const response = await fetch(baseUrl, {
+    const apiKey = process.env.VTPASS_SANDBOX_API_KEY || process.env.VTPASS_LIVE_API_KEY;
+    const secretKey = process.env.VTPASS_SANDBOX_SECRET_KEY || process.env.VTPASS_LIVE_SECRET_KEY;
+    const publicKey = process.env.VTPASS_SANDBOX_PUBLIC_KEY || process.env.VTPASS_LIVE_PUBLIC_KEY;
+    
+    // ✅ Fetch service categories
+    const categoriesUrl = `${baseUrl}/service-categories`;
+    console.log(`📡 [EDUCATION] Fetching service categories from: ${categoriesUrl}`);
+    
+    const categoriesResponse = await fetch(categoriesUrl, {
       headers: {
+        "api-key": apiKey || '',
+        "secret-key": secretKey || '',
+        "public-key": publicKey || '',
         "Content-Type": "application/json",
       },
     });
 
-    if (!response.ok) {
-      console.warn(`Failed to fetch service categories: ${response.status}`);
+    if (!categoriesResponse.ok) {
+      console.warn(`Failed to fetch service categories: ${categoriesResponse.status}`);
       return getFallbackEducationProducts();
     }
 
-    const data = await response.json();
+    const categoriesData = await categoriesResponse.json();
     
-    if (data.response_description === "000" && data.content) {
+    if (categoriesData.response_description === "000" && categoriesData.content) {
       // Find education category
-      const educationCategory = data.content.find(
-        (cat: any) => cat.identifier === "education"
+      const educationCategory = categoriesData.content.find(
+        (cat: any) => cat.identifier === "education" || cat.name?.toLowerCase().includes("education")
       );
       
       if (!educationCategory) {
@@ -42,13 +53,15 @@ async function fetchEducationProductsFromVTpass(): Promise<any[]> {
         return getFallbackEducationProducts();
       }
 
-      const isProductionServices = process.env.NODE_ENV === "production";
-      const servicesUrl = isProductionServices
-        ? "https://vtpass.com/api/services?identifier=education"
-        : "https://sandbox.vtpass.com/api/services?identifier=education";
+      // ✅ Fetch services in education category
+      const servicesUrl = `${baseUrl}/services?identifier=education`;
+      console.log(`📡 [EDUCATION] Fetching education services from: ${servicesUrl}`);
       
       const servicesResponse = await fetch(servicesUrl, {
         headers: {
+          "api-key": apiKey || '',
+          "secret-key": secretKey || '',
+          "public-key": publicKey || '',
           "Content-Type": "application/json",
         },
       });
@@ -61,25 +74,33 @@ async function fetchEducationProductsFromVTpass(): Promise<any[]> {
       const servicesData = await servicesResponse.json();
       
       if (servicesData.response_description === "000" && servicesData.content) {
-        // Fetch variations for each education product
         const products = [];
         
+        // ✅ Fetch variations for each education product
         for (const service of servicesData.content) {
-          const variationResponse = await fetch(
-            `${isProductionServices ? "https://vtpass.com" : "https://sandbox.vtpass.com"}/api/service-variations?serviceID=${service.serviceID}`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-              },
-            }
-          );
+          // ✅ Skip if service is not a valid education product
+          if (!service.serviceID || service.serviceID === 'bulk' || service.serviceID === 'test') {
+            continue;
+          }
+          
+          const variationUrl = `${baseUrl}/service-variations?serviceID=${service.serviceID}`;
+          console.log(`📡 [EDUCATION] Fetching variations for ${service.serviceID} from: ${variationUrl}`);
+          
+          const variationResponse = await fetch(variationUrl, {
+            headers: {
+              "api-key": apiKey || '',
+              "secret-key": secretKey || '',
+              "public-key": publicKey || '',
+              "Content-Type": "application/json",
+            },
+          });
 
           if (variationResponse.ok) {
             const variationData = await variationResponse.json();
             if (variationData.response_description === "000" && variationData.content?.variations) {
               const variations = variationData.content.variations.map((v: any) => ({
                 id: v.variation_code,
-                name: v.name,
+                name: v.name || v.variation_code,
                 price: parseFloat(v.variation_amount) || 0,
                 packageCode: v.variation_code,
                 serviceID: service.serviceID,
@@ -93,19 +114,21 @@ async function fetchEducationProductsFromVTpass(): Promise<any[]> {
               if (validVariations.length > 0) {
                 products.push({
                   id: service.serviceID,
-                  name: this.formatProductName(service.name || service.serviceID),
+                  name: formatProductName(service.name || service.serviceID),
                   serviceId: service.serviceID,
                   variations: validVariations,
-                  // ✅ For JAMB, mark that it requires profile verification
                   requiresProfileVerification: service.serviceID === 'jamb',
                 });
+                console.log(`✅ [EDUCATION] Added ${service.serviceID} with ${validVariations.length} variations`);
               }
             }
           }
         }
 
-        console.log(`✅ [VTpass] Fetched ${products.length} education products from API`);
-        return products;
+        if (products.length > 0) {
+          console.log(`✅ [EDUCATION] Fetched ${products.length} education products from API`);
+          return products;
+        }
       }
     }
 
@@ -137,33 +160,19 @@ function formatProductName(name: string): string {
   return nameMap[cleanName] || cleanName;
 }
 
-// ✅ Fallback Education Products
+// ✅ Fallback Education Products with correct VTpass variation codes
 function getFallbackEducationProducts() {
   return [
-    {
-      id: "waec-registration",
-      name: "WAEC Registration",
-      serviceId: "waec-registration",
-      variations: [
-        { 
-          id: "waec-registration", 
-          name: "WASSCE Registration PIN", 
-          price: 14450, 
-          packageCode: "waec-registration" 
-        },
-      ],
-      requiresProfileVerification: false,
-    },
     {
       id: "waec",
       name: "WAEC Result Checker",
       serviceId: "waec",
       variations: [
         { 
-          id: "waecdirect", 
+          id: "waec", 
           name: "WAEC Result Checker PIN", 
           price: 900, 
-          packageCode: "waecdirect" 
+          packageCode: "waec" 
         },
       ],
       requiresProfileVerification: false,
@@ -174,16 +183,16 @@ function getFallbackEducationProducts() {
       serviceId: "jamb",
       variations: [
         { 
-          id: "utme-mock", 
-          name: "UTME PIN (with mock)", 
-          price: 7700, 
-          packageCode: "utme-mock" 
+          id: "jamb", 
+          name: "JAMB UTME PIN (without mock)", 
+          price: 6200, 
+          packageCode: "jamb" 
         },
         { 
-          id: "utme-no-mock", 
-          name: "UTME PIN (without mock)", 
-          price: 6200, 
-          packageCode: "utme-no-mock" 
+          id: "jamb-mock", 
+          name: "JAMB UTME PIN (with mock)", 
+          price: 7700, 
+          packageCode: "jamb-mock" 
         },
       ],
       requiresProfileVerification: true,
@@ -210,13 +219,6 @@ export default async function EducationPage() {
     return null;
   }
 
-  console.log(`✅ [EDUCATION] User found: ${user.id}`);
-  console.log(`📋 [EDUCATION] User hasWallet flag: ${user.hasWallet}`);
-
-  if (user.wallet) {
-    console.log(`💰 [EDUCATION] Wallet found - Balance: ${user.wallet.walletBalance}`);
-  }
-
   // Safely get wallet data with Decimal conversion
   let walletBalance = 0;
   let hasWallet = false;
@@ -230,37 +232,6 @@ export default async function EducationPage() {
     accountNumber = user.wallet.accountNumber || "";
     bankName = user.wallet.bankName || "PALMPAY";
     accountName = user.wallet.accountName || user.fullName;
-  } else if (user.hasWallet) {
-    try {
-      const newWallet = await prisma.wallet.create({
-        data: {
-          userId: user.id,
-          accountNumber: generateVirtualAccountNumber(),
-          bankName: "PALMPAY",
-          accountName: user.fullName,
-          walletBalance: 0,
-          ledgerBalance: 0,
-          currency: "NGN",
-          isActive: true,
-          kycLevel: 1,
-        },
-      });
-      
-      hasWallet = true;
-      walletBalance = 0;
-      accountNumber = newWallet.accountNumber;
-      bankName = newWallet.bankName;
-      accountName = newWallet.accountName;
-      
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { hasWallet: true },
-      });
-    } catch (error) {
-      console.error("❌ Failed to create wallet:", error);
-      hasWallet = false;
-      walletBalance = 0;
-    }
   } else {
     try {
       const newWallet = await prisma.wallet.create({

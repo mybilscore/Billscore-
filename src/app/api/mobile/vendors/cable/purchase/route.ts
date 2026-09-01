@@ -1,11 +1,12 @@
 // src/app/api/mobile/vendors/cable/purchase/route.ts
+// UPDATED VERSION - With customer info saving and channelDisplay
 
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "jsonwebtoken";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
 import { CacheService } from "~/lib/cache/cache.service";
-import { TransactionStatus, VtuType, CustomerType, VtuVendor } from "@prisma/client";
+import { TransactionStatus, VtuType, CustomerType, VtuVendor, ChannelType } from "@prisma/client";
 import { compare } from "bcrypt";
 
 const JWT_SECRET = process.env.MOBILE_JWT_SECRET || process.env.AUTH_SECRET || "your-secret-key";
@@ -59,6 +60,68 @@ async function authenticateMobile(request: NextRequest) {
 }
 
 // ============================================================
+// SAVE DECODER HELPER (UPDATED WITH COMPLETE INFO)
+// ============================================================
+
+async function saveDecoderAsync(
+  userId: string, 
+  decoderNumber: string, 
+  provider: string, 
+  packageCode: string,
+  customerName?: string,
+  customerAddress?: string,
+  customerPhone?: string,
+  customerEmail?: string,
+  decoderStatus?: string,
+  lastVerified?: Date
+) {
+  try {
+    const existing = await prisma.savedDecoder.findFirst({
+      where: { userId, decoderNumber },
+    });
+
+    const data = {
+      userId,
+      decoderNumber,
+      provider: provider,
+      name: `${provider} Decoder`,
+      package: packageCode || "Standard",
+      customerName: customerName || null,
+      customerAddress: customerAddress || null,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      decoderStatus: decoderStatus || null,
+      lastVerified: lastVerified || new Date(),
+      isDefault: existing?.isDefault || false,
+    };
+
+    if (existing) {
+      await prisma.savedDecoder.update({
+        where: { id: existing.id },
+        data: {
+          provider,
+          package: packageCode || "Standard",
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          decoderStatus: decoderStatus || existing.decoderStatus,
+          lastVerified: lastVerified || new Date(),
+        },
+      });
+      console.log(`✅ [MOBILE CABLE API] Decoder updated with customer info: ${decoderNumber}`);
+    } else {
+      await prisma.savedDecoder.create({ data });
+      console.log(`✅ [MOBILE CABLE API] Decoder saved with customer info: ${decoderNumber}`);
+    }
+
+    await CacheService.invalidateSavedDecoders(userId).catch(() => {});
+  } catch (error) {
+    console.error('❌ [MOBILE CABLE API] Failed to save decoder:', error);
+  }
+}
+
+// ============================================================
 // HELPER FUNCTIONS FOR ERROR HANDLING
 // ============================================================
 
@@ -89,6 +152,8 @@ async function handleMobileCableVendorFailure(
         increment: 1,
       },
       failedVendors: result.vendorErrors || [],
+      channel: ChannelType.MOBILE_APP,
+      channelDisplay: "MOBILE_APP",
       metadata: {
         ...transaction.metadata,
         error: result.error,
@@ -101,6 +166,8 @@ async function handleMobileCableVendorFailure(
         vendorAttempts: result.attempts || 1,
         responseData: result.data || null,
         source: "MobileCableAPI",
+        channel: "MOBILE_APP",
+        channelDisplay: "MOBILE_APP",
       },
     },
   });
@@ -213,6 +280,8 @@ async function handleMobileCableUnexpectedError(
         fallbackAttempts: {
           increment: 1,
         },
+        channel: ChannelType.MOBILE_APP,
+        channelDisplay: "MOBILE_APP",
         metadata: {
           ...transaction.metadata,
           error: error.message || "Unknown error",
@@ -223,6 +292,8 @@ async function handleMobileCableUnexpectedError(
           errorCode: error.code || null,
           vendor: errorVendor || null,
           source: "MobileCableAPI",
+          channel: "MOBILE_APP",
+          channelDisplay: "MOBILE_APP",
         },
       },
     });
@@ -354,6 +425,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // ============================================================
+    // STATIC CHANNEL - Always MOBILE_APP for mobile routes
+    // ============================================================
+    const CHANNEL_DISPLAY = "MOBILE_APP";
+
     // ✅ 4. Get user with cache
     let user = await CacheService.getUser(userId);
     
@@ -415,7 +491,8 @@ export async function POST(request: NextRequest) {
         network: null,
         networkPlan: packageCode,
         status: TransactionStatus.PENDING,
-        channel: "MOBILE_APP",
+        channel: ChannelType.MOBILE_APP,
+        channelDisplay: CHANNEL_DISPLAY,
         metadata: {
           source: "MobileCableAPI",
           service: "CABLE_TV",
@@ -424,8 +501,10 @@ export async function POST(request: NextRequest) {
           packageCode: packageCode,
           smartCardNumber: smartCardNumber,
           customerId: customer.id,
-          pinVerified: false, // Not yet verified
+          pinVerified: false,
           attemptStage: "INITIALIZED",
+          channel: "MOBILE_APP",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
@@ -444,6 +523,7 @@ export async function POST(request: NextRequest) {
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
             pinVerified: false,
@@ -452,6 +532,8 @@ export async function POST(request: NextRequest) {
             failedAt: new Date().toISOString(),
             remainingMinutes: remainingMinutes,
             source: "MobileCableAPI",
+            channel: "MOBILE_APP",
+            channelDisplay: CHANNEL_DISPLAY,
           },
         },
       });
@@ -497,6 +579,7 @@ export async function POST(request: NextRequest) {
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
             pinVerified: false,
@@ -504,6 +587,8 @@ export async function POST(request: NextRequest) {
             error: "Transaction PIN not set",
             failedAt: new Date().toISOString(),
             source: "MobileCableAPI",
+            channel: "MOBILE_APP",
+            channelDisplay: CHANNEL_DISPLAY,
           },
         },
       });
@@ -575,6 +660,7 @@ export async function POST(request: NextRequest) {
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
             pinVerified: false,
@@ -584,6 +670,8 @@ export async function POST(request: NextRequest) {
             error: errorMessage,
             failedAt: new Date().toISOString(),
             source: "MobileCableAPI",
+            channel: "MOBILE_APP",
+            channelDisplay: CHANNEL_DISPLAY,
           },
         },
       });
@@ -633,6 +721,8 @@ export async function POST(request: NextRequest) {
           pinVerified: true,
           pinVerifiedAt: new Date().toISOString(),
           source: "MobileCableAPI",
+          channel: "MOBILE_APP",
+          channelDisplay: CHANNEL_DISPLAY,
         },
       },
     });
@@ -653,6 +743,7 @@ export async function POST(request: NextRequest) {
         where: { id: transaction.id },
         data: {
           status: TransactionStatus.FAILED,
+          channelDisplay: CHANNEL_DISPLAY,
           metadata: {
             ...transaction.metadata,
             pinVerified: true,
@@ -662,6 +753,8 @@ export async function POST(request: NextRequest) {
             error: `Insufficient balance. Available: ₦${walletBalance.toFixed(2)}, Required: ₦${amount.toFixed(2)}`,
             failedAt: new Date().toISOString(),
             source: "MobileCableAPI",
+            channel: "MOBILE_APP",
+            channelDisplay: CHANNEL_DISPLAY,
           },
         },
       });
@@ -707,35 +800,15 @@ export async function POST(request: NextRequest) {
 
     let vendorId: string | null = null;
     let vendorEnum: VtuVendor | null = null;
-
-    // Save decoder to saved decoders (async, don't wait)
-    const saveDecoderPromise = (async () => {
-      try {
-        const existingDecoder = await prisma.savedDecoder.findFirst({
-          where: {
-            userId: user.id,
-            decoderNumber: smartCardNumber,
-          },
-        });
-
-        if (!existingDecoder) {
-          await prisma.savedDecoder.create({
-            data: {
-              userId: user.id,
-              decoderNumber: smartCardNumber,
-              provider: provider,
-              name: `${provider} Decoder`,
-              package: packageCode,
-              isDefault: false,
-            },
-          });
-          await CacheService.invalidateSavedDecoders(user.id);
-          console.log(`✅ [MOBILE CABLE API] Saved decoder: ${smartCardNumber}`);
-        }
-      } catch (saveError) {
-        console.error("❌ [MOBILE CABLE API] Failed to save decoder:", saveError);
-      }
-    })();
+    let vendorCommission: number | null = null;
+    let vendorTotalAmount: number | null = null;
+    let commissionRate: number | null = null;
+    let commissionType: string | null = null;
+    let commissionDetails: any = null;
+    let costPrice: number | null = null;
+    let grossProfit: number | null = null;
+    let profitMargin: number | null = null;
+    let platformCommission: number | null = null;
 
     try {
       // 8. Vendor call
@@ -755,6 +828,23 @@ export async function POST(request: NextRequest) {
       );
 
       console.log(`⏱️ [MOBILE CABLE API] Vendor call took ${Date.now() - vendorStart}ms`);
+
+      // Extract commission data
+      if (result.data) {
+        vendorCommission = result.data.commission || null;
+        vendorTotalAmount = result.data.totalAmount || null;
+        
+        if (result.metadata?.commissionDetails) {
+          commissionDetails = result.metadata.commissionDetails;
+          commissionRate = commissionDetails.rate ? parseFloat(commissionDetails.rate) : null;
+          commissionType = commissionDetails.rate_type || null;
+        }
+        
+        costPrice = vendorTotalAmount ?? amount;
+        grossProfit = amount - costPrice;
+        profitMargin = amount > 0 ? (grossProfit / amount) * 100 : 0;
+        platformCommission = grossProfit;
+      }
 
       console.log(`📊 [MOBILE CABLE API] Vendor result:`, {
         success: result.success,
@@ -796,6 +886,51 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // ============================================================
+        // ✅ EXTRACT AND SAVE CUSTOMER INFO
+        // ============================================================
+        
+        // Extract customer info from vendor response
+        const customerName = result.data?.customerName || 
+                             result.data?.Customer_Name || 
+                             result.data?.customer?.name || 
+                             null;
+        
+        const customerAddress = result.data?.customerAddress || 
+                                result.data?.Address || 
+                                result.data?.customer?.address || 
+                                null;
+        
+        const customerPhoneFromVendor = result.data?.customerPhone || 
+                                        result.data?.phone || 
+                                        result.data?.customer?.phone || 
+                                        null;
+        
+        const customerEmailFromVendor = result.data?.customerEmail || 
+                                        result.data?.email || 
+                                        result.data?.customer?.email || 
+                                        null;
+        
+        const decoderStatus = result.data?.status || 
+                              result.data?.Status || 
+                              "ACTIVE";
+
+        // Save decoder with complete information (non-blocking)
+        saveDecoderAsync(
+          user.id, 
+          smartCardNumber, 
+          provider, 
+          packageCode || 'STANDARD',
+          customerName,
+          customerAddress,
+          customerPhoneFromVendor,
+          customerEmailFromVendor,
+          decoderStatus,
+          new Date()
+        ).catch(() => {});
+
+        console.log(`📝 [MOBILE CABLE API] Customer data saved for decoder ${smartCardNumber}: ${customerName || 'No name'}`);
+
         // 10. Deduct from wallet, complete transaction, and create customer transaction
         const dbStart = Date.now();
         await prisma.$transaction([
@@ -825,11 +960,27 @@ export async function POST(request: NextRequest) {
             where: { id: transaction.id },
             data: {
               status: TransactionStatus.SUCCESS,
+              totalDebited: amount,
               vendorReference: result.vendorReference,
               vendorId: vendorId || undefined,
               vendor: vendorEnum,
               token: result.data?.token,
               deliveredAt: new Date(),
+              vendorCommission: vendorCommission,
+              vendorTotalAmount: vendorTotalAmount,
+              commissionRate: commissionRate,
+              commissionType: commissionType,
+              commissionMetadata: commissionDetails,
+              costPrice: costPrice,
+              sellingPrice: amount,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
+              platformCommission: platformCommission,
+              platformTotalAmount: amount,
+              netProfit: grossProfit,
+              totalCommission: (vendorCommission || 0) + (platformCommission || 0),
+              effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
+              channelDisplay: CHANNEL_DISPLAY,
               metadata: {
                 ...transaction.metadata,
                 vendorResponse: result.data,
@@ -838,10 +989,31 @@ export async function POST(request: NextRequest) {
                 vendorSwitched: result.vendorSwitched,
                 switchedFrom: result.switchedFrom,
                 responseDescription: result.data?.responseDescription,
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  commissionDetails: commissionDetails,
+                  platformCommission: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                  costPrice: costPrice,
+                  sellingPrice: amount,
+                },
                 success: true,
                 pinVerified: true,
                 completedAt: new Date().toISOString(),
                 source: "MobileCableAPI",
+                channel: "MOBILE_APP",
+                channelDisplay: CHANNEL_DISPLAY,
+                customerInfo: {
+                  name: customerName,
+                  address: customerAddress,
+                  phone: customerPhoneFromVendor,
+                  email: customerEmailFromVendor,
+                  status: decoderStatus,
+                },
               },
             },
           }),
@@ -858,6 +1030,10 @@ export async function POST(request: NextRequest) {
               network: null,
               planName: packageCode,
               status: TransactionStatus.SUCCESS,
+              commissionAmount: vendorCommission || 0,
+              commissionRate: commissionRate || 0,
+              commissionPaid: true,
+              commissionPaidAt: new Date(),
               metadata: {
                 vendorName: result.vendor || 'unknown',
                 vendorReference: result.vendorReference || '',
@@ -868,14 +1044,27 @@ export async function POST(request: NextRequest) {
                 provider: provider,
                 completedAt: new Date().toISOString(),
                 source: "MobileCableAPI",
+                commission: {
+                  vendorCommission,
+                  vendorTotalAmount,
+                  commissionRate,
+                  commissionType,
+                  platformProfit: platformCommission,
+                  grossProfit: grossProfit,
+                  profitMargin: profitMargin,
+                },
+                customerInfo: {
+                  name: customerName,
+                  address: customerAddress,
+                  phone: customerPhoneFromVendor,
+                  email: customerEmailFromVendor,
+                  status: decoderStatus,
+                },
               },
             },
           }),
         ]);
         console.log(`⏱️ [MOBILE CABLE API] Database transaction took ${Date.now() - dbStart}ms`);
-
-        // Wait for decoder save to complete
-        await saveDecoderPromise;
 
         // ✅ Invalidate cache
         await Promise.all([
@@ -904,6 +1093,22 @@ export async function POST(request: NextRequest) {
             vendorSwitched: result.vendorSwitched,
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
+            channel: CHANNEL_DISPLAY,
+            commission: {
+              vendorCommission: vendorCommission,
+              vendorTotalAmount: vendorTotalAmount,
+              commissionRate: commissionRate,
+              platformProfit: platformCommission,
+              grossProfit: grossProfit,
+              profitMargin: profitMargin,
+            },
+            customerInfo: {
+              name: customerName,
+              address: customerAddress,
+              phone: customerPhoneFromVendor,
+              email: customerEmailFromVendor,
+              status: decoderStatus,
+            },
             ...result.data,
           },
         });
