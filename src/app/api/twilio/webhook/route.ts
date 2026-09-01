@@ -1,4 +1,4 @@
-// app/api/twilio/webhook/route.ts - COMPLETE WITH ALL FUNCTIONS
+// app/api/twilio/webhook/route.ts - COMPLETE UPDATED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -537,9 +537,8 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 }
 
 // ============================================================
-// GET AVAILABLE PLANS FOR NETWORK
+// GET AVAILABLE PLANS FOR NETWORK - FIXED
 // ============================================================
-
 
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
   try {
@@ -578,10 +577,17 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     let index = 1;
     let foundPlans = false;
 
-    // ✅ Check if we have valid data
     if (result.success && result.data) {
-      // ✅ Get plans array from response
       let plansData = result.data.plans || result.data.networks || [];
+      
+      if (!Array.isArray(plansData) && typeof plansData === 'object') {
+        for (const key of Object.keys(result.data)) {
+          if (Array.isArray(result.data[key]) && result.data[key].length > 0) {
+            plansData = result.data[key];
+            break;
+          }
+        }
+      }
       
       if (!Array.isArray(plansData) || plansData.length === 0) {
         console.log(`[Data Plans] No plans found in response`);
@@ -590,61 +596,60 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
 
       console.log(`[Data Plans] Found ${plansData.length} providers`);
 
-      // ✅ Find the network provider
       const networkUpper = network.toUpperCase();
       let networkProvider = plansData.find((p: any) => {
-        const name = (p.name || '').toUpperCase();
-        return name === networkUpper || name.includes(networkUpper);
+        const name = (p.name || p.provider || p.network || '').toUpperCase();
+        return name === networkUpper || name.includes(networkUpper) || networkUpper.includes(name);
       });
 
-      // ✅ If not found, try first provider with categories
       if (!networkProvider) {
         networkProvider = plansData.find((p: any) => {
           return p.categories && Array.isArray(p.categories) && p.categories.length > 0;
         });
-        console.log(`[Data Plans] Using first provider with categories: ${networkProvider?.name || 'Unknown'}`);
+      }
+
+      if (!networkProvider && plansData.length > 0) {
+        networkProvider = plansData[0];
       }
 
       if (networkProvider) {
-        const providerName = networkProvider.name || network;
-        const categories = networkProvider.categories || [];
+        const providerName = networkProvider.name || networkProvider.provider || networkProvider.network || network;
         
-        // ✅ Collect all plans from all categories
         let allPlans: any[] = [];
         
-        for (const category of categories) {
-          const categoryPlans = category.plans || [];
-          for (const plan of categoryPlans) {
-            if (plan.price && Number(plan.price) > 0) {
-              allPlans.push({
-                data: plan.data || plan.name || `${plan.amountMB || 0}MB`,
-                price: Number(plan.price),
-                validity: plan.validity || '30 days',
-                planCode: plan.planCode || plan.id || plan.data,
-                amountMB: plan.amountMB || 0,
-                category: category.name || 'Monthly',
-              });
+        if (networkProvider.categories && Array.isArray(networkProvider.categories)) {
+          for (const category of networkProvider.categories) {
+            const categoryPlans = category.plans || [];
+            for (const plan of categoryPlans) {
+              if (plan.price && Number(plan.price) > 0) {
+                allPlans.push({
+                  data: plan.data || plan.name || `${plan.amountMB || 0}MB`,
+                  price: Number(plan.price),
+                  validity: plan.validity || plan.duration || '30 days',
+                  planCode: plan.planCode || plan.code || plan.id || plan.data,
+                  amountMB: plan.amountMB || 0,
+                  category: category.name || 'Monthly',
+                });
+              }
             }
           }
         }
 
-        // ✅ If no plans in categories, try direct plans array
-        if (allPlans.length === 0 && networkProvider.plans) {
+        if (allPlans.length === 0 && networkProvider.plans && Array.isArray(networkProvider.plans)) {
           for (const plan of networkProvider.plans) {
             if (plan.price && Number(plan.price) > 0) {
               allPlans.push({
                 data: plan.data || plan.name || `${plan.amountMB || 0}MB`,
                 price: Number(plan.price),
-                validity: plan.validity || '30 days',
-                planCode: plan.planCode || plan.id || plan.data,
+                validity: plan.validity || plan.duration || '30 days',
+                planCode: plan.planCode || plan.code || plan.id || plan.data,
                 amountMB: plan.amountMB || 0,
-                category: 'Monthly',
+                category: plan.category || 'Monthly',
               });
             }
           }
         }
 
-        // ✅ Sort plans by price
         allPlans.sort((a, b) => a.price - b.price);
 
         if (allPlans.length > 0) {
@@ -654,7 +659,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
           allPlans.forEach((plan) => {
             const priceDisplay = `NGN ${plan.price.toFixed(0)}`;
             const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
-            const categoryDisplay = plan.category ? `[${plan.category}] ` : '';
+            const categoryDisplay = plan.category && plan.category !== 'Monthly' ? `[${plan.category}] ` : '';
             
             planMap.set(index, {
               planData: {
@@ -675,16 +680,13 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
       }
     }
 
-    // ✅ Cache the plans
     if (foundPlans) {
       cachedNetworkPlans.set(cacheKey, planMap);
-      // biome-ignore lint/style/useTemplate: <explanation>
       cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1\nFor another number: DATA [phone] [index]`);
       networkPlanCacheTime.set(cacheKey, Date.now());
       return cachedNetworkMessages.get(cacheKey)!;
     }
 
-    // ✅ If no plans found, use fallback
     console.log(`[Data Plans] No plans found for ${network}, using fallback`);
     return getFallbackPlansForNetwork(network);
     
@@ -739,30 +741,199 @@ function getFallbackPlansForNetwork(network: string): string {
     message += `  ${idx}. ${plan.data} - NGN ${plan.price} (${plan.validity})\n`;
   });
   cachedNetworkPlans.set(cacheKey, planMap);
-  cachedNetworkMessages.set(cacheKey, message + `\nTo buy: DATA [index]\nExample: DATA 1`);
+  cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1`);
   networkPlanCacheTime.set(cacheKey, Date.now());
   return cachedNetworkMessages.get(cacheKey)!;
 }
 
-// ============================================================
-// GET PLAN BY INDEX FOR NETWORK - FIXED
-// ============================================================
-
 async function getPlanByIndexForNetwork(network: string, indexNumber: number): Promise<{ planData: any, provider: string, network: string } | null> {
   const cacheKey = network.toUpperCase();
   
-  // If cache is empty or expired, refresh it
   if (!cachedNetworkPlans.has(cacheKey) || 
       Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) >= CACHE_TTL) {
     await getAvailablePlansForNetwork(network);
   }
   
   const planMap = cachedNetworkPlans.get(cacheKey);
-  if (!planMap) {
-    return null;
+  return planMap?.get(indexNumber) || null;
+}
+
+// ============================================================
+// PROCESS DATA PURCHASE WITH QUEUE (NO PIN - uses job)
+// ============================================================
+
+async function processDataPurchaseWithQueue(
+  user: any,
+  phoneNumber: string,
+  planQuery: string,
+  detectedNetwork: string,
+  isOwnNumber: boolean
+): Promise<string> {
+  const isIndex = /^\d+$/.test(planQuery);
+  
+  if (!isIndex) {
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
   
-  return planMap.get(indexNumber) || null;
+  const indexNum = parseInt(planQuery);
+  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum);
+  
+  if (!planInfo) {
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
+  }
+
+  const planData = planInfo.planData;
+  const provider = planInfo.provider;
+  const amount = Number(planData.price);
+  const normalizedTarget = normalizePhoneNumber(phoneNumber);
+
+  const transaction = await prisma.vtuTransaction.create({
+    data: {
+      userId: user.id,
+      transactionType: VtuType.DATA,
+      product: `${detectedNetwork} - ${planData.data}`,
+      amount: amount,
+      totalDebited: 0,
+      phoneNumber: normalizedTarget,
+      network: mapNetwork(detectedNetwork),
+      networkPlan: planData.planCode || planData.data,
+      status: TransactionStatus.PROCESSING,
+      channel: ChannelType.WHATSAPP,
+      metadata: {
+        source: "WhatsApp",
+        service: "DATA",
+        timestamp: new Date().toISOString(),
+        network: detectedNetwork,
+        planData: planData,
+        provider: provider,
+        isOwnNumber: isOwnNumber,
+        queued: true,
+        requiresPin: false,
+      },
+    },
+  });
+
+  await createJob(
+    JobType.VTU_TRANSACTION,
+    {
+      transactionId: transaction.id,
+      userId: user.id,
+      phoneNumber: normalizedTarget,
+      planData: planData,
+      provider: provider,
+      detectedNetwork: detectedNetwork,
+      serviceType: "DATA",
+      isOwnNumber: isOwnNumber,
+    },
+    5,
+    3,
+    new Date()
+  );
+
+  const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+  return `Processing your data purchase...!
+
+Phone: ${normalizedTarget}
+Plan: ${dataDisplay} (${provider})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+}
+
+// ============================================================
+// PROCESS DATA PURCHASE WITH PIN (PIN required - no job)
+// ============================================================
+
+async function processDataPurchaseWithPin(
+  user: any,
+  phoneNumber: string,
+  planQuery: string,
+  detectedNetwork: string
+): Promise<string> {
+  const isIndex = /^\d+$/.test(planQuery);
+  
+  if (!isIndex) {
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
+  }
+  
+  const indexNum = parseInt(planQuery);
+  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum);
+  
+  if (!planInfo) {
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
+  }
+
+  const planData = planInfo.planData;
+  const provider = planInfo.provider;
+  const amount = Number(planData.price);
+  const normalizedTarget = normalizePhoneNumber(phoneNumber);
+
+  const transaction = await prisma.vtuTransaction.create({
+    data: {
+      userId: user.id,
+      transactionType: VtuType.DATA,
+      product: `${detectedNetwork} - ${planData.data}`,
+      amount: amount,
+      totalDebited: 0,
+      phoneNumber: normalizedTarget,
+      network: mapNetwork(detectedNetwork),
+      networkPlan: planData.planCode || planData.data,
+      status: TransactionStatus.PENDING,
+      channel: ChannelType.WHATSAPP,
+      metadata: {
+        source: "WhatsApp",
+        service: "DATA",
+        timestamp: new Date().toISOString(),
+        network: detectedNetwork,
+        planData: planData,
+        provider: provider,
+        isOwnNumber: false,
+        queued: false,
+        requiresPin: true,
+      },
+    },
+  });
+
+  const validationToken = generateValidationToken();
+  const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+  await prisma.vtuTransaction.update({
+    where: { id: transaction.id },
+    data: {
+      metadata: {
+        ...transaction.metadata,
+        validationToken: validationToken,
+        validationExpiry: validationExpiry,
+      },
+    },
+  });
+
+  const appUrl = getAppUrl();
+  const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+  const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+  return `📱 Data Purchase Initiated!
+
+Phone: ${normalizedTarget}
+Plan: ${dataDisplay} (${provider})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Reference: ${transaction.id.substring(0, 10)}
+
+🔹 **Complete Purchase:** ${purchaseLink}
+🔹 **PIN Required:** Enter your transaction PIN
+
+This link expires in 5 minutes.
+
+You'll receive a confirmation via WhatsApp after completion.`;
 }
 
 // ============================================================
@@ -944,6 +1115,7 @@ ${customerEmail ? `Email: ${customerEmail}` : ''}
 
 Quick Buy QR Code:
 ${qrLink}
+
 
 🔹 Print this QR code and paste it on your meter
 🔹 Scan to quickly buy electricity anytime
@@ -1495,116 +1667,6 @@ To create a new subscription: SCHEDULE [meter_index] [amount] [days]`;
 }
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH QUEUE - FIXED
-// ============================================================
-
-async function processDataPurchaseWithQueue(
-  user: any,
-  phoneNumber: string,
-  planQuery: string,
-  detectedNetwork: string,
-  isOwnNumber: boolean
-): Promise<string> {
-  const isIndex = /^\d+$/.test(planQuery);
-  
-  if (!isIndex) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
-    return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
-  }
-  
-  const indexNum = parseInt(planQuery);
-  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum);
-  
-  if (!planInfo) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
-    return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
-  }
-
-  const planData = planInfo.planData;
-  const provider = planInfo.provider;
-  const amount = Number(planData.price);
-  const normalizedTarget = normalizePhoneNumber(phoneNumber);
-
-  const transaction = await prisma.vtuTransaction.create({
-    data: {
-      userId: user.id,
-      transactionType: VtuType.DATA,
-      product: `${detectedNetwork} - ${planData.data}`,
-      amount: amount,
-      totalDebited: 0,
-      phoneNumber: normalizedTarget,
-      network: mapNetwork(detectedNetwork),
-      networkPlan: planData.planCode || planData.data,
-      status: TransactionStatus.PENDING,
-      channel: ChannelType.WHATSAPP,
-      metadata: {
-        source: "WhatsApp",
-        service: "DATA",
-        timestamp: new Date().toISOString(),
-        network: detectedNetwork,
-        planData: planData,
-        provider: provider,
-        isOwnNumber: isOwnNumber,
-        queued: true,
-        requiresPin: true,
-      },
-    },
-  });
-
-  const validationToken = generateValidationToken();
-  const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-  await prisma.vtuTransaction.update({
-    where: { id: transaction.id },
-    data: {
-      metadata: {
-        ...transaction.metadata,
-        validationToken: validationToken,
-        validationExpiry: validationExpiry,
-      },
-    },
-  });
-
-  const appUrl = getAppUrl();
-  const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-  await createJob(
-    JobType.VTU_TRANSACTION,
-    {
-      transactionId: transaction.id,
-      userId: user.id,
-      phoneNumber: normalizedTarget,
-      planData: planData,
-      provider: provider,
-      detectedNetwork: detectedNetwork,
-      serviceType: "DATA",
-      isOwnNumber: isOwnNumber,
-      requiresPin: true,
-    },
-    5,
-    3,
-    new Date()
-  );
-
-  const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
-  return `📱 Data Purchase Initiated!
-
-Phone: ${normalizedTarget}
-Plan: ${dataDisplay} (${provider})
-Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
-Reference: ${transaction.id.substring(0, 10)}
-
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
-
-This link expires in 5 minutes.
-
-You'll receive a confirmation via WhatsApp after completion.`;
-}
-
-// ============================================================
 // PROCESS EDUCATION PURCHASE
 // ============================================================
 
@@ -1643,7 +1705,7 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
         productType: product,
         productName: productInfo.name,
         quantity: quantity,
-        queued: true,
+        queued: false,
         requiresPin: true,
       },
     },
@@ -1665,25 +1727,6 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
 
   const appUrl = getAppUrl();
   const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
-
-  await createJob(
-    JobType.VTU_TRANSACTION,
-    {
-      transactionId: transaction.id,
-      userId: user.id,
-      productType: product,
-      quantity: quantity,
-      amount: amount,
-      phone: user.phone,
-      serviceType: "EDUCATION",
-      serviceId: productInfo.serviceId,
-      variationCode: productInfo.variationCode,
-      requiresPin: true,
-    },
-    5,
-    3,
-    new Date()
-  );
 
   return `🎓 Education Purchase Initiated!
 
@@ -1774,19 +1817,19 @@ TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
 Airtime & Data:
-AIRTIME [amount] - For YOUR number (PIN required)
+AIRTIME [amount] - For YOUR number (no PIN)
 AIRTIME [phone] [amount] - For others (PIN required)
 
 DATA - Show available plans for your network
-DATA [index] - For YOUR number (PIN required)
+DATA [index] - For YOUR number (no PIN)
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - For others (PIN required)
 DATA ALL - View all pricing at https://bilscore.com/pricing
 
 Electricity:
 ELECTRIC - Show saved meters
-ELECTRIC [amount] - Buy for saved meter (PIN required)
-ELECTRIC [index] [amount] - Buy for saved meter (PIN required)
+ELECTRIC [amount] - Buy for saved meter (no PIN)
+ELECTRIC [index] [amount] - Buy for saved meter (no PIN)
 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
@@ -2080,13 +2123,19 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
       
       const planInfo = await getPlanByIndexForNetwork(network, indexNum);
       
-      if (planInfo) {
-        const planData = planInfo.planData;
-        const provider = planInfo.provider;
-        const normalizedTarget = normalizePhoneNumber(targetPhone);
-        
-        userSessions.delete(user.id);
-        
+      if (!planInfo) {
+        const plans = await getAvailablePlansForNetwork(network, targetPhone);
+        return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
+      }
+      
+      const planData = planInfo.planData;
+      const provider = planInfo.provider;
+      const normalizedTarget = normalizePhoneNumber(targetPhone);
+      
+      userSessions.delete(user.id);
+      
+      // ✅ If it's the user's own number, no PIN needed (use job)
+      if (isOwnNumber) {
         const transaction = await prisma.vtuTransaction.create({
           data: {
             userId: user.id,
@@ -2097,7 +2146,7 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
             phoneNumber: normalizedTarget,
             network: mapNetwork(network),
             networkPlan: planData.planCode || planData.data,
-            status: TransactionStatus.PENDING,
+            status: TransactionStatus.PROCESSING,
             channel: ChannelType.WHATSAPP,
             metadata: {
               source: "WhatsApp",
@@ -2106,29 +2155,12 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
               network: network,
               planData: planData,
               provider: provider,
-              isOwnNumber: isOwnNumber,
+              isOwnNumber: true,
               queued: true,
-              requiresPin: true,
+              requiresPin: false,
             },
           },
         });
-
-        const validationToken = generateValidationToken();
-        const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-        await prisma.vtuTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            metadata: {
-              ...transaction.metadata,
-              validationToken: validationToken,
-              validationExpiry: validationExpiry,
-            },
-          },
-        });
-
-        const appUrl = getAppUrl();
-        const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
         await createJob(
           JobType.VTU_TRANSACTION,
@@ -2140,8 +2172,7 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
             provider: provider,
             detectedNetwork: network,
             serviceType: "DATA",
-            isOwnNumber: isOwnNumber,
-            requiresPin: true,
+            isOwnNumber: true,
           },
           5,
           3,
@@ -2150,7 +2181,64 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
 
         const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-        return `📱 Data Purchase Initiated!
+        return `Processing your data purchase...!
+
+Phone: ${normalizedTarget}
+Plan: ${dataDisplay} (${provider})
+Amount: NGN ${Number(planData.price).toFixed(2)}
+Network: ${network}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+      }
+      
+      // ✅ PIN REQUIRED - no job
+      const transaction = await prisma.vtuTransaction.create({
+        data: {
+          userId: user.id,
+          transactionType: VtuType.DATA,
+          product: `${network} - ${planData.data}`,
+          amount: Number(planData.price),
+          totalDebited: 0,
+          phoneNumber: normalizedTarget,
+          network: mapNetwork(network),
+          networkPlan: planData.planCode || planData.data,
+          status: TransactionStatus.PENDING,
+          channel: ChannelType.WHATSAPP,
+          metadata: {
+            source: "WhatsApp",
+            service: "DATA",
+            timestamp: new Date().toISOString(),
+            network: network,
+            planData: planData,
+            provider: provider,
+            isOwnNumber: false,
+            queued: false,
+            requiresPin: true,
+          },
+        },
+      });
+
+      const validationToken = generateValidationToken();
+      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          metadata: {
+            ...transaction.metadata,
+            validationToken: validationToken,
+            validationExpiry: validationExpiry,
+          },
+        },
+      });
+
+      const appUrl = getAppUrl();
+      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+      const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+      return `📱 Data Purchase Initiated!
 
 Phone: ${normalizedTarget}
 Plan: ${dataDisplay} (${provider})
@@ -2164,12 +2252,9 @@ Reference: ${transaction.id.substring(0, 10)}
 This link expires in 5 minutes.
 
 You'll receive a confirmation via WhatsApp after completion.`;
-      }
-      
-      const plans = await getAvailablePlansForNetwork(network, targetPhone);
-      return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
     }
     
+    // No session, show help for DATA command
     const normalizedUserPhone = normalizePhoneNumber(user.phone);
     const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
     
@@ -2188,7 +2273,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
     const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
     return `📱 Buy Data
 
-DATA [index] - Buy data for YOUR number (PIN required)
+DATA [index] - Buy data for YOUR number (no PIN)
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for another number (PIN required)
 
@@ -2249,7 +2334,7 @@ Type HELP for available commands.`;
   }
 
   // ============================================================
-  // DATA COMMAND - FIXED
+  // DATA COMMAND - WITH BOTH FLOWS
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -2276,8 +2361,9 @@ Type HELP for available commands.`;
       const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
       return `📱 Buy Data for YOUR number (${normalizedUserPhone})
 
-DATA [index] - Buy data (PIN required)
-Example: DATA 1
+DATA [index] - Buy data (no PIN)
+DATA [phone] - Show plans for another number
+DATA [phone] [index] - Buy data for another number (PIN required)
 
 ${plans}`;
     }
@@ -2311,24 +2397,25 @@ ${plans}`;
         const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone);
         return `📱 Buy Data for ${targetPhone}
 
-Just type the index number to buy (PIN required)
+Just type the index number to buy (${isOwnNumber ? 'no PIN' : 'PIN required'})
 
 ${plans}`;
-      } else {
-        // It's a plan index - buy for user's own number
-        targetPhone = user.phone;
-        planQuery = firstParam;
-        isOwnNumber = true;
-        
-        const normalizedTarget = normalizePhoneNumber(targetPhone);
-        const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
-        
-        if (!detectedNetwork) {
-          return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
-        }
-        
-        return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
       }
+      
+      // It's a plan index - buy for user's own number (NO PIN)
+      targetPhone = user.phone;
+      planQuery = firstParam;
+      isOwnNumber = true;
+      
+      const normalizedTarget = normalizePhoneNumber(targetPhone);
+      const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+      
+      if (!detectedNetwork) {
+        return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
+      }
+      
+      // ✅ NO PIN - uses job
+      return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
     }
     
     // CASE 3: "DATA [phone] [index]" - 3 parts
@@ -2344,7 +2431,13 @@ ${plans}`;
         return `Could Not Detect Network\n\nWe couldn't detect the network for ${targetPhone}.`;
       }
       
-      return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
+      // ✅ If it's the user's own number, no PIN needed
+      if (isOwnNumber) {
+        return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, true);
+      }
+      
+      // ✅ PIN REQUIRED - no job
+      return await processDataPurchaseWithPin(user, targetPhone, planQuery, detectedNetwork);
     }
     
     // Default: Show help
@@ -2355,7 +2448,7 @@ ${plans}`;
     return `📱 Buy Data
 
 DATA - Show available plans for YOUR number
-DATA [index] - Buy data for YOUR number (PIN required)
+DATA [index] - Buy data for YOUR number (no PIN)
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for another number (PIN required)
 
@@ -2604,7 +2697,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // AIRTIME COMMAND - WITH PIN
+  // AIRTIME COMMAND - WITH BOTH FLOWS
   // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     userSessions.delete(user.id);
@@ -2622,6 +2715,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
         return `Could not detect your network. Please ensure your phone number is correct.`;
       }
 
+      // ✅ NO PIN - for your own number
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -2631,7 +2725,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
           totalDebited: 0,
           phoneNumber: normalizedUserPhone,
           network: mapNetwork(detectedNetwork),
-          status: TransactionStatus.PENDING,
+          status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
@@ -2639,27 +2733,10 @@ Available providers: DSTV, GOTV, STARTIMES`;
             timestamp: new Date().toISOString(),
             network: detectedNetwork,
             queued: true,
-            requiresPin: true,
+            requiresPin: false,
           },
         },
       });
-
-      const validationToken = generateValidationToken();
-      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          metadata: {
-            ...transaction.metadata,
-            validationToken: validationToken,
-            validationExpiry: validationExpiry,
-          },
-        },
-      });
-
-      const appUrl = getAppUrl();
-      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
       await createJob(
         JobType.VTU_TRANSACTION,
@@ -2670,26 +2747,20 @@ Available providers: DSTV, GOTV, STARTIMES`;
           amount: amount,
           detectedNetwork: detectedNetwork,
           serviceType: "AIRTIME",
-          requiresPin: true,
         },
         5,
         3,
         new Date()
       );
 
-      return `📱 Airtime Purchase Initiated!
+      return `Processing your airtime purchase...
 
 Phone: ${normalizedUserPhone}
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
 
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
-
-This link expires in 5 minutes.
-
-You'll receive a confirmation via WhatsApp after completion.`;
+You'll receive a confirmation shortly.`;
     }
     
     if (parts.length >= 3) {
@@ -2710,6 +2781,58 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const normalizedUserPhone = normalizePhoneNumber(user.phone);
       const isOwnNumber = normalizedPhone === normalizedUserPhone;
 
+      // ✅ If it's the user's own number, no PIN needed
+      if (isOwnNumber) {
+        const transaction = await prisma.vtuTransaction.create({
+          data: {
+            userId: user.id,
+            transactionType: VtuType.AIRTIME,
+            product: detectedNetwork,
+            amount: amount,
+            totalDebited: 0,
+            phoneNumber: normalizedPhone,
+            network: mapNetwork(detectedNetwork),
+            status: TransactionStatus.PROCESSING,
+            channel: ChannelType.WHATSAPP,
+            metadata: {
+              source: "WhatsApp",
+              service: "AIRTIME",
+              timestamp: new Date().toISOString(),
+              network: detectedNetwork,
+              isOwnNumber: true,
+              queued: true,
+              requiresPin: false,
+            },
+          },
+        });
+
+        await createJob(
+          JobType.VTU_TRANSACTION,
+          {
+            transactionId: transaction.id,
+            userId: user.id,
+            phoneNumber: normalizedPhone,
+            amount: amount,
+            detectedNetwork: detectedNetwork,
+            serviceType: "AIRTIME",
+            isOwnNumber: true,
+          },
+          5,
+          3,
+          new Date()
+        );
+
+        return `Processing your airtime purchase...
+
+Phone: ${normalizedPhone}
+Amount: NGN ${amount.toFixed(2)}
+Network: ${detectedNetwork}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+      }
+
+      // ✅ PIN REQUIRED - for another number
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -2726,8 +2849,8 @@ You'll receive a confirmation via WhatsApp after completion.`;
             service: "AIRTIME",
             timestamp: new Date().toISOString(),
             network: detectedNetwork,
-            isOwnNumber: isOwnNumber,
-            queued: true,
+            isOwnNumber: false,
+            queued: false,
             requiresPin: true,
           },
         },
@@ -2750,23 +2873,6 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const appUrl = getAppUrl();
       const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          phoneNumber: normalizedPhone,
-          amount: amount,
-          detectedNetwork: detectedNetwork,
-          serviceType: "AIRTIME",
-          isOwnNumber: isOwnNumber,
-          requiresPin: true,
-        },
-        5,
-        3,
-        new Date()
-      );
-
       return `📱 Airtime Purchase Initiated!
 
 Phone: ${normalizedPhone}
@@ -2782,11 +2888,11 @@ This link expires in 5 minutes.
 You'll receive a confirmation via WhatsApp after completion.`;
     }
     
-    return `Buy Airtime\n\nAIRTIME [amount] - For YOUR number\nAIRTIME [phone] [amount] - For another number\n\nMinimum amount: NGN 50`;
+    return `Buy Airtime\n\nAIRTIME [amount] - For YOUR number (no PIN)\nAIRTIME [phone] [amount] - For another number (PIN required)\n\nMinimum amount: NGN 50`;
   }
 
   // ============================================================
-  // CABLE COMMAND - WITH PIN
+  // CABLE COMMAND - WITH PIN (always requires PIN)
   // ============================================================
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
     userSessions.delete(user.id);
@@ -2841,6 +2947,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
 
       await getAvailablePackagesForWhatsApp(selectedDecoder.provider);
       
+      // ✅ PIN REQUIRED for Cable TV
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -2860,7 +2967,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
             packageQuery: packageQuery,
             decoderNumber: selectedDecoder.decoderNumber,
             smartCardNumber: selectedDecoder.decoderNumber,
-            queued: true,
+            queued: false,
             requiresPin: true,
           },
         },
@@ -2883,23 +2990,6 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const appUrl = getAppUrl();
       const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          decoderNumber: selectedDecoder.decoderNumber,
-          packageQuery: packageQuery,
-          provider: selectedDecoder.provider,
-          phone: user.phone,
-          serviceType: "CABLE_TV",
-          requiresPin: true,
-        },
-        5,
-        3,
-        new Date()
-      );
-
       return `📺 Cable Subscription Initiated!
 
 Decoder: ${selectedDecoder.decoderNumber}
@@ -2921,7 +3011,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
   }
 
   // ============================================================
-  // ELECTRICITY COMMAND - WITH PIN
+  // ELECTRICITY COMMAND - WITH BOTH FLOWS
   // ============================================================
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
       command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
@@ -2953,16 +3043,16 @@ You'll receive a confirmation via WhatsApp after completion.`;
         message += `\n`;
       });
 
-      message += `To buy for saved meter: ELECTRIC [index] [amount]\n`;
+      message += `To buy for saved meter: ELECTRIC [index] [amount] (no PIN)\n`;
       message += `Example: ELECTRIC 1 5000\n\n`;
-      message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
+      message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount] (PIN required)\n`;
       message += `Example: ELECTRIC 1234567890 ABUJA 5000\n\n`;
       message += `To add more meters: ADDMETER [meter] [disco] [name]`;
 
       return message;
     }
 
-    // CASE 1: ELECTRIC [amount] - Buy using default/saved meter
+    // CASE 1: ELECTRIC [amount] - Buy using default/saved meter (NO PIN)
     if (parts.length === 2) {
       const amountStr = parts[1];
       const amount = parseFloat(amountStr);
@@ -2993,6 +3083,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
         return message;
       }
 
+      // ✅ NO PIN - saved meter, use job
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -3002,7 +3093,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
           totalDebited: 0,
           meterNumber: selectedMeter.meterNumber,
           meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-          status: TransactionStatus.PENDING,
+          status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
@@ -3017,27 +3108,10 @@ You'll receive a confirmation via WhatsApp after completion.`;
             meterStatus: selectedMeter.meterStatus,
             queued: true,
             skipVerification: true,
-            requiresPin: true,
+            requiresPin: false,
           },
         },
       });
-
-      const validationToken = generateValidationToken();
-      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          metadata: {
-            ...transaction.metadata,
-            validationToken: validationToken,
-            validationExpiry: validationExpiry,
-          },
-        },
-      });
-
-      const appUrl = getAppUrl();
-      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
       await createJob(
         JobType.VTU_TRANSACTION,
@@ -3056,14 +3130,13 @@ You'll receive a confirmation via WhatsApp after completion.`;
           meterStatus: selectedMeter.meterStatus,
           serviceType: "ELECTRICITY",
           skipVerification: true,
-          requiresPin: true,
         },
         5,
         3,
         new Date()
       );
 
-      return `⚡ Electricity Purchase Initiated!
+      return `Processing your electricity purchase...
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -3071,15 +3144,10 @@ Amount: NGN ${amount.toFixed(2)}
 ${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
-
-This link expires in 5 minutes.
-
-You'll receive a confirmation via WhatsApp after completion.`;
+You'll receive a confirmation shortly.`;
     }
 
-    // CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index
+    // CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index (NO PIN)
     if (parts.length === 3) {
       const [, indexStr, amountStr] = parts;
       const index = parseInt(indexStr) - 1;
@@ -3104,6 +3172,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
       
       const selectedMeter = meters[index];
 
+      // ✅ NO PIN - saved meter, use job
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -3113,7 +3182,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
           totalDebited: 0,
           meterNumber: selectedMeter.meterNumber,
           meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-          status: TransactionStatus.PENDING,
+          status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
@@ -3128,27 +3197,10 @@ You'll receive a confirmation via WhatsApp after completion.`;
             meterStatus: selectedMeter.meterStatus,
             queued: true,
             skipVerification: true,
-            requiresPin: true,
+            requiresPin: false,
           },
         },
       });
-
-      const validationToken = generateValidationToken();
-      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          metadata: {
-            ...transaction.metadata,
-            validationToken: validationToken,
-            validationExpiry: validationExpiry,
-          },
-        },
-      });
-
-      const appUrl = getAppUrl();
-      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
       await createJob(
         JobType.VTU_TRANSACTION,
@@ -3167,14 +3219,13 @@ You'll receive a confirmation via WhatsApp after completion.`;
           meterStatus: selectedMeter.meterStatus,
           serviceType: "ELECTRICITY",
           skipVerification: true,
-          requiresPin: true,
         },
         5,
         3,
         new Date()
       );
 
-      return `⚡ Electricity Purchase Initiated!
+      return `Processing your electricity purchase...
 
 Meter: ${selectedMeter.meterNumber}
 DisCo: ${selectedMeter.disco}
@@ -3182,15 +3233,10 @@ Amount: NGN ${amount.toFixed(2)}
 ${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
-
-This link expires in 5 minutes.
-
-You'll receive a confirmation via WhatsApp after completion.`;
+You'll receive a confirmation shortly.`;
     }
 
-    // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter
+    // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter (PIN REQUIRED)
     if (parts.length >= 4) {
       const [, meterNumber, discoInput, amountStr] = parts;
       const amount = parseFloat(amountStr);
@@ -3199,6 +3245,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
         return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 1234567890 ABUJA 5000`;
       }
       
+      // Check if meter is already saved
       const existingMeter = await prisma.savedMeter.findFirst({
         where: { 
           userId: user.id, 
@@ -3206,6 +3253,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
         },
       });
       
+      // If meter is already saved, use saved data (NO PIN)
       if (existingMeter) {
         const transaction = await prisma.vtuTransaction.create({
           data: {
@@ -3216,7 +3264,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
             totalDebited: 0,
             meterNumber: existingMeter.meterNumber,
             meterType: existingMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-            status: TransactionStatus.PENDING,
+            status: TransactionStatus.PROCESSING,
             channel: ChannelType.WHATSAPP,
             metadata: {
               source: "WhatsApp",
@@ -3231,27 +3279,10 @@ You'll receive a confirmation via WhatsApp after completion.`;
               meterStatus: existingMeter.meterStatus,
               queued: true,
               skipVerification: true,
-              requiresPin: true,
+              requiresPin: false,
             },
           },
         });
-
-        const validationToken = generateValidationToken();
-        const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-        await prisma.vtuTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            metadata: {
-              ...transaction.metadata,
-              validationToken: validationToken,
-              validationExpiry: validationExpiry,
-            },
-          },
-        });
-
-        const appUrl = getAppUrl();
-        const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
         await createJob(
           JobType.VTU_TRANSACTION,
@@ -3270,14 +3301,13 @@ You'll receive a confirmation via WhatsApp after completion.`;
             meterStatus: existingMeter.meterStatus,
             serviceType: "ELECTRICITY",
             skipVerification: true,
-            requiresPin: true,
           },
           5,
           3,
           new Date()
         );
 
-        return `⚡ Electricity Purchase Initiated!
+        return `Processing your electricity purchase...
 
 Meter: ${existingMeter.meterNumber}
 DisCo: ${existingMeter.disco}
@@ -3285,14 +3315,10 @@ Amount: NGN ${amount.toFixed(2)}
 ${existingMeter.customerName ? `Customer: ${existingMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
-
-This link expires in 5 minutes.
-
-You'll receive a confirmation via WhatsApp after completion.`;
+You'll receive a confirmation shortly.`;
       }
       
+      // New meter - need verification (PIN REQUIRED)
       const discoInfo = normalizeDisco(discoInput);
       if (!discoInfo) {
         const discosList = getValidDiscosList();
@@ -3302,6 +3328,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const discoUpper = discoInfo.code;
       const serviceID = discoInfo.serviceID;
       
+      // Verify new meter
       const verificationResult = await verifyMeterWithVTpass(
         serviceID,
         meterNumber,
@@ -3315,6 +3342,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
         return `Could Not Verify Meter\n\n${verificationResult.error || "Unknown error"}\n\nYou can still proceed with the purchase.\n\nTo continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}\nTo cancel: Type HELP for other options.`;
       }
       
+      // ✅ PIN REQUIRED - new meter, no job
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -3333,7 +3361,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
             discoCode: discoUpper,
             meterType: "Prepaid",
             customerName: customerName,
-            queued: true,
+            queued: false,
             skipVerification: false,
             requiresPin: true,
           },
@@ -3357,26 +3385,6 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const appUrl = getAppUrl();
       const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-      await createJob(
-        JobType.VTU_TRANSACTION,
-        {
-          transactionId: transaction.id,
-          userId: user.id,
-          meterNumber: meterNumber,
-          amount: amount,
-          discoCode: discoUpper,
-          meterType: "Prepaid",
-          phone: user.phone,
-          customerName: customerName,
-          serviceType: "ELECTRICITY",
-          skipVerification: false,
-          requiresPin: true,
-        },
-        5,
-        3,
-        new Date()
-      );
-
       return `⚡ Electricity Purchase Initiated!
 
 Meter: ${meterNumber}
@@ -3393,6 +3401,7 @@ This link expires in 5 minutes.
 You'll receive a confirmation via WhatsApp after completion.`;
     }
     
+    // Default: Show available meters
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -3407,11 +3416,11 @@ You'll receive a confirmation via WhatsApp after completion.`;
         message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
         message += `   ${meter.disco}\n\n`;
       });
-      message += `To buy: ELECTRIC [index] [amount]\n`;
+      message += `To buy: ELECTRIC [index] [amount] (no PIN)\n`;
       message += `Example: ELECTRIC 1 5000\n\n`;
     }
     
-    message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
+    message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount] (PIN required)\n`;
     message += `Examples:\n`;
     message += `- ELECTRIC 1234567890 ABUJA 5000\n`;
     message += `- ELECTRIC 1234567890 AEDC 5000\n`;
@@ -3496,12 +3505,12 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
-AIRTIME [amount] - Buy airtime (PIN required)
+AIRTIME [amount] - Buy airtime for YOUR number (no PIN)
 AIRTIME [phone] [amount] - Buy airtime for others (PIN required)
 DATA - Show available plans
-DATA [index] - Buy data (PIN required)
+DATA [index] - Buy data for YOUR number (no PIN)
 ELECTRIC - See saved meters
-ELECTRIC [amount] - Buy electricity (PIN required)
+ELECTRIC [amount] - Buy electricity for saved meter (no PIN)
 TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN`;
