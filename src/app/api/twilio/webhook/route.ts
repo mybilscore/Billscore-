@@ -537,8 +537,195 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
   }
 }
 
+
+
 // ============================================================
-// GET AVAILABLE PLANS FOR NETWORK - WITH LIMIT AND PROPER FORMATTING
+// GET AVAILABLE PLANS FOR NETWORK - WHATSAPP PLANS ONLY
+// ============================================================
+
+
+
+// ============================================================
+// HELPER: Get active vendor for DATA service
+// ============================================================
+
+async function getActiveDataVendor() {
+  const vendorService = await prisma.vendorService.findFirst({
+    where: {
+      serviceType: VtuType.DATA,
+      isActive: true,
+    },
+    include: {
+      vendor: true,
+    },
+    orderBy: {
+      priority: 'asc',
+    },
+  });
+  return vendorService;
+}
+
+// ============================================================
+// HELPER: Build where clause for WhatsApp plans
+// ============================================================
+
+function buildWhatsAppPlanWhereClause(vendorId: string, network: string): any {
+  const validNetworks = ['MTN', 'GLO', 'AIRTEL', '9MOBILE', 'NINEMOBILE'];
+  const networkUpper = network.toUpperCase();
+  const where: any = {
+    vendorId: vendorId,
+    isActive: true,
+    status: PlanStatus.ACTIVE,
+    isActiveForWhatsApp: true,
+  };
+
+  if (validNetworks.includes(networkUpper)) {
+    where.network = networkUpper as NetworkProvider;
+  }
+
+  return where;
+}
+
+// ============================================================
+// HELPER: Format validity display from schema fields
+// ============================================================
+
+function formatValidityDisplay(validity: number, validityUnit: string): string {
+  if (!validity || validity <= 0) {
+    return '30 days';
+  }
+
+  const unit = validityUnit?.toUpperCase() || 'DAYS';
+  
+  if (unit === 'HOURS' || unit === 'MINUTES') {
+    return `${validity} ${unit.toLowerCase()}`;
+  }
+  
+  if (unit === 'DAYS') {
+    if (validity === 1) return '1 day';
+    if (validity < 7) return `${validity} days`;
+    if (validity === 7) return '7 days';
+    if (validity < 30) return `${validity} days`;
+    if (validity === 30) return '30 days';
+    if (validity === 60) return '60 days';
+    if (validity === 90) return '90 days';
+    if (validity === 365) return '1 year';
+    return `${validity} days`;
+  }
+  
+  if (unit === 'MONTHS') {
+    if (validity === 1) return '1 month';
+    if (validity < 12) return `${validity} months`;
+    if (validity === 12) return '1 year';
+    return `${validity} months`;
+  }
+  
+  if (unit === 'YEARS') {
+    if (validity === 1) return '1 year';
+    return `${validity} years`;
+  }
+  
+  return `${validity} days`;
+}
+
+// ============================================================
+// HELPER: Format data display from amountMB
+// ============================================================
+
+function formatDataDisplay(amountMB: number, existingData?: string): string {
+  if (existingData && existingData !== '0MB' && existingData !== '') {
+    return existingData;
+  }
+  
+  const mb = amountMB || 0;
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)}GB`;
+  }
+  return `${mb}MB`;
+}
+
+// ============================================================
+// HELPER: Get display price from plan (uses ourPrice)
+// ============================================================
+
+function getDisplayPrice(plan: any): number {
+  if (plan.ourPrice !== undefined && plan.ourPrice !== null && Number(plan.ourPrice) > 0) {
+    return Number(plan.ourPrice);
+  }
+  return 0;
+}
+
+// ============================================================
+// HELPER: Process plans and build message
+// ============================================================
+
+function processPlansForWhatsApp(dbPlans: any[], network: string): {
+  planMap: Map<number, { planData: any, provider: string, network: string }>;
+  message: string;
+  count: number;
+} {
+  const planMap = new Map<number, { planData: any, provider: string, network: string }>();
+  let message = `📱 *${network} Data Plans*\n\n`;
+  let index = 1;
+  let count = 0;
+
+  for (const plan of dbPlans) {
+    const displayPrice = getDisplayPrice(plan);
+    if (displayPrice <= 0) continue;
+
+    const dataDisplay = formatDataDisplay(plan.amountMB, plan.data || plan.dataDisplay);
+    const validityDisplay = formatValidityDisplay(plan.validity, plan.validityUnit);
+    const priceDisplay = `₦${displayPrice.toFixed(0)}`;
+    
+    planMap.set(index, {
+      planData: {
+        data: dataDisplay,
+        price: displayPrice,
+        validity: validityDisplay,
+        planCode: plan.planCode || plan.id || dataDisplay,
+        amountMB: plan.amountMB || 0,
+      },
+      provider: network,
+      network: network,
+    });
+    
+    message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})\n`;
+    index++;
+    count++;
+  }
+
+  // Add footer with instructions
+  if (count > 0) {
+    message += `\n_Reply with DATA [index] to buy_\n`;
+    message += `_Example: DATA 1_\n`;
+    message += `_For another number: DATA [phone] [index]_`;
+  }
+
+  return { planMap, message, count };
+}
+
+// ============================================================
+// HELPER: Check if there are any active plans for network
+// ============================================================
+
+async function countActivePlansForNetwork(vendorId: string, network: string): Promise<number> {
+  const validNetworks = ['MTN', 'GLO', 'AIRTEL', '9MOBILE', 'NINEMOBILE'];
+  const networkUpper = network.toUpperCase();
+  const where: any = {
+    vendorId: vendorId,
+    isActive: true,
+    status: PlanStatus.ACTIVE,
+  };
+
+  if (validNetworks.includes(networkUpper)) {
+    where.network = networkUpper as NetworkProvider;
+  }
+
+  return await prisma.dataPlan.count({ where });
+}
+
+// ============================================================
+// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK - REFACTORED
 // ============================================================
 
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
@@ -549,26 +736,14 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     if (networkPlanCacheTime.get(cacheKey) && 
         Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) < CACHE_TTL && 
         cachedNetworkMessages.has(cacheKey)) {
-      console.log(`[Data Plans] Returning cached plans for ${network}`);
+      console.log(`[Data Plans] Returning cached WhatsApp plans for ${network}`);
       return cachedNetworkMessages.get(cacheKey)!;
     }
     
-    console.log(`[Data Plans] Fetching plans for ${network} from database...`);
+    console.log(`[Data Plans] Fetching WhatsApp plans for ${network} from database...`);
 
-    // ✅ Get active vendor for DATA service
-    const vendorService = await prisma.vendorService.findFirst({
-      where: {
-        serviceType: VtuType.DATA,
-        isActive: true,
-      },
-      include: {
-        vendor: true,
-      },
-      orderBy: {
-        priority: 'asc',
-      },
-    });
-
+    // ✅ Get active vendor
+    const vendorService = await getActiveDataVendor();
     if (!vendorService) {
       console.log('[Data Plans] No active vendor found for DATA');
       return getFallbackPlansForNetwork(network);
@@ -577,116 +752,56 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     console.log(`[Data Plans] Active vendor: ${vendorService.vendor.name} (${vendorService.vendor.code})`);
 
     // ✅ Build where clause
-    const networkUpper = network.toUpperCase();
-    const validNetworks = ['MTN', 'GLO', 'AIRTEL', '9MOBILE', 'NINEMOBILE'];
-    const where: any = {
-      vendorId: vendorService.vendorId,
-      isActive: true,
-      status: PlanStatus.ACTIVE,
-    };
+    const where = buildWhatsAppPlanWhereClause(vendorService.vendorId, network);
+    console.log(`[Data Plans] Where clause (WhatsApp only):`, JSON.stringify(where));
 
-    if (validNetworks.includes(networkUpper)) {
-      where.network = networkUpper as NetworkProvider;
-    }
-
-    console.log(`[Data Plans] Where clause:`, JSON.stringify(where));
-
-    // ✅ Fetch plans from database
+    // ✅ Fetch WhatsApp plans
     const dbPlans = await prisma.dataPlan.findMany({
       where,
       orderBy: [
-        { amountMB: 'asc' }, // Sort by data amount
+        { whatsappPriority: 'asc' },
+        { amountMB: 'asc' },
       ],
-      take: 20, // ✅ Limit to 20 plans to avoid message being too long
+      take: 30,
     });
 
-    console.log(`[Data Plans] Database returned ${dbPlans.length} plans, showing up to 20`);
+    console.log(`[Data Plans] Database returned ${dbPlans.length} WhatsApp-active plans`);
 
+    // ✅ If no WhatsApp plans, check if any plans exist
     if (dbPlans.length === 0) {
-      console.log('[Data Plans] No plans found in database, using fallback');
+      const totalPlans = await countActivePlansForNetwork(vendorService.vendorId, network);
+      console.log(`[Data Plans] Found ${totalPlans} total active plans, 0 are WhatsApp-enabled`);
       return getFallbackPlansForNetwork(network);
     }
 
-    const planMap = new Map<number, { planData: any, provider: string, network: string }>();
-    let message = `📱 *${network} Data Plans*\n\n`;
-    let index = 1;
-    let plansAdded = 0;
-
-    // ✅ Process plans from database
-    for (const plan of dbPlans) {
-      // Get display price
-      let displayPrice = 0;
-      if (plan.ourPrice !== undefined && plan.ourPrice !== null && Number(plan.ourPrice) > 0) {
-        displayPrice = Number(plan.ourPrice);
-      } else if (plan.price !== undefined && plan.price !== null && Number(plan.price) > 0) {
-        displayPrice = Number(plan.price);
-      }
-      
-      if (displayPrice <= 0) continue;
-
-      // Get data display
-      let dataDisplay = plan.data || plan.dataDisplay;
-      if (!dataDisplay || dataDisplay === '0MB' || dataDisplay === '') {
-        const mb = plan.amountMB || 0;
-        if (mb >= 1024) {
-          dataDisplay = `${(mb / 1024).toFixed(1)}GB`;
-        } else {
-          dataDisplay = `${mb}MB`;
-        }
-      }
-
-      // Get validity
-      let validityDisplay = '30d';
-      if (plan.validityDays) {
-        const days = typeof plan.validityDays === 'number' ? plan.validityDays : parseInt(plan.validityDays) || 30;
-        if (days === 1) validityDisplay = '1d';
-        else if (days < 7) validityDisplay = `${days}d`;
-        else if (days === 7) validityDisplay = '7d';
-        else if (days === 30) validityDisplay = '30d';
-        else if (days === 60) validityDisplay = '60d';
-        else if (days === 365) validityDisplay = '1yr';
-        else validityDisplay = `${days}d`;
-      }
-
-      const priceDisplay = `₦${displayPrice.toFixed(0)}`;
-      
-      // ✅ Store plan in cache
-      planMap.set(index, {
-        planData: {
-          data: dataDisplay,
-          price: displayPrice,
-          validity: validityDisplay,
-          planCode: plan.planCode || plan.id || dataDisplay,
-          amountMB: plan.amountMB || 0,
-        },
-        provider: network,
-        network: network,
-      });
-      
-      // ✅ Build message line - shorter format for WhatsApp
-      message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})\n`;
-      index++;
-      plansAdded++;
+    // ✅ Log first plan for debugging
+    if (dbPlans.length > 0) {
+      console.log(`[Data Plans] First WhatsApp plan:`, JSON.stringify({
+        id: dbPlans[0].id,
+        name: dbPlans[0].name,
+        ourPrice: dbPlans[0].ourPrice?.toString(),
+        amountMB: dbPlans[0].amountMB,
+        validity: dbPlans[0].validity,
+        validityUnit: dbPlans[0].validityUnit,
+        isActiveForWhatsApp: dbPlans[0].isActiveForWhatsApp,
+      }));
     }
 
-    console.log(`[Data Plans] Added ${plansAdded} plans to message`);
+    // ✅ Process plans and build message
+    const { planMap, message, count } = processPlansForWhatsApp(dbPlans, network);
+    console.log(`[Data Plans] Added ${count} WhatsApp plans to message using ourPrice`);
 
-    if (plansAdded === 0) {
-      console.log('[Data Plans] No valid plans found, using fallback');
+    if (count === 0) {
+      console.log('[Data Plans] No valid WhatsApp plans with ourPrice > 0, using fallback');
       return getFallbackPlansForNetwork(network);
     }
-
-    // ✅ Add footer with instructions
-    message += `\n_Reply with DATA [index] to buy_\n`;
-    message += `_Example: DATA 1_\n`;
-    message += `_For another number: DATA [phone] [index]_`;
 
     // ✅ Cache the plans
     cachedNetworkPlans.set(cacheKey, planMap);
     cachedNetworkMessages.set(cacheKey, message);
     networkPlanCacheTime.set(cacheKey, Date.now());
     
-    console.log(`[Data Plans] Cached ${planMap.size} plans for ${network}`);
+    console.log(`[Data Plans] Cached ${planMap.size} WhatsApp plans for ${network}`);
     console.log(`[Data Plans] Message preview:`, message.substring(0, 100) + '...');
     
     return message;
@@ -696,6 +811,215 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     return getFallbackPlansForNetwork(network);
   }
 }
+
+// async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
+//   try {
+//     const cacheKey = network.toUpperCase();
+    
+//     // Check cache first
+//     if (networkPlanCacheTime.get(cacheKey) && 
+//         Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) < CACHE_TTL && 
+//         cachedNetworkMessages.has(cacheKey)) {
+//       console.log(`[Data Plans] Returning cached WhatsApp plans for ${network}`);
+//       return cachedNetworkMessages.get(cacheKey)!;
+//     }
+    
+//     console.log(`[Data Plans] Fetching WhatsApp plans for ${network} from database...`);
+
+//     // ✅ Get active vendor for DATA service
+//     const vendorService = await prisma.vendorService.findFirst({
+//       where: {
+//         serviceType: VtuType.DATA,
+//         isActive: true,
+//       },
+//       include: {
+//         vendor: true,
+//       },
+//       orderBy: {
+//         priority: 'asc',
+//       },
+//     });
+
+//     if (!vendorService) {
+//       console.log('[Data Plans] No active vendor found for DATA');
+//       return getFallbackPlansForNetwork(network);
+//     }
+
+//     console.log(`[Data Plans] Active vendor: ${vendorService.vendor.name} (${vendorService.vendor.code})`);
+
+//     // ✅ Build where clause - ONLY WhatsApp active plans
+//     const networkUpper = network.toUpperCase();
+//     const validNetworks = ['MTN', 'GLO', 'AIRTEL', '9MOBILE', 'NINEMOBILE'];
+//     const where: any = {
+//       vendorId: vendorService.vendorId,
+//       isActive: true,
+//       status: PlanStatus.ACTIVE,
+//       isActiveForWhatsApp: true, // ✅ ONLY WhatsApp active plans
+//     };
+
+//     if (validNetworks.includes(networkUpper)) {
+//       where.network = networkUpper as NetworkProvider;
+//     }
+
+//     console.log(`[Data Plans] Where clause (WhatsApp only):`, JSON.stringify(where));
+
+//     // ✅ Fetch WhatsApp plans from database
+//     const dbPlans = await prisma.dataPlan.findMany({
+//       where,
+//       orderBy: [
+//         { whatsappPriority: 'asc' }, // ✅ Order by WhatsApp priority
+//         { amountMB: 'asc' },
+//       ],
+//       take: 30,
+//     });
+
+//     console.log(`[Data Plans] Database returned ${dbPlans.length} WhatsApp-active plans`);
+
+//     if (dbPlans.length === 0) {
+//       console.log('[Data Plans] No WhatsApp plans found for this network');
+      
+//       // ✅ Check if there are plans that aren't WhatsApp active
+//       const totalPlans = await prisma.dataPlan.count({
+//         where: {
+//           vendorId: vendorService.vendorId,
+//           isActive: true,
+//           status: PlanStatus.ACTIVE,
+//           network: networkUpper as NetworkProvider,
+//         },
+//       });
+      
+//       console.log(`[Data Plans] Found ${totalPlans} total active plans for ${network}, but 0 are WhatsApp-enabled`);
+//       return getFallbackPlansForNetwork(network);
+//     }
+
+//     // ✅ Log first plan to debug
+//     if (dbPlans.length > 0) {
+//       console.log(`[Data Plans] First WhatsApp plan:`, JSON.stringify({
+//         id: dbPlans[0].id,
+//         name: dbPlans[0].name,
+//         network: dbPlans[0].network,
+//         ourPrice: dbPlans[0].ourPrice?.toString(),
+//         vendorPrice: dbPlans[0].vendorPrice?.toString(),
+//         amountMB: dbPlans[0].amountMB,
+//         validity: dbPlans[0].validity,
+//         validityUnit: dbPlans[0].validityUnit,
+//         isActiveForWhatsApp: dbPlans[0].isActiveForWhatsApp,
+//         whatsappPriority: dbPlans[0].whatsappPriority,
+//       }));
+//     }
+
+//     const planMap = new Map<number, { planData: any, provider: string, network: string }>();
+//     let message = `📱 *${network} Data Plans*\n\n`;
+//     let index = 1;
+//     let plansAdded = 0;
+
+//     // ✅ Process WhatsApp plans from database
+//     for (const plan of dbPlans) {
+//       // ✅ USE ourPrice (our selling price), NOT vendorPrice
+//       let displayPrice = 0;
+//       if (plan.ourPrice !== undefined && plan.ourPrice !== null && Number(plan.ourPrice) > 0) {
+//         displayPrice = Number(plan.ourPrice);
+//       } else {
+//         // Fallback: if ourPrice is not set, skip this plan
+//         console.log(`[Data Plans] Skipping plan "${plan.name}" - no ourPrice set`);
+//         continue;
+//       }
+      
+//       if (displayPrice <= 0) {
+//         console.log(`[Data Plans] Skipping plan "${plan.name}" - ourPrice is ${displayPrice}`);
+//         continue;
+//       }
+
+//       // ✅ Get data display from amountMB
+//       let dataDisplay = plan.data || plan.dataDisplay;
+//       if (!dataDisplay || dataDisplay === '0MB' || dataDisplay === '') {
+//         const mb = plan.amountMB || 0;
+//         if (mb >= 1024) {
+//           const gb = (mb / 1024).toFixed(1);
+//           dataDisplay = `${gb}GB`;
+//         } else {
+//           dataDisplay = `${mb}MB`;
+//         }
+//       }
+
+//       // ✅ FIX: Get validity from schema fields
+//       let validityDisplay = '30 days';
+//       const validityNum = plan.validity || 0;
+//       const validityUnit = plan.validityUnit || 'DAYS';
+      
+//       if (validityNum > 0) {
+//         const unit = validityUnit.toUpperCase();
+//         if (unit === 'HOURS' || unit === 'MINUTES') {
+//           validityDisplay = `${validityNum} ${unit.toLowerCase()}`;
+//         } else if (unit === 'DAYS') {
+//           if (validityNum === 1) validityDisplay = '1 day';
+//           else if (validityNum < 7) validityDisplay = `${validityNum} days`;
+//           else if (validityNum === 7) validityDisplay = '7 days';
+//           else if (validityNum < 30) validityDisplay = `${validityNum} days`;
+//           else if (validityNum === 30) validityDisplay = '30 days';
+//           else if (validityNum === 60) validityDisplay = '60 days';
+//           else if (validityNum === 90) validityDisplay = '90 days';
+//           else if (validityNum === 365) validityDisplay = '1 year';
+//           else validityDisplay = `${validityNum} days`;
+//         } else if (unit === 'MONTHS') {
+//           if (validityNum === 1) validityDisplay = '1 month';
+//           else if (validityNum < 12) validityDisplay = `${validityNum} months`;
+//           else if (validityNum === 12) validityDisplay = '1 year';
+//           else validityDisplay = `${validityNum} months`;
+//         } else if (unit === 'YEARS') {
+//           if (validityNum === 1) validityDisplay = '1 year';
+//           else validityDisplay = `${validityNum} years`;
+//         }
+//       }
+
+//       const priceDisplay = `₦${displayPrice.toFixed(0)}`;
+      
+//       // ✅ Store plan in cache with ourPrice
+//       planMap.set(index, {
+//         planData: {
+//           data: dataDisplay,
+//           price: displayPrice, // ✅ ourPrice
+//           validity: validityDisplay,
+//           planCode: plan.planCode || plan.id || dataDisplay,
+//           amountMB: plan.amountMB || 0,
+//         },
+//         provider: network,
+//         network: network,
+//       });
+      
+//       // ✅ Build message line
+//       message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})\n`;
+//       index++;
+//       plansAdded++;
+//     }
+
+//     console.log(`[Data Plans] Added ${plansAdded} WhatsApp plans to message using ourPrice`);
+
+//     if (plansAdded === 0) {
+//       console.log('[Data Plans] No valid WhatsApp plans with ourPrice > 0, using fallback');
+//       return getFallbackPlansForNetwork(network);
+//     }
+
+//     // ✅ Add footer with instructions
+//     message += `\n_Reply with DATA [index] to buy_\n`;
+//     message += `_Example: DATA 1_\n`;
+//     message += `_For another number: DATA [phone] [index]_`;
+
+//     // ✅ Cache the plans
+//     cachedNetworkPlans.set(cacheKey, planMap);
+//     cachedNetworkMessages.set(cacheKey, message);
+//     networkPlanCacheTime.set(cacheKey, Date.now());
+    
+//     console.log(`[Data Plans] Cached ${planMap.size} WhatsApp plans for ${network}`);
+//     console.log(`[Data Plans] Message preview:`, message.substring(0, 100) + '...');
+    
+//     return message;
+    
+//   } catch (error) {
+//     console.error('[Data Plans] Error fetching plans:', error);
+//     return getFallbackPlansForNetwork(network);
+//   }
+// }
 
 function getFallbackPlansForNetwork(network: string): string {
   const fallbackPlans: Record<string, any[]> = {
@@ -747,6 +1071,8 @@ function getFallbackPlansForNetwork(network: string): string {
   return cachedNetworkMessages.get(cacheKey)!;
 }
 
+
+
 async function getPlanByIndexForNetwork(network: string, indexNumber: number): Promise<{ planData: any, provider: string, network: string } | null> {
   const cacheKey = network.toUpperCase();
   
@@ -765,7 +1091,7 @@ async function getPlanByIndexForNetwork(network: string, indexNumber: number): P
   
   const plan = planMap.get(indexNumber);
   if (plan) {
-    console.log(`[Data Plans] Found plan at index ${indexNumber}: ${plan.planData.data}`);
+    console.log(`[Data Plans] Found plan at index ${indexNumber}: ${plan.planData.data} - ₦${plan.planData.price}`);
   } else {
     console.log(`[Data Plans] No plan at index ${indexNumber}, map size: ${planMap.size}`);
   }
