@@ -21,6 +21,7 @@ import {
   JobType,
   JobStatus,
   RefundStatus,
+  PlanStatus
 } from "@prisma/client";
 import { 
   createPalmPayVirtualAccountForUser, 
@@ -540,6 +541,10 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 // GET AVAILABLE PLANS FOR NETWORK - FIXED
 // ============================================================
 
+// ============================================================
+// GET AVAILABLE PLANS FOR NETWORK - DIRECT DATABASE FETCH
+// ============================================================
+
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
   try {
     const cacheKey = network.toUpperCase();
@@ -551,144 +556,186 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
       return cachedNetworkMessages.get(cacheKey)!;
     }
     
-    const apiUrl = getApiUrl();
-    const url = `${apiUrl}/api/vendors/plans?serviceType=DATA`;
-    
-    console.log(`[Data Plans] Fetching from: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'User-Agent': 'Bilscore-WhatsApp/1.0',
+    console.log(`[Data Plans] Fetching plans for ${network} from database...`);
+
+    // ✅ Get active vendor for DATA service
+    const vendorService = await prisma.vendorService.findFirst({
+      where: {
+        serviceType: VtuType.DATA,
+        isActive: true,
       },
-      signal: AbortSignal.timeout(10000),
+      include: {
+        vendor: true,
+      },
+      orderBy: {
+        priority: 'asc',
+      },
     });
 
-    if (!response.ok) {
-      console.log(`[Data Plans] API returned ${response.status}, using fallback`);
+    if (!vendorService) {
+      console.log('[Data Plans] No active vendor found for DATA');
       return getFallbackPlansForNetwork(network);
     }
 
-    const result = await response.json();
-    console.log(`[Data Plans] API Response success: ${result.success}`);
-    
+    console.log(`[Data Plans] Active vendor: ${vendorService.vendor.name} (${vendorService.vendor.code})`);
+
+    // ✅ Build where clause
+    const networkUpper = network.toUpperCase();
+    const validNetworks = ['MTN', 'GLO', 'AIRTEL', '9MOBILE', 'NINEMOBILE'];
+    const where: any = {
+      vendorId: vendorService.vendorId,
+      isActive: true,
+      status: PlanStatus.ACTIVE,
+    };
+
+    // ✅ Add network filter if valid
+    if (validNetworks.includes(networkUpper)) {
+      where.network = networkUpper as NetworkProvider;
+    }
+
+    console.log(`[Data Plans] Where clause:`, JSON.stringify(where));
+
+    // ✅ Fetch plans from database
+    const dbPlans = await prisma.dataPlan.findMany({
+      where,
+      orderBy: [
+        { network: 'asc' },
+        { planType: 'asc' },
+        { amountMB: 'asc' },
+      ],
+    });
+
+    console.log(`[Data Plans] Database returned ${dbPlans.length} plans`);
+
+    if (dbPlans.length === 0) {
+      console.log('[Data Plans] No plans found in database, using fallback');
+      return getFallbackPlansForNetwork(network);
+    }
+
+    // ✅ Extract category from plan based on validity
+    function extractCategory(plan: any): string {
+      // Check if it's an SME plan
+      const isSME = plan.planType?.toUpperCase() === 'SME' || 
+                    plan.name?.toUpperCase().includes('SME');
+      if (isSME) {
+        return 'SME';
+      }
+
+      // Check if it's a Corporate plan
+      const isCorporate = plan.planType?.toUpperCase() === 'CORPORATE' || 
+                          plan.planType?.toUpperCase() === 'COOPERATE' ||
+                          plan.name?.toUpperCase().includes('COOPERATE') ||
+                          plan.name?.toUpperCase().includes('CORPORATE');
+      if (isCorporate) {
+        return 'Corporate';
+      }
+
+      // For all other plans, categorize by validity
+      const validityDays = plan.validityDays || plan.validity || 0;
+      const validityUnit = plan.validityUnit?.toUpperCase() || 'DAYS';
+      
+      if (validityUnit === 'HOURS' || validityUnit === 'MINUTES') {
+        return 'Hourly';
+      }
+      
+      if (validityUnit === 'DAYS') {
+        if (validityDays <= 1) return 'Daily';
+        if (validityDays <= 7) return 'Weekly';
+        if (validityDays <= 30) return 'Monthly';
+        if (validityDays <= 60) return '2 Monthly';
+        if (validityDays <= 365) return 'Yearly';
+        return 'Monthly';
+      }
+      
+      if (validityUnit === 'MONTHS') {
+        if (validityDays <= 1) return 'Monthly';
+        if (validityDays <= 2) return '2 Monthly';
+        if (validityDays <= 12) return 'Yearly';
+        return 'Monthly';
+      }
+      
+      if (validityUnit === 'YEARS') {
+        return 'Yearly';
+      }
+
+      return 'Monthly'; // Default
+    }
+
     const planMap = new Map<number, { planData: any, provider: string, network: string }>();
     let message = `Available Data Plans for ${network}:\n\n`;
     let index = 1;
-    let foundPlans = false;
 
-    if (result.success && result.data) {
-      let plansData = result.data.plans || result.data.networks || [];
+    // ✅ Process plans from database
+    for (const plan of dbPlans) {
+      // Get display price
+      let displayPrice = 0;
+      if (plan.ourPrice !== undefined && plan.ourPrice !== null && Number(plan.ourPrice) > 0) {
+        displayPrice = Number(plan.ourPrice);
+      } else if (plan.price !== undefined && plan.price !== null && Number(plan.price) > 0) {
+        displayPrice = Number(plan.price);
+      }
       
-      if (!Array.isArray(plansData) && typeof plansData === 'object') {
-        for (const key of Object.keys(result.data)) {
-          if (Array.isArray(result.data[key]) && result.data[key].length > 0) {
-            plansData = result.data[key];
-            break;
-          }
+      if (displayPrice <= 0) continue;
+
+      // Get data display
+      let dataDisplay = plan.data || plan.dataDisplay || `${plan.amountMB || 0}MB`;
+      if (!dataDisplay || dataDisplay === '0MB') {
+        const mb = plan.amountMB || 0;
+        if (mb >= 1024) {
+          dataDisplay = `${(mb / 1024).toFixed(1)}GB`;
+        } else {
+          dataDisplay = `${mb}MB`;
         }
       }
-      
-      if (!Array.isArray(plansData) || plansData.length === 0) {
-        console.log(`[Data Plans] No plans found in response`);
-        return getFallbackPlansForNetwork(network);
+
+      // Get validity display
+      let validityDisplay = '30 days';
+      if (plan.validity) {
+        validityDisplay = typeof plan.validity === 'string' ? plan.validity : `${plan.validity} days`;
+      } else if (plan.validityDays) {
+        const days = typeof plan.validityDays === 'number' ? plan.validityDays : parseInt(plan.validityDays) || 30;
+        if (days === 1) validityDisplay = '1 day';
+        else if (days < 7) validityDisplay = `${days} days`;
+        else if (days === 7) validityDisplay = '7 days';
+        else if (days < 30) validityDisplay = `${days} days`;
+        else if (days === 30) validityDisplay = '30 days';
+        else if (days === 60) validityDisplay = '60 days';
+        else if (days === 365) validityDisplay = '1 year';
+        else validityDisplay = `${days} days`;
       }
 
-      console.log(`[Data Plans] Found ${plansData.length} providers`);
-
-      const networkUpper = network.toUpperCase();
-      let networkProvider = plansData.find((p: any) => {
-        const name = (p.name || p.provider || p.network || '').toUpperCase();
-        return name === networkUpper || name.includes(networkUpper) || networkUpper.includes(name);
+      const categoryName = extractCategory(plan);
+      const categoryDisplay = categoryName !== 'Monthly' ? `[${categoryName}] ` : '';
+      const priceDisplay = `NGN ${displayPrice.toFixed(0)}`;
+      
+      planMap.set(index, {
+        planData: {
+          data: dataDisplay,
+          price: displayPrice,
+          validity: validityDisplay,
+          planCode: plan.planCode || plan.id || dataDisplay,
+          amountMB: plan.amountMB || 0,
+        },
+        provider: network,
+        network: network,
       });
-
-      if (!networkProvider) {
-        networkProvider = plansData.find((p: any) => {
-          return p.categories && Array.isArray(p.categories) && p.categories.length > 0;
-        });
-      }
-
-      if (!networkProvider && plansData.length > 0) {
-        networkProvider = plansData[0];
-      }
-
-      if (networkProvider) {
-        const providerName = networkProvider.name || networkProvider.provider || networkProvider.network || network;
-        
-        let allPlans: any[] = [];
-        
-        if (networkProvider.categories && Array.isArray(networkProvider.categories)) {
-          for (const category of networkProvider.categories) {
-            const categoryPlans = category.plans || [];
-            for (const plan of categoryPlans) {
-              if (plan.price && Number(plan.price) > 0) {
-                allPlans.push({
-                  data: plan.data || plan.name || `${plan.amountMB || 0}MB`,
-                  price: Number(plan.price),
-                  validity: plan.validity || plan.duration || '30 days',
-                  planCode: plan.planCode || plan.code || plan.id || plan.data,
-                  amountMB: plan.amountMB || 0,
-                  category: category.name || 'Monthly',
-                });
-              }
-            }
-          }
-        }
-
-        if (allPlans.length === 0 && networkProvider.plans && Array.isArray(networkProvider.plans)) {
-          for (const plan of networkProvider.plans) {
-            if (plan.price && Number(plan.price) > 0) {
-              allPlans.push({
-                data: plan.data || plan.name || `${plan.amountMB || 0}MB`,
-                price: Number(plan.price),
-                validity: plan.validity || plan.duration || '30 days',
-                planCode: plan.planCode || plan.code || plan.id || plan.data,
-                amountMB: plan.amountMB || 0,
-                category: plan.category || 'Monthly',
-              });
-            }
-          }
-        }
-
-        allPlans.sort((a, b) => a.price - b.price);
-
-        if (allPlans.length > 0) {
-          foundPlans = true;
-          message = `Available Data Plans for ${providerName}:\n\n`;
-          
-          allPlans.forEach((plan) => {
-            const priceDisplay = `NGN ${plan.price.toFixed(0)}`;
-            const validityDisplay = plan.validity ? ` (${plan.validity})` : '';
-            const categoryDisplay = plan.category && plan.category !== 'Monthly' ? `[${plan.category}] ` : '';
-            
-            planMap.set(index, {
-              planData: {
-                data: plan.data,
-                price: plan.price,
-                validity: plan.validity,
-                planCode: plan.planCode || plan.data,
-                amountMB: plan.amountMB || 0,
-              },
-              provider: providerName,
-              network: network,
-            });
-            
-            message += `  ${index}. ${categoryDisplay}${plan.data} - ${priceDisplay}${validityDisplay}\n`;
-            index++;
-          });
-        }
-      }
+      
+      message += `  ${index}. ${categoryDisplay}${dataDisplay} - ${priceDisplay} (${validityDisplay})\n`;
+      index++;
     }
 
-    if (foundPlans) {
-      cachedNetworkPlans.set(cacheKey, planMap);
-      cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1\nFor another number: DATA [phone] [index]`);
-      networkPlanCacheTime.set(cacheKey, Date.now());
-      return cachedNetworkMessages.get(cacheKey)!;
+    if (planMap.size === 0) {
+      console.log('[Data Plans] No valid plans with price > 0, using fallback');
+      return getFallbackPlansForNetwork(network);
     }
 
-    console.log(`[Data Plans] No plans found for ${network}, using fallback`);
-    return getFallbackPlansForNetwork(network);
+    // ✅ Cache the plans
+    cachedNetworkPlans.set(cacheKey, planMap);
+    cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1\nFor another number: DATA [phone] [index]`);
+    networkPlanCacheTime.set(cacheKey, Date.now());
+    
+    console.log(`[Data Plans] Successfully fetched ${planMap.size} plans for ${network}`);
+    return cachedNetworkMessages.get(cacheKey)!;
     
   } catch (error) {
     console.error('[Data Plans] Error fetching plans:', error);
