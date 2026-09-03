@@ -12,14 +12,15 @@ interface QRDisplayPageProps {
     p?: string;
     h?: string;
     e?: string;
+    u?: string; // ✅ userId
   };
 }
 
 export default async function QRDisplayPage({ params, searchParams }: QRDisplayPageProps) {
   const { id } = params;
-  const { t: type, p: provider, h: hash, e: expiresAt } = searchParams;
+  const { t: type, p: provider, h: hash, e: expiresAt, u: userId } = searchParams;
 
-  console.log("🔍 [QR Display] Params:", { id, type, provider, hash, expiresAt });
+  console.log("🔍 [QR Display] Params:", { id, type, provider, hash, expiresAt, userId });
 
   // ✅ Validate required parameters
   if (!id || id === "undefined") {
@@ -27,18 +28,18 @@ export default async function QRDisplayPage({ params, searchParams }: QRDisplayP
     redirect("/");
   }
 
-  if (!type || !provider || !hash) {
-    console.error("❌ [QR Display] Missing required parameters:", { type, provider, hash });
+  if (!type || !provider || !hash || !userId) {
+    console.error("❌ [QR Display] Missing required parameters:", { type, provider, hash, userId });
     redirect("/");
   }
 
-  // ✅ Verify the QR hash using the same function as Buy Now
+  // ✅ Verify the QR hash using userId
   const isValid = verifyQRHash({
     identifier: id,
     type: type,
     provider: provider,
+    userId: userId, // ✅ Include userId in verification
     hash: hash,
-    expiresAt: expiresAt || undefined,
   });
 
   if (!isValid) {
@@ -46,8 +47,8 @@ export default async function QRDisplayPage({ params, searchParams }: QRDisplayP
     notFound();
   }
 
-  // ✅ Build the buy-now link (what the QR code points to)
-  const buyNowLink = `/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+  // ✅ Build the buy-now link with userId
+  const buyNowLink = `/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}&u=${userId}${expiresAt ? `&e=${expiresAt}` : ''}`;
 
   // ✅ Support contact info
   const supportInfo = {
@@ -70,6 +71,7 @@ export default async function QRDisplayPage({ params, searchParams }: QRDisplayP
       supportWebsite={supportInfo.website}
       hash={hash}
       expiresAt={expiresAt || undefined}
+      userId={userId} // ✅ Pass userId to client
     />
   );
 }

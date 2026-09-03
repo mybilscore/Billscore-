@@ -5,6 +5,8 @@ import { prisma } from "~/lib/db";
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const meterNumber = searchParams.get("meterNumber");
+  const userId = searchParams.get("userId");
+  const includeUser = searchParams.get("includeUser") === "true";
 
   if (!meterNumber) {
     return NextResponse.json(
@@ -14,11 +16,35 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Use findFirst instead of findUnique since meterNumber is not unique by itself
+    // Build where clause
+    const where: any = { 
+      meterNumber: meterNumber 
+    };
+    
+    // Filter by userId if provided
+    if (userId) {
+      where.userId = userId;
+    }
+
+    // Use findFirst - meterNumber should be unique per user
     const meter = await prisma.savedMeter.findFirst({
-      where: { 
-        meterNumber: meterNumber 
-      },
+      where: where,
+      include: includeUser ? {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            hasWallet: true,
+            wallet: {
+              select: {
+                walletBalance: true,
+              },
+            },
+          },
+        },
+      } : undefined,
     });
 
     if (!meter) {

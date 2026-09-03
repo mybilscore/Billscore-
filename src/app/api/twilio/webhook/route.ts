@@ -139,6 +139,7 @@ function getValidDiscosList(): string {
   return list;
 }
 
+// ✅ Correct - WITH userId
 function generateMeterQRCode(userId: string, meterNumber: string, disco: string): Promise<string> {
   try {
     const appUrl = getAppUrl();
@@ -147,12 +148,14 @@ function generateMeterQRCode(userId: string, meterNumber: string, disco: string)
       identifier: meterNumber,
       type: "electricity",
       provider: disco,
+      userId: userId, // ✅ Included in hash
     });
     const url = new URL(qrValue);
     const params = new URLSearchParams(url.search);
     const hash = params.get('h');
     const expiresAt = params.get('e');
-    const qrDisplayLink = `${baseUrl}/qr/display/${meterNumber}?t=electricity&p=${encodeURIComponent(disco)}&h=${hash}${expiresAt ? `&e=${expiresAt}` : ''}`;
+    const qrDisplayLink = `${baseUrl}/qr/display/${meterNumber}?t=electricity&p=${encodeURIComponent(disco)}&h=${hash}&u=${userId}${expiresAt ? `&e=${expiresAt}` : ''}`;
+    //                                                                                              ^^^^^^^^^^^^^^^^ ✅ Added userId
     return Promise.resolve(qrDisplayLink);
   } catch (error) {
     console.error("QR code generation error:", error);
@@ -1473,6 +1476,10 @@ Type CABLE to see all your decoders and subscribe!`;
 // LIST METERS
 // ============================================================
 
+// ============================================================
+// LIST METERS - WITH QR DISPLAY LINK
+// ============================================================
+
 async function listMeters(userId: string): Promise<string> {
   const meters = await prisma.savedMeter.findMany({
     where: { userId: userId },
@@ -1492,24 +1499,41 @@ ${discosList}
 Example: ADDMETER 1234567890 ABUJA HOME`;
   }
 
-  let message = "Your Saved Meters:\n\n";
-  meters.forEach((meter: any, index: number) => {
-    const defaultTag = meter.isDefault ? " (Default)" : "";
-    message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-    message += `   ${meter.disco}\n`;
-    message += `   ${meter.meterNumber}\n`;
+  let message = "📋 *Your Saved Meters*\n\n";
+  
+  for (const meter of meters) {
+    const defaultTag = meter.isDefault ? " 🔹 (Default)" : "";
+    message += `*${meter.name || meter.meterNumber}*${defaultTag}\n`;
+    message += `   🏢 ${meter.disco}\n`;
+    message += `   📟 ${meter.meterNumber}\n`;
+    
     if (meter.customerName) {
-      message += `   Customer: ${meter.customerName}\n`;
+      message += `   👤 ${meter.customerName}\n`;
     }
     if (meter.customerAddress) {
-      message += `   Address: ${meter.customerAddress}\n`;
+      message += `   📍 ${meter.customerAddress}\n`;
     }
+    
+    // ✅ Generate QR display link for each meter
+    try {
+      const qrLink = await generateMeterQRCode(userId, meter.meterNumber, meter.disco);
+      if (qrLink) {
+        message += `   📱 QR: ${qrLink}\n`;
+      }
+    } catch (error) {
+      console.error(`Failed to generate QR for meter ${meter.meterNumber}:`, error);
+      // Continue without QR link
+    }
+    
     message += `\n`;
-  });
+  }
 
-  message += `To buy electricity: POWER [number] [amount]
-To delete: DELETEMETER [meter_number]
-To set default: SETDEFAULTMETER [meter_number]`;
+  message += `\n--- Commands ---
+🔹 POWER [amount] - Buy for default meter (no PIN)
+🔹 POWER [index] [amount] - Buy for saved meter (no PIN)
+🔹 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
+🔹 QR [meter_number] - Get QR code for a specific meter
+🔹 METERS - Show this list again`;
 
   return message;
 }
@@ -2034,6 +2058,9 @@ ELECTRIC [index] [amount] - Buy for saved meter (no PIN)
 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
+
+QR [meter_number] - Get QR code for a specific meter
+QR [index] - Get QR code by meter index
 
 Referral:
 REFERRAL - Get referral link
@@ -2668,6 +2695,93 @@ DATA [phone] [index] - Buy data for another number (PIN required)
 
 ${plans}`;
   }
+
+
+
+  // In processWhatsAppCommand function, add this after the METERS command:
+
+// ============================================================
+// QR COMMAND - Get QR code for a specific meter
+// ============================================================
+if (command === "QR" || command.startsWith("QR ")) {
+  userSessions.delete(user.id);
+  
+  const qrParts = body.split(" ").filter(p => p.length > 0);
+  
+  // If just "QR", show instructions
+  if (qrParts.length === 1) {
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      take: 5,
+    });
+    
+    if (meters.length === 0) {
+      return `No saved meters found.\n\nAdd a meter first with:\nADDMETER [meter_number] [disco_code] [name]`;
+    }
+    
+    let msg = "📱 *Get QR Code*\n\nReply with:\nQR [meter_number] or QR [index]\n\nExample: QR 1234567890\n\nYour saved meters:\n";
+    meters.forEach((meter, index) => {
+      msg += `   ${index + 1}. ${meter.meterNumber} - ${meter.name || meter.disco}\n`;
+    });
+    if (meters.length > 5) {
+      msg += `\n... and ${meters.length - 5} more. Use METERS to see all.`;
+    }
+    return msg;
+  }
+  
+  // Get the meter number or index
+  const query = qrParts[1];
+  let meterNumber = query;
+  let foundMeter = null;
+  
+  // Check if it's an index
+  if (/^\d+$/.test(query)) {
+    const index = parseInt(query) - 1;
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+    
+    if (index >= 0 && index < meters.length) {
+      foundMeter = meters[index];
+      meterNumber = foundMeter.meterNumber;
+    } else {
+      return `Invalid meter index: ${query}\n\nUse METERS to see your saved meters.`;
+    }
+  } else {
+    // Find by meter number
+    foundMeter = await prisma.savedMeter.findFirst({
+      where: { 
+        userId: user.id, 
+        meterNumber: meterNumber 
+      },
+    });
+  }
+  
+  if (!foundMeter) {
+    return `Meter ${meterNumber} not found.\n\nUse METERS to see your saved meters.`;
+  }
+  
+  // Generate QR code
+  const qrLink = await generateMeterQRCode(userId, foundMeter.meterNumber, foundMeter.disco);
+  
+  if (!qrLink) {
+    return `Failed to generate QR code for meter ${foundMeter.meterNumber}. Please try again.`;
+  }
+  
+  let response = `📱 *QR Code for ${foundMeter.name || 'Meter'}*\n\n`;
+  response += `🏢 ${foundMeter.disco}\n`;
+  response += `📟 ${foundMeter.meterNumber}\n`;
+  if (foundMeter.customerName) {
+    response += `👤 ${foundMeter.customerName}\n`;
+  }
+  response += `\n🔗 *QR Link:*\n${qrLink}\n\n`;
+  response += `📌 Print this QR code and paste it on your meter for quick payments.\n\n`;
+  response += `To buy electricity: POWER ${foundMeter.meterNumber} [amount]`;
+  
+  return response;
+}
 
   // ============================================================
   // METER MANAGEMENT

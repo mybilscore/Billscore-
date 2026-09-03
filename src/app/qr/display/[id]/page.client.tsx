@@ -1,4 +1,3 @@
-// app/qr/display/[id]/page.client.tsx
 "use client";
 
 import { useRef } from "react";
@@ -24,6 +23,7 @@ interface QRDisplayClientProps {
   supportWebsite: string;
   hash: string;
   expiresAt?: string;
+  userId: string;
 }
 
 export function QRDisplayClient({
@@ -37,6 +37,7 @@ export function QRDisplayClient({
   supportWebsite,
   hash,
   expiresAt,
+  userId,
 }: QRDisplayClientProps) {
   const qrRef = useRef<HTMLDivElement>(null);
 
@@ -47,11 +48,12 @@ export function QRDisplayClient({
     return process.env.NEXTAUTH_URL || 'http://localhost:3000';
   };
 
-  // ✅ Generate QR value for the Buy Now link
+  // Generate QR value for the Buy Now link with userId
   const qrValue = generateQRUrl(getBaseUrl(), {
     identifier: identifier,
     type: type.toLowerCase(),
     provider: provider,
+    userId: userId,
   });
 
   const urlParams = new URLSearchParams(qrValue.split('?')[1]);
@@ -61,154 +63,155 @@ export function QRDisplayClient({
     window.print();
   };
 
-  // ✅ Check if expired
   const isExpired = expiresAt ? new Date(expiresAt) < new Date() : false;
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center p-4 print:p-2">
-      <div className="w-full max-w-sm bg-white shadow-xl rounded-2xl print:shadow-none print:rounded-none p-4 print:p-3 border print:border-2 print:border-black">
-        
-        {/* ⚠️ Expired Badge */}
-        {isExpired && (
-          <div className="mb-2 bg-red-600 border-2 border-red-800 rounded-lg p-1.5 text-center print:mb-1">
-            <p className="text-[10px] font-bold text-white uppercase tracking-wider print:text-[8px]">
-              ⚠️ This QR code has expired
-            </p>
-          </div>
-        )}
+    <>
+      <div className="min-h-screen bg-white flex items-center justify-center p-4 print:p-2">
+        <div className="w-full max-w-sm bg-white shadow-xl rounded-2xl print:shadow-none print:rounded-none p-4 print:p-3 border print:border-2 print:border-black">
+          
+          {/* Expired Badge */}
+          {isExpired && (
+            <div className="mb-2 bg-red-600 border-2 border-red-800 rounded-lg p-1.5 text-center print:mb-1">
+              <p className="text-[10px] font-bold text-white uppercase tracking-wider print:text-[8px]">
+                ⚠️ This QR code has expired
+              </p>
+            </div>
+          )}
 
-        {/* ✅ Valid Badge */}
-        {!isExpired && (
-          <div className="mb-2 bg-green-50 border-2 border-green-500 rounded-lg p-1 text-center print:mb-1 print:border-green-700">
-            <div className="flex items-center justify-center gap-1.5">
-              <CheckCircle className="h-3.5 w-3.5 text-green-600 print:text-green-800" />
-              <p className="text-[9px] font-bold text-green-700 uppercase tracking-wider print:text-[8px] print:text-green-900">
-                ✅ Valid QR Code
+          {/* Valid Badge */}
+          {!isExpired && (
+            <div className="mb-2 bg-green-50 border-2 border-green-500 rounded-lg p-1 text-center print:mb-1 print:border-green-700">
+              <div className="flex items-center justify-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5 text-green-600 print:text-green-800" />
+                <p className="text-[9px] font-bold text-green-700 uppercase tracking-wider print:text-[8px] print:text-green-900">
+                  ✅ Valid QR Code
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* QR Code */}
+          <div ref={qrRef} className="flex justify-center mb-3 print:mb-2">
+            <div className="rounded-xl border-2 border-gray-300 bg-white p-3 print:border-4 print:border-black">
+              {qrValue && (
+                <QRCode
+                  value={qrValue}
+                  size={300}
+                  style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                  viewBox="0 0 256 256"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="H"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Meter Number */}
+          <div className="text-center mb-2 print:mb-1.5">
+            <div className="bg-gray-100 rounded-lg py-1.5 px-3 print:bg-transparent print:border-2 print:border-black">
+              <p className="text-[10px] text-gray-600 print:text-[8px] uppercase tracking-wider font-semibold">Meter Number</p>
+              <p className="text-lg font-mono font-bold text-black print:text-black tracking-wider">
+                {meterNumber}
               </p>
             </div>
           </div>
-        )}
 
-        {/* ✅ QR Code - MAXIMUM SIZE */}
-        <div ref={qrRef} className="flex justify-center mb-3 print:mb-2">
-          <div className="rounded-xl border-2 border-gray-300 bg-white p-3 print:border-4 print:border-black">
-            {qrValue && (
-              <QRCode
-                value={qrValue}
-                size={300}
-                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                viewBox="0 0 256 256"
-                bgColor="#ffffff"
-                fgColor="#000000"
-                level="H"
-              />
-            )}
-          </div>
-        </div>
-
-        {/* ✅ Meter Number - Darker */}
-        <div className="text-center mb-2 print:mb-1.5">
-          <div className="bg-gray-100 rounded-lg py-1.5 px-3 print:bg-transparent print:border-2 print:border-black">
-            <p className="text-[10px] text-gray-600 print:text-[8px] uppercase tracking-wider font-semibold">Meter Number</p>
-            <p className="text-lg font-mono font-bold text-black print:text-black tracking-wider">
-              {meterNumber}
+          {/* Provider */}
+          <div className="text-center mb-2 print:mb-1.5">
+            <p className="text-xs font-semibold text-gray-800 print:text-black">
+              {provider}
             </p>
           </div>
-        </div>
 
-        {/* ✅ Provider - Darker */}
-        <div className="text-center mb-2 print:mb-1.5">
-          <p className="text-xs font-semibold text-gray-800 print:text-black">
-            {provider}
-          </p>
-        </div>
-
-        {/* QR Code ID / Hash - Darker */}
-        <div className="text-center mb-2 print:mb-1.5">
-          <div className="inline-flex items-center gap-1.5 text-[10px] text-gray-600 print:text-black bg-gray-50 px-2 py-0.5 rounded-full print:bg-transparent print:border print:border-black">
-            <Shield className="h-2.5 w-2.5 text-gray-700 print:text-black" />
-            <span className="font-mono font-medium text-gray-700 print:text-black">#{hashShort}</span>
-            {!isExpired && (
-              <>
-                <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
-                <span className="text-green-700 font-bold print:text-black">● Valid</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div className="border-t border-gray-300 my-2 print:my-1.5 print:border-black" />
-
-        {/* ✅ Bilscore Branding - WITH LOGO IMAGE */}
-        <div className="text-center mb-2 print:mb-1.5">
-          <div className="flex items-center justify-center gap-2">
-            <div className="h-8 w-8 rounded-lg overflow-hidden flex-shrink-0 print:h-7 print:w-7 print:border-2 print:border-black">
-              <img
-                src="/uploads/log-icon.jpeg"
-                alt="Bilscore"
-                className="h-full w-full object-cover"
-              />
+          {/* QR Code ID / Hash */}
+          <div className="text-center mb-2 print:mb-1.5">
+            <div className="inline-flex items-center gap-1.5 text-[10px] text-gray-600 print:text-black bg-gray-50 px-2 py-0.5 rounded-full print:bg-transparent print:border print:border-black">
+              <Shield className="h-2.5 w-2.5 text-gray-700 print:text-black" />
+              <span className="font-mono font-medium text-gray-700 print:text-black">#{hashShort}</span>
+              {!isExpired && (
+                <>
+                  <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
+                  <span className="text-green-700 font-bold print:text-black">● Valid</span>
+                </>
+              )}
             </div>
-            <span className="text-base font-bold text-gray-900 print:text-black tracking-tight">Bilscore</span>
-            <span className="text-[10px] text-gray-500 print:text-black">|</span>
-            <span className="text-[10px] font-medium text-gray-700 print:text-black">Pay Your Bill</span>
           </div>
-        </div>
 
-        {/* ✅ Support / Contact Information - Darker */}
-        <div className="text-center space-y-0.5 print:space-y-0 bg-gray-50 rounded-lg p-1.5 print:bg-transparent print:p-0">
-          <p className="text-[10px] font-semibold text-gray-700 print:text-black">
-            📞 Need help? Contact us:
-          </p>
-          <div className="flex items-center justify-center gap-3 text-[10px] font-semibold text-gray-800 print:text-black">
-            <span className="flex items-center gap-1">
-              <Phone className="h-3 w-3 text-gray-700 print:text-black" />
-              {supportPhone}
-            </span>
-            <span className="w-px h-3 bg-gray-400 print:bg-black" />
-            <span className="flex items-center gap-1">
-              <Mail className="h-3 w-3 text-gray-700 print:text-black" />
-              {supportEmail}
-            </span>
+          {/* Divider */}
+          <div className="border-t border-gray-300 my-2 print:my-1.5 print:border-black" />
+
+          {/* Bilscore Branding */}
+          <div className="text-center mb-2 print:mb-1.5">
+            <div className="flex items-center justify-center gap-2">
+              <div className="h-8 w-8 rounded-lg overflow-hidden flex-shrink-0 print:h-7 print:w-7 print:border-2 print:border-black">
+                <img
+                  src="/uploads/log-icon.jpeg"
+                  alt="Bilscore"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <span className="text-base font-bold text-gray-900 print:text-black tracking-tight">Bilscore</span>
+              <span className="text-[10px] text-gray-500 print:text-black">|</span>
+              <span className="text-[10px] font-medium text-gray-700 print:text-black">Pay Your Bill</span>
+            </div>
           </div>
-          <p className="text-[10px] font-medium text-gray-600 print:text-black">
-            {supportWebsite}
-          </p>
-        </div>
 
-        {/* ✅ Footer - Scan to pay - Darker */}
-        <div className="mt-2 pt-1.5 border-t border-gray-300 text-center print:mt-1.5 print:pt-1 print:border-black">
-          <p className="text-xs font-bold text-gray-800 print:text-black">
-            📱 Scan to Pay
-          </p>
-          <div className="flex items-center justify-center gap-2 mt-1">
-            <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
-              <span>🔒</span> Secured
-            </span>
-            <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
-            <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
-              <span>⚡</span> Instant
-            </span>
-            <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
-            <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
-              <span>📱</span> QR Payment
-            </span>
+          {/* Support / Contact Information */}
+          <div className="text-center space-y-0.5 print:space-y-0 bg-gray-50 rounded-lg p-1.5 print:bg-transparent print:p-0">
+            <p className="text-[10px] font-semibold text-gray-700 print:text-black">
+              📞 Need help? Contact us:
+            </p>
+            <div className="flex items-center justify-center gap-3 text-[10px] font-semibold text-gray-800 print:text-black">
+              <span className="flex items-center gap-1">
+                <Phone className="h-3 w-3 text-gray-700 print:text-black" />
+                {supportPhone}
+              </span>
+              <span className="w-px h-3 bg-gray-400 print:bg-black" />
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3 text-gray-700 print:text-black" />
+                {supportEmail}
+              </span>
+            </div>
+            <p className="text-[10px] font-medium text-gray-600 print:text-black">
+              {supportWebsite}
+            </p>
           </div>
-        </div>
 
-        {/* Print Button */}
-        <button
-          onClick={handlePrint}
-          className="mt-3 w-full rounded-lg bg-[#1e293b] py-2.5 text-sm font-semibold text-white hover:bg-[#0f172a] transition-colors flex items-center justify-center gap-2 print:hidden shadow-lg"
-        >
-          <Printer className="h-4 w-4" />
-          Print QR Code
-        </button>
+          {/* Footer - Scan to pay */}
+          <div className="mt-2 pt-1.5 border-t border-gray-300 text-center print:mt-1.5 print:pt-1 print:border-black">
+            <p className="text-xs font-bold text-gray-800 print:text-black">
+              📱 Scan to Pay
+            </p>
+            <div className="flex items-center justify-center gap-2 mt-1">
+              <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
+                <span>🔒</span> Secured
+              </span>
+              <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
+              <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
+                <span>⚡</span> Instant
+              </span>
+              <span className="w-px h-2.5 bg-gray-400 print:bg-black" />
+              <span className="text-[8px] font-medium text-gray-600 print:text-black flex items-center gap-0.5">
+                <span>📱</span> QR Payment
+              </span>
+            </div>
+          </div>
+
+          {/* Print Button */}
+          <button
+            onClick={handlePrint}
+            className="mt-3 w-full rounded-lg bg-[#1e293b] py-2.5 text-sm font-semibold text-white hover:bg-[#0f172a] transition-colors flex items-center justify-center gap-2 print:hidden shadow-lg"
+          >
+            <Printer className="h-4 w-4" />
+            Print QR Code
+          </button>
+        </div>
       </div>
 
-      {/* Print Styles */}
-      <style jsx global>{`
+      {/* ✅ Fixed: Use regular style tag instead of styled-jsx */}
+      <style>{`
         @media print {
           body {
             background: white !important;
@@ -326,7 +329,7 @@ export function QRDisplayClient({
             color: #15803d !important;
           }
           .print\\:text-red-700 {
-            color: #b91c1c !important;
+            color: #b91c1b !important;
           }
           .print\\:text-white {
             color: white !important;
@@ -385,7 +388,6 @@ export function QRDisplayClient({
           .print\\:font-bold {
             font-weight: 700 !important;
           }
-          /* Ensure logo prints properly */
           .print\\:rounded-none {
             border-radius: 0 !important;
           }
@@ -394,6 +396,6 @@ export function QRDisplayClient({
           }
         }
       `}</style>
-    </div>
+    </>
   );
 }

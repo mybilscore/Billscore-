@@ -15,15 +15,16 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
-  ShoppingBag,
-  Clock,
   Shield,
   QrCode,
   Copy,
   Check,
-  Calendar,
-  ChevronDown,
-  ChevronUp,
+  User,
+  Wallet,
+  Clock,
+  Mail,
+  RefreshCw,
+  Headphones,
   X,
 } from "lucide-react";
 
@@ -38,6 +39,17 @@ interface MeterData {
   name: string | null;
   meterType: string;
   isDefault: boolean;
+  userId: string;
+  user: {
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    hasWallet: boolean;
+    wallet: {
+      walletBalance: number;
+    } | null;
+  };
 }
 
 interface DecoderData {
@@ -47,31 +59,17 @@ interface DecoderData {
   name: string | null;
   package: string | null;
   isDefault: boolean;
-}
-
-interface UserData {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  hasWallet: boolean;
-  walletBalance: number;
-}
-
-interface ScheduledBill {
-  id: string;
-  type: "ELECTRICITY" | "CABLE_TV";
-  meterNumber?: string;
-  decoderNumber?: string;
-  disco?: string;
-  provider?: string;
-  amount: number;
-  deliveryDate: string;
-  nextRenewalDate: string;
-  status: "PENDING" | "PROCESSING" | "PURCHASED" | "DELIVERED" | "FAILED";
-  token?: string | null;
-  isActive: boolean;
-  isPaused: boolean;
+  userId: string;
+  user: {
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    hasWallet: boolean;
+    wallet: {
+      walletBalance: number;
+    } | null;
+  };
 }
 
 const formatCurrency = (amount: number) => {
@@ -82,16 +80,148 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-NG", { month: "short", day: "numeric", year: "numeric" });
+// ✅ LOADING MODAL
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing Payment...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your transaction</p>
+        </div>
+
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
 };
 
-const getDaysRemaining = (dateString: string) => {
-  const target = new Date(dateString);
-  const now = new Date();
-  const diff = Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  return diff;
+// ✅ SIMPLE ERROR MODAL
+const ErrorModal = ({
+  isOpen,
+  onClose,
+  error,
+  onRetry,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  error: string;
+  onRetry?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  // Simple friendly message mapping
+  const getFriendlyMessage = (err: string): { title: string; message: string } => {
+    const lower = err.toLowerCase();
+    
+    if (lower.includes('timeout') || lower.includes('timed out')) {
+      return {
+        title: "⏱️ Request Timed Out",
+        message: "The payment service is taking too long. Please try again."
+      };
+    }
+    if (lower.includes('vendor') || lower.includes('all vendors failed')) {
+      return {
+        title: "⚠️ Service Unavailable",
+        message: "We're having trouble connecting to the payment service. Please try again."
+      };
+    }
+    if (lower.includes('insufficient') || lower.includes('balance')) {
+      return {
+        title: "💳 Insufficient Balance",
+        message: "The wallet balance is not enough to complete this transaction."
+      };
+    }
+    if (lower.includes('pin')) {
+      return {
+        title: "🔑 Invalid PIN",
+        message: "The transaction PIN you entered is incorrect. Please check and try again."
+      };
+    }
+    if (lower.includes('network') || lower.includes('connection')) {
+      return {
+        title: "🌐 Network Error",
+        message: "Please check your internet connection and try again."
+      };
+    }
+    
+    return {
+      title: "❌ Transaction Failed",
+      message: err.length > 100 ? err.substring(0, 100) + "..." : err
+    };
+  };
+
+  const friendly = getFriendlyMessage(error);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+          <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-xl font-bold text-gray-900 dark:text-white">
+          {friendly.title}
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+          {friendly.message}
+        </p>
+
+        <div className="flex flex-col gap-2">
+          {onRetry && (
+            <button
+              onClick={() => {
+                onRetry();
+                onClose();
+              }}
+              className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01] flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Try Again
+            </button>
+          )}
+          <button
+            onClick={() => {
+              onClose();
+              window.location.href = "/support";
+            }}
+            className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2"
+          >
+            <Headphones className="h-4 w-4" />
+            Contact Support
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Amount Button
@@ -120,189 +250,22 @@ const AmountButton = ({
   );
 };
 
-// Scheduled Bill Modal Component
-const ScheduledBillModal = ({
-  isOpen,
-  onClose,
-  bill,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  bill: ScheduledBill | null;
-}) => {
-  if (!isOpen || !bill) return null;
-
-  const daysRemaining = getDaysRemaining(bill.deliveryDate);
-  const isDue = daysRemaining <= 0;
-  const hasToken = !!bill.token;
-  const isDelivered = bill.status === "DELIVERED";
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "DELIVERED":
-        return <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">Delivered</span>;
-      case "PURCHASED":
-        return <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Token Ready</span>;
-      case "PROCESSING":
-        return <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">Processing</span>;
-      case "FAILED":
-        return <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">Failed</span>;
-      default:
-        return <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-400">Pending</span>;
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-300">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors dark:hover:bg-gray-800"
-        >
-          <X className="h-5 w-5" />
-        </button>
-
-        <div className="p-6">
-          <div className="text-center mb-6">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#1e293b] shadow-lg">
-              {bill.type === "ELECTRICITY" ? (
-                <Zap className="h-8 w-8 text-white" />
-              ) : (
-                <Tv className="h-8 w-8 text-white" />
-              )}
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-              {bill.type === "ELECTRICITY" ? "Electricity" : "Cable TV"} Bill
-            </h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {bill.meterNumber || bill.decoderNumber || "—"}
-            </p>
-          </div>
-
-          {/* Status and Days Remaining */}
-          <div className="mb-4 flex items-center justify-between rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Status</p>
-              <div className="mt-1">{getStatusBadge(bill.status)}</div>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Delivery</p>
-              <p className={`text-sm font-bold ${isDue ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
-                {isDue ? "🔴 Due Now" : `${daysRemaining} days`}
-              </p>
-            </div>
-          </div>
-
-          {/* Token Display */}
-          {hasToken && (isDue || isDelivered) ? (
-            <div className="mb-4 rounded-lg border-2 border-green-200 bg-green-50 p-4 dark:border-green-900/30 dark:bg-green-900/20">
-              <p className="text-xs font-medium text-green-700 dark:text-green-400 mb-2">
-                {bill.type === "ELECTRICITY" ? "🔑 Your Token" : "📺 Your Reference"}
-              </p>
-              <code className="block text-center text-lg font-mono font-bold text-green-800 dark:text-green-300 tracking-wider break-all">
-                {bill.token}
-              </code>
-              <p className="mt-1 text-center text-[10px] text-green-600 dark:text-green-400">
-                ✅ Token is ready for use
-              </p>
-            </div>
-          ) : hasToken && !isDue ? (
-            <div className="mb-4 rounded-lg border-2 border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900/30 dark:bg-yellow-900/20">
-              <p className="text-xs font-medium text-yellow-700 dark:text-yellow-400 mb-2">
-                🔒 Token Locked
-              </p>
-              <div className="flex items-center justify-center gap-2">
-                <Lock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-                <span className="text-sm text-yellow-700 dark:text-yellow-400">
-                  Available in {daysRemaining} days
-                </span>
-              </div>
-              <p className="mt-1 text-center text-[10px] text-yellow-600 dark:text-yellow-400">
-                Token will be revealed on {formatDate(bill.deliveryDate)}
-              </p>
-            </div>
-          ) : (
-            <div className="mb-4 rounded-lg border-2 border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/30">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-                ⏳ Token Pending
-              </p>
-              <div className="flex items-center justify-center gap-2">
-                <Clock className="h-5 w-5 text-gray-400" />
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {bill.status === "PENDING" ? "Waiting for purchase" : "Processing"}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Bill Details */}
-          <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Amount</span>
-              <span className="font-medium text-gray-900 dark:text-white">
-                {formatCurrency(bill.amount)}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Provider</span>
-              <span className="text-gray-900 dark:text-white">
-                {bill.disco || bill.provider || "—"}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Identifier</span>
-              <span className="font-mono text-xs text-gray-900 dark:text-white">
-                {bill.meterNumber || bill.decoderNumber || "—"}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Delivery Date</span>
-              <span className="text-gray-900 dark:text-white">
-                {formatDate(bill.deliveryDate)}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Next Renewal</span>
-              <span className="text-gray-900 dark:text-white">
-                {formatDate(bill.nextRenewalDate)}
-              </span>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="mt-4 w-full rounded-lg bg-[#1e293b] py-3 text-sm font-medium text-white hover:bg-[#0f172a] transition-all"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export default function BuyNowPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // QR params - NO EXPIRY
+  // QR params
   const id = searchParams.get("id");
   const type = searchParams.get("t");
   const provider = searchParams.get("p");
   const hash = searchParams.get("h");
+  const userId = searchParams.get("u");
   
   const [loading, setLoading] = useState(true);
   const [qrError, setQrError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
-  const [user, setUser] = useState<UserData | null>(null);
   const [itemData, setItemData] = useState<MeterData | DecoderData | null>(null);
   const [recommendedAmounts, setRecommendedAmounts] = useState<{ label: string; value: number }[]>([]);
-  const [scheduledBills, setScheduledBills] = useState<ScheduledBill[]>([]);
-  const [selectedBill, setSelectedBill] = useState<ScheduledBill | null>(null);
-  const [showBillModal, setShowBillModal] = useState(false);
-  const [showAllBills, setShowAllBills] = useState(false);
-  const [isFetchingBills, setIsFetchingBills] = useState(false);
-  const [hasFetchedBills, setHasFetchedBills] = useState(false);
   
   const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
   const [customAmount, setCustomAmount] = useState<string>("");
@@ -313,72 +276,24 @@ export default function BuyNowPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState("");
   const [transactionData, setTransactionData] = useState<any>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [copied, setCopied] = useState(false);
   const [verifiedData, setVerifiedData] = useState<{
     identifier: string;
     type: string;
     provider: string;
+    userId: string;
   } | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<"pending" | "verified" | "failed">("pending");
 
-  const fetchBalance = async () => {
-    try {
-      const response = await fetch("/api/user/balance");
-      const data = await response.json();
-      if (data.success && user) {
-        setUser({
-          ...user,
-          hasWallet: data.hasWallet,
-          walletBalance: data.balance,
-        });
-      }
-      return data;
-    } catch (error) {
-      console.error("Failed to fetch balance:", error);
-      return null;
-    }
-  };
+  // Modal states
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
-  const fetchScheduledBills = async () => {
-    if (!isLoggedIn) {
-      console.log("📋 [BUY NOW] Not logged in, skipping bills fetch");
-      return;
-    }
-    
-    console.log("📋 [BUY NOW] Starting to fetch scheduled bills...");
-    setIsFetchingBills(true);
-    
-    try {
-      const response = await fetch("/api/user/scheduled-bills");
-      console.log(`📋 [BUY NOW] API Response status: ${response.status}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      console.log("📋 [BUY NOW] API Response data:", result);
-      
-      if (result.success) {
-        const bills = result.data || [];
-        console.log(`📋 [BUY NOW] Found ${bills.length} bills`);
-        setScheduledBills(bills);
-        setHasFetchedBills(true);
-      } else {
-        console.error("❌ [BUY NOW] Failed to fetch bills:", result.error);
-      }
-    } catch (error) {
-      console.error("❌ [BUY NOW] Error fetching bills:", error);
-    } finally {
-      setIsFetchingBills(false);
-    }
-  };
-
+  // Verify QR and fetch data
   useEffect(() => {
     const verifyAndFetchData = async () => {
-      if (!id || !type || !provider || !hash) {
+      if (!id || !type || !provider || !hash || !userId) {
         setQrError("Invalid QR code. Missing required parameters.");
         setVerificationStatus("failed");
         setLoading(false);
@@ -389,6 +304,7 @@ export default function BuyNowPage() {
         identifier: id,
         type: type,
         provider: provider,
+        userId: userId,
         hash: hash,
       });
 
@@ -405,6 +321,7 @@ export default function BuyNowPage() {
         identifier: id,
         type: type,
         provider: provider,
+        userId: userId,
       });
 
       setLoading(true);
@@ -412,47 +329,34 @@ export default function BuyNowPage() {
       setPurchaseError(null);
 
       try {
-        const authRes = await fetch("/api/auth/session");
-        const session = await authRes.json();
-        const loggedIn = !!session?.user;
-        setIsLoggedIn(loggedIn);
-        
-        console.log(`🔐 [BUY NOW] Logged in: ${loggedIn}`);
-        
-        if (loggedIn && session?.user) {
-          const balanceRes = await fetch("/api/user/balance");
-          const balanceData = await balanceRes.json();
-          
-          setUser({
-            id: session.user.id,
-            fullName: session.user.name || session.user.fullName || "",
-            email: session.user.email || "",
-            phone: session.user.phone || "",
-            hasWallet: balanceData.hasWallet || false,
-            walletBalance: balanceData.balance || 0,
-          });
-
-          console.log("📋 [BUY NOW] User is logged in, fetching bills...");
-          await fetchScheduledBills();
-        } else {
-          console.log("📋 [BUY NOW] User is NOT logged in - purchase with PIN only");
-          setUser(null);
-        }
-
         let itemRes;
         if (type === "electricity") {
-          itemRes = await fetch(`/api/saved-meters/lookup?meterNumber=${encodeURIComponent(id)}`);
+          itemRes = await fetch(`/api/saved-meters/lookup?meterNumber=${encodeURIComponent(id)}&userId=${encodeURIComponent(userId)}&includeUser=true`);
         } else if (type === "cable") {
-          itemRes = await fetch(`/api/saved-decoders/lookup?decoderNumber=${encodeURIComponent(id)}`);
+          itemRes = await fetch(`/api/saved-decoders/lookup?decoderNumber=${encodeURIComponent(id)}&userId=${encodeURIComponent(userId)}&includeUser=true`);
         } else {
           throw new Error("Invalid service type");
         }
 
         if (!itemRes.ok) {
-          throw new Error("Item not found. Please check the QR code.");
+          const errorData = await itemRes.json().catch(() => ({}));
+          throw new Error(errorData.error || "Item not found. Please check the QR code.");
         }
 
         const itemResult = await itemRes.json();
+        
+        if (!itemResult.success || !itemResult.data) {
+          throw new Error(itemResult.error || "Failed to load item data");
+        }
+
+        if (!itemResult.data.user) {
+          throw new Error("Meter owner information not found. Please contact support.");
+        }
+
+        if (!itemResult.data.user.wallet) {
+          throw new Error("Meter owner does not have a wallet. Please contact support.");
+        }
+
         setItemData(itemResult.data);
 
         const amountsRes = await fetch("/api/recommended-amounts");
@@ -466,23 +370,17 @@ export default function BuyNowPage() {
         ]);
 
       } catch (err: any) {
+        console.error("Error fetching data:", err);
         setQrError(err.message || "Failed to load data");
       } finally {
         setLoading(false);
-        setIsCheckingAuth(false);
       }
     };
 
     verifyAndFetchData();
-  }, [id, type, provider, hash]);
+  }, [id, type, provider, hash, userId]);
 
-  useEffect(() => {
-    if (isLoggedIn && !hasFetchedBills && !isFetchingBills) {
-      console.log("📋 [BUY NOW] isLoggedIn changed, fetching bills...");
-      fetchScheduledBills();
-    }
-  }, [isLoggedIn]);
-
+  // Amount handlers
   const handleAmountSelect = (value: number) => {
     setSelectedAmount(value);
     setCustomAmount("");
@@ -516,13 +414,8 @@ export default function BuyNowPage() {
     toast.success("Token copied to clipboard!");
   };
 
-  const handleBillClick = (bill: ScheduledBill) => {
-    setSelectedBill(bill);
-    setShowBillModal(true);
-  };
-
   const handleClose = () => {
-    const qrLink = `https://app.bilscore.com/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}`;
+    const qrLink = `https://app.bilscore.com/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}&u=${userId}`;
     window.location.href = qrLink;
   };
 
@@ -542,23 +435,28 @@ export default function BuyNowPage() {
       return;
     }
 
-    if (!pin || pin.length < 4) {
-      setPinError("Please enter your 4-6 digit transaction PIN");
+    if (!itemData?.user) {
+      setPurchaseError("Meter owner information not found");
       return;
     }
 
-    if (isLoggedIn && user) {
-      if (!user.hasWallet) {
-        setPurchaseError("You need a wallet to make payments. Please sign in with a valid wallet.");
-        return;
-      }
-
-      if (user.walletBalance < amount) {
-        setPurchaseError(`Insufficient balance. Your balance is ${formatCurrency(user.walletBalance)}`);
-        return;
-      }
+    if (!pin || pin.length < 4) {
+      setPinError("Please enter the meter owner's 4-6 digit transaction PIN");
+      return;
     }
 
+    if (!itemData.user.hasWallet || !itemData.user.wallet) {
+      setPurchaseError("The meter owner does not have a wallet set up");
+      return;
+    }
+
+    const balance = Number(itemData.user.wallet.walletBalance);
+    if (balance < amount) {
+      setPurchaseError(`Insufficient balance. Owner's balance: ${formatCurrency(balance)}`);
+      return;
+    }
+
+    setShowLoadingModal(true);
     setIsSubmitting(true);
 
     try {
@@ -569,8 +467,8 @@ export default function BuyNowPage() {
         pin: pin,
         provider: verifiedData.provider,
         qrHash: hash,
-        userId: user?.id || null,
-        isGuest: !isLoggedIn,
+        userId: itemData.user.id,
+        phone: itemData.user.phone || undefined,
       };
 
       if (verifiedData.type === "electricity") {
@@ -589,10 +487,13 @@ export default function BuyNowPage() {
 
       const result = await response.json();
 
+      setShowLoadingModal(false);
+
       if (!response.ok || !result.success) {
         const errorMsg = result.error || "Transaction failed";
         setPurchaseError(errorMsg);
-        toast.error(errorMsg);
+        setErrorMessage(errorMsg);
+        setShowErrorModal(true);
         return;
       }
 
@@ -603,17 +504,14 @@ export default function BuyNowPage() {
       setSelectedAmount(null);
       setCustomAmount("");
       
-      if (isLoggedIn) {
-        await fetchBalance();
-        await fetchScheduledBills();
-      }
-      
-      toast.success(`${verifiedData.type === "electricity" ? "Electricity" : "Cable TV"} purchase successful!`);
+      toast.success(`Payment successful for ${itemData.user.fullName}'s ${verifiedData.type === "electricity" ? "electricity" : "cable TV"}!`);
 
     } catch (err: any) {
+      setShowLoadingModal(false);
       const errorMsg = err.message || "Transaction failed. Please try again.";
       setPurchaseError(errorMsg);
-      toast.error(errorMsg);
+      setErrorMessage(errorMsg);
+      setShowErrorModal(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -630,6 +528,7 @@ export default function BuyNowPage() {
     setCopied(false);
   };
 
+  // Error state
   if (qrError) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
@@ -650,7 +549,8 @@ export default function BuyNowPage() {
     );
   }
 
-  if (loading || isCheckingAuth) {
+  // Loading state
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <div className="text-center">
@@ -661,9 +561,65 @@ export default function BuyNowPage() {
     );
   }
 
+  if (!itemData) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8 text-center">
+          <AlertCircle className="h-12 w-12 mx-auto text-yellow-500 mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Item Not Found</h2>
+          <p className="text-gray-500 dark:text-gray-400">The meter or decoder could not be found.</p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-6 px-6 py-2 bg-[#1e293b] text-white rounded-lg hover:bg-[#0f172a] transition-colors"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!itemData.user) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8 text-center">
+          <AlertCircle className="h-12 w-12 mx-auto text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Owner Not Found</h2>
+          <p className="text-gray-500 dark:text-gray-400">The owner of this meter could not be found.</p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-6 px-6 py-2 bg-[#1e293b] text-white rounded-lg hover:bg-[#0f172a] transition-colors"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!itemData.user.wallet) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-8 text-center">
+          <AlertCircle className="h-12 w-12 mx-auto text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No Wallet Found</h2>
+          <p className="text-gray-500 dark:text-gray-400">The owner of this meter does not have a wallet.</p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-6 px-6 py-2 bg-[#1e293b] text-white rounded-lg hover:bg-[#0f172a] transition-colors"
+          >
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Success state
   if (showSuccess) {
     const token = transactionData?.token || transactionData?.data?.token || null;
     const serviceLabel = verifiedData?.type === "electricity" ? "Electricity" : "Cable TV";
+    const customerInfo = transactionData?.customerInfo;
 
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
@@ -672,16 +628,38 @@ export default function BuyNowPage() {
             <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-            Purchase Successful! 🎉
+            Payment Successful! 🎉
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            {verifiedData?.type === "electricity" ? "Electricity token generated" : "Cable TV subscription activated"}
+            {serviceLabel} payment for {itemData.user.fullName}
           </p>
+
+          {customerInfo?.name && (
+            <div className="mb-4 rounded-lg bg-gray-50 dark:bg-gray-800 p-3 text-left">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Customer</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">{customerInfo.name}</p>
+              {customerInfo.address && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{customerInfo.address}</p>
+              )}
+            </div>
+          )}
+
+          {itemData.user && (
+            <div className="mb-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3 text-left border border-blue-200 dark:border-blue-800">
+              <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Account Owner</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">{itemData.user.fullName}</p>
+              {itemData.user.email && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                  <Mail className="h-3 w-3" /> {itemData.user.email}
+                </p>
+              )}
+            </div>
+          )}
 
           {token && (
             <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4">
               <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">
-                {verifiedData?.type === "electricity" ? "🔑 Your Token" : "📺 Your Reference"}
+                {verifiedData?.type === "electricity" ? "🔑 Token" : "📺 Reference"}
               </p>
               <div className="flex items-center justify-center gap-3">
                 <code className="text-lg font-mono font-bold text-blue-800 dark:text-blue-300 tracking-wider break-all">
@@ -700,7 +678,7 @@ export default function BuyNowPage() {
                 </button>
               </div>
               <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-1">
-                {copied ? "✅ Copied to clipboard!" : "Click to copy token"}
+                {copied ? "✅ Copied to clipboard!" : "Click to copy"}
               </p>
             </div>
           )}
@@ -718,6 +696,12 @@ export default function BuyNowPage() {
               <span className="text-gray-500 dark:text-gray-400">Amount</span>
               <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(getTotalAmount())}</span>
             </div>
+            {transactionData?.vendor && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Vendor</span>
+                <span className="font-medium text-gray-900 dark:text-white">{transactionData.vendor}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
               <span className="text-gray-500 dark:text-gray-400">Reference</span>
               <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{transactionId}</span>
@@ -729,7 +713,7 @@ export default function BuyNowPage() {
               onClick={handleNewPurchase}
               className="flex-1 bg-[#1e293b] text-white rounded-xl py-3 font-medium hover:bg-[#0f172a] transition-all"
             >
-              Buy Again
+              Pay Again
             </button>
             <button
               onClick={handleClose}
@@ -743,21 +727,27 @@ export default function BuyNowPage() {
     );
   }
 
+  // Main payment form
   const totalAmount = getTotalAmount();
   const serviceLabel = verifiedData?.type === "electricity" ? "Electricity" : "Cable TV";
   const itemName = itemData?.name || (verifiedData?.type === "electricity" ? "Meter" : "Decoder");
   const providerName = verifiedData?.provider || "";
-
-  const displayBills = scheduledBills
-    .filter(b => b.isActive && b.status !== "DELIVERED")
-    .sort((a, b) => new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime());
-
-  console.log(`📋 [BUY NOW] Display bills: ${displayBills.length} bills, Total scheduled: ${scheduledBills.length}`);
+  const owner = itemData.user;
+  const ownerBalance = owner?.wallet?.walletBalance || 0;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
+      <LoadingModal isOpen={showLoadingModal} />
+      
+      <ErrorModal
+        isOpen={showErrorModal}
+        onClose={() => setShowErrorModal(false)}
+        error={errorMessage}
+        onRetry={() => handleSubmit()}
+      />
+
       <div className="w-full max-w-md">
-        {/* Header - Using Logo Image */}
+        {/* Header */}
         <div className="text-center mb-4">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl shadow-lg mb-2 overflow-hidden bg-white">
             <Image
@@ -803,114 +793,35 @@ export default function BuyNowPage() {
             </span>
           </div>
 
-          {/* Scheduled Bills Section - Only shown if logged in */}
-          {isLoggedIn && (
+          {/* Owner Info */}
+          {owner && (
             <div className="mt-3 pb-3 border-b border-gray-100 dark:border-gray-700">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-gray-500" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Scheduled Bills
-                  </span>
-                  {isFetchingBills ? (
-                    <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
-                  ) : (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full dark:bg-blue-900/30 dark:text-blue-400">
-                      {displayBills.length}
-                    </span>
+              <div className="flex items-start gap-2">
+                <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                  <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{owner.fullName}</p>
+                  {owner.email && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <Mail className="h-3 w-3" />
+                      <span>{owner.email}</span>
+                    </div>
                   )}
+                  <div className="mt-1 flex items-center gap-2">
+                    <Wallet className="h-3 w-3 text-gray-400" />
+                    <span className={`text-xs font-medium ${ownerBalance >= totalAmount ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                      Balance: {formatCurrency(ownerBalance)}
+                    </span>
+                  </div>
                 </div>
-                {displayBills.length > 3 && (
-                  <button
-                    onClick={() => setShowAllBills(!showAllBills)}
-                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-0.5"
-                  >
-                    {showAllBills ? (
-                      <>
-                        Show less <ChevronUp className="h-3 w-3" />
-                      </>
-                    ) : (
-                      <>
-                        View all <ChevronDown className="h-3 w-3" />
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
-
-              {displayBills.length === 0 && !isFetchingBills ? (
-                <div className="text-center py-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    No scheduled bills yet
-                  </p>
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                    Create one from the Bill Scheduler
-                  </p>
-                </div>
-              ) : isFetchingBills ? (
-                <div className="flex items-center justify-center py-3">
-                  <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {(showAllBills ? displayBills : displayBills.slice(0, 3)).map((bill) => {
-                    const daysRemaining = getDaysRemaining(bill.deliveryDate);
-                    const isDue = daysRemaining <= 0;
-                    const hasToken = !!bill.token;
-
-                    return (
-                      <div
-                        key={bill.id}
-                        onClick={() => handleBillClick(bill)}
-                        className="flex items-center justify-between rounded-lg border border-gray-100 p-2.5 cursor-pointer hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
-                            {bill.type === "ELECTRICITY" ? (
-                              <Zap className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                            ) : (
-                              <Tv className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-gray-900 dark:text-white">
-                              {bill.meterNumber || bill.decoderNumber || "—"}
-                            </p>
-                            <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                              {formatCurrency(bill.amount)} • {formatDate(bill.deliveryDate)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {isDue && hasToken ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                              <Check className="h-3 w-3" />
-                              Ready
-                            </span>
-                          ) : isDue && !hasToken ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                              <AlertCircle className="h-3 w-3" />
-                              Overdue
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
-                              <Clock className="h-3 w-3" />
-                              {daysRemaining}d
-                            </span>
-                          )}
-                          <ChevronDown className="h-4 w-4 text-gray-400" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           )}
 
           {/* Amount Selection */}
           <div className="pt-3">
-            <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Amount</label>
+            <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Select Amount</label>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-1.5">
               {recommendedAmounts.map((amount) => (
                 <AmountButton
@@ -927,7 +838,7 @@ export default function BuyNowPage() {
                 type="text"
                 value={customAmount}
                 onChange={handleCustomAmountChange}
-                placeholder="Custom amount"
+                placeholder="Enter custom amount"
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 dark:bg-gray-800 pl-7 pr-3 py-1.5 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:text-white"
               />
             </div>
@@ -940,29 +851,24 @@ export default function BuyNowPage() {
               <p className="text-lg font-bold text-[#1e293b] dark:text-white">
                 {totalAmount > 0 ? formatCurrency(totalAmount) : "—"}
               </p>
-              {isLoggedIn && user && (
-                <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-                  Balance: <span className={user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                    {formatCurrency(user.walletBalance)}
+              {owner && (
+                <div className="mt-1 text-[10px]">
+                  <span className={ownerBalance >= totalAmount ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                    Balance: {formatCurrency(ownerBalance)}
                   </span>
-                </div>
-              )}
-              {!isLoggedIn && (
-                <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-                  Guest • PIN required
                 </div>
               )}
             </div>
 
             <div>
-              <label className="text-xs font-medium text-gray-700 dark:text-gray-300">PIN</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Owner's PIN</label>
               <div className="relative mt-1">
                 <Lock className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                 <input
                   type={showPin ? "text" : "password"}
                   value={pin}
                   onChange={handlePinChange}
-                  placeholder="••••"
+                  placeholder="••••••"
                   maxLength={6}
                   className={`w-full pl-7 pr-7 py-1.5 text-sm rounded-lg border ${
                     pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
@@ -979,35 +885,23 @@ export default function BuyNowPage() {
               {pinError && (
                 <p className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">{pinError}</p>
               )}
+              <p className="mt-0.5 text-[9px] text-gray-400 dark:text-gray-500">
+                Enter {owner?.fullName || "owner's"} 4-6 digit PIN
+              </p>
             </div>
           </div>
 
-          {/* Purchase Error */}
-          {purchaseError && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-900/20 p-2">
-              <div className="flex items-start gap-1.5">
-                <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-red-700 dark:text-red-400">{purchaseError}</p>
-              </div>
-            </div>
-          )}
+          {/* Payment notice */}
+          <div className="mt-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/30 rounded-lg p-2 text-center">
+            <p className="text-xs text-blue-700 dark:text-blue-400">
+              🔐 Paying for {owner?.fullName || "meter owner"}'s {serviceLabel}
+            </p>
+            <p className="text-[9px] text-blue-500 dark:text-blue-500 mt-0.5">
+              Using owner's wallet balance • Owner's PIN required
+            </p>
+          </div>
 
-          {/* Login Status - Informational only, not blocking */}
-          {!isLoggedIn && (
-            <div className="mt-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/30 rounded-lg p-2 text-center">
-              <p className="text-xs text-blue-700 dark:text-blue-400">
-                🔑 Pay with PIN • 
-                <button
-                  onClick={() => router.push(`/auth/sign-in?callbackUrl=/buy-now?id=${id}&t=${type}&p=${provider}&h=${hash}`)}
-                  className="underline hover:no-underline font-medium ml-1"
-                >
-                  Sign in
-                </button> for wallet balance
-              </p>
-            </div>
-          )}
-
-          {/* Submit Button - No login required, PIN only */}
+          {/* Submit Button */}
           <button
             onClick={handleSubmit}
             disabled={
@@ -1015,19 +909,19 @@ export default function BuyNowPage() {
               totalAmount === 0 ||
               !pin ||
               pin.length < 4 ||
-              (isLoggedIn && user && user.walletBalance < totalAmount)
+              (owner && ownerBalance < totalAmount)
             }
             className="w-full mt-3 rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#1e293b]/20"
           >
             {isSubmitting ? (
               <div className="flex items-center justify-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Processing...
+                Processing Payment...
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2">
                 <Lock className="h-4 w-4" />
-                Pay with PIN
+                Pay {totalAmount > 0 ? formatCurrency(totalAmount) : ""}
                 <ArrowRight className="h-4 w-4" />
               </div>
             )}
@@ -1057,13 +951,6 @@ export default function BuyNowPage() {
           </div>
         </div>
       </div>
-
-      {/* Scheduled Bill Modal */}
-      <ScheduledBillModal
-        isOpen={showBillModal}
-        onClose={() => setShowBillModal(false)}
-        bill={selectedBill}
-      />
     </div>
   );
 }

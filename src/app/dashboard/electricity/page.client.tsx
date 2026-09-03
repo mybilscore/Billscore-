@@ -1,6 +1,3 @@
-// app/dashboard/buy/electricity/page.client.tsx
-// COMPLETE WITH LOADING MODAL IMPLEMENTATION
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -50,11 +47,12 @@ import {
   Phone,
   Home,
   RefreshCw,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
 // Import QR hash utilities
-import { generateQRUrl } from "~/lib/qr-hash";
+import { generateQRUrl, generateQRDisplayLink } from "~/lib/qr-hash";
 
 // Types - COMPLETE with all customer fields
 interface DisCo {
@@ -129,12 +127,9 @@ const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="flex flex-col items-center">
-        {/* Animated Logo */}
+        {/* Outer ring pulse */}
         <div className="relative">
-          {/* Outer ring pulse */}
           <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
-          
-          {/* Logo container with white background */}
           <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
             <div className="relative h-16 w-16">
               <Image
@@ -187,7 +182,6 @@ const SuccessModal = ({
 }) => {
   if (!isOpen) return null;
 
-  // Auto-close after 10 seconds
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(() => {
@@ -356,45 +350,6 @@ const ErrorModal = ({
   );
 };
 
-// Generate encrypted QR Display link
-const generateQRDisplayLink = (
-  baseUrl: string,
-  identifier: string,
-  type: string,
-  provider: string
-): string => {
-  const buyNowLink = generateQRUrl(baseUrl, {
-    identifier: identifier,
-    type: type,
-    provider: provider,
-  });
-
-  const url = new URL(buyNowLink);
-  const hash = url.searchParams.get('h');
-  const expiresAt = url.searchParams.get('e');
-
-  let displayPath = `/qr/display/${identifier}`;
-  const queryParams = new URLSearchParams();
-
-  if (hash) {
-    queryParams.set('h', hash);
-  }
-
-  queryParams.set('t', type);
-  queryParams.set('p', encodeURIComponent(provider));
-
-  if (expiresAt) {
-    queryParams.set('e', expiresAt);
-  }
-
-  const queryString = queryParams.toString();
-  if (queryString) {
-    displayPath += `?${queryString}`;
-  }
-
-  return `${baseUrl}${displayPath}`;
-};
-
 // QR Code Modal
 const QRCodeModal = ({
   isOpen,
@@ -402,6 +357,7 @@ const QRCodeModal = ({
   identifier,
   serviceType,
   provider,
+  userId,
   qrValue,
   onQuickOrder,
   businessName = "Bilscore",
@@ -411,6 +367,7 @@ const QRCodeModal = ({
   identifier: string;
   serviceType: string;
   provider: string;
+  userId: string;
   qrValue: string;
   onQuickOrder: () => void;
   businessName?: string;
@@ -661,6 +618,7 @@ const SavedMeters = ({
   onGetQRDisplayLink,
   isLoading,
   baseUrl,
+  userId,
 }: {
   meters: SavedMeter[];
   onSelect: (meterNumber: string) => void;
@@ -668,6 +626,7 @@ const SavedMeters = ({
   onGetQRDisplayLink: (identifier: string, provider: string, serviceType: string) => void;
   isLoading: boolean;
   baseUrl: string;
+  userId: string;
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedQRDisplayLink, setCopiedQRDisplayLink] = useState<Record<string, boolean>>({});
@@ -737,7 +696,8 @@ const SavedMeters = ({
             baseUrl,
             meter.meterNumber,
             "electricity",
-            meter.disco
+            meter.disco,
+            userId // ✅ Pass userId
           );
 
           const hasCustomerInfo = meter.customerName || meter.customerAddress || meter.customerPhone || meter.customerEmail;
@@ -942,6 +902,7 @@ export function ElectricityClient({
     identifier: string; 
     provider: string; 
     serviceType: string; 
+    userId: string;
     qrValue: string;
     hash: string;
     expiresAt?: string;
@@ -1120,7 +1081,7 @@ export function ElectricityClient({
     ensureWallet();
   }, [user.hasWallet]);
 
-  // Handle View QR Code
+  // ✅ UPDATED: Handle View QR Code with userId
   const handleViewQR = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
     
@@ -1128,6 +1089,7 @@ export function ElectricityClient({
       identifier: identifier,
       type: serviceType.toLowerCase(),
       provider: provider,
+      userId: user.id, // ✅ Added userId
     });
     
     const url = new URL(qrValue);
@@ -1139,6 +1101,7 @@ export function ElectricityClient({
       identifier: identifier,
       provider: provider,
       serviceType: serviceType,
+      userId: user.id,
       qrValue: qrValue,
       hash: hash || '',
       expiresAt: expiresAt || undefined,
@@ -1146,14 +1109,15 @@ export function ElectricityClient({
     setShowQRModal(true);
   };
 
-  // Handle Get QR Display Link
+  // ✅ UPDATED: Handle Get QR Display Link with userId
   const handleGetQRDisplayLink = (identifier: string, provider: string, serviceType: string) => {
     const baseUrl = getBaseUrl();
     const encryptedLink = generateQRDisplayLink(
       baseUrl,
       identifier,
       serviceType.toLowerCase(),
-      provider
+      provider,
+      user.id // ✅ Added userId
     );
     router.push(encryptedLink.replace(baseUrl, ''));
   };
@@ -1435,6 +1399,7 @@ export function ElectricityClient({
             identifier={qrData.identifier}
             serviceType={qrData.serviceType}
             provider={qrData.provider}
+            userId={qrData.userId}
             qrValue={qrData.qrValue}
             onQuickOrder={handleQuickOrder}
           />
@@ -1461,6 +1426,7 @@ export function ElectricityClient({
                   onGetQRDisplayLink={handleGetQRDisplayLink}
                   isLoading={loadingMeters}
                   baseUrl={getBaseUrl()}
+                  userId={user.id} // ✅ Pass userId
                 />
               </div>
             )}
@@ -1779,6 +1745,7 @@ export function ElectricityClient({
 
                 <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-2">
+                    <Wallet className="h-4 w-4 text-gray-400" />
                     <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                   </div>
                   <span className={`font-medium ${user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>

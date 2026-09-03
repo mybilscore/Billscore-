@@ -20,18 +20,21 @@ function simpleHash(payload: string): string {
 
 /**
  * Generate a secure hash for QR data (NO EXPIRY)
+ * Includes userId for verification
  */
 export function generateQRHash(data: {
   identifier: string;
   type: string;
   provider: string;
+  userId: string;
 }): string {
-  const payload = `${data.identifier}|${data.type}|${data.provider}|${SECRET_KEY}`;
+  const payload = `${data.identifier}|${data.type}|${data.provider}|${data.userId}|${SECRET_KEY}`;
   return simpleHash(payload);
 }
 
 /**
  * Generate QR URL with hash (NO EXPIRY)
+ * Includes userId in URL for identification
  */
 export function generateQRUrl(
   baseUrl: string,
@@ -39,6 +42,7 @@ export function generateQRUrl(
     identifier: string;
     type: string;
     provider: string;
+    userId: string;
   }
 ): string {
   const hash = generateQRHash(data);
@@ -48,6 +52,7 @@ export function generateQRUrl(
     t: data.type,
     p: data.provider,
     h: hash,
+    u: data.userId, // Include userId in URL
   });
   
   return `${baseUrl}/buy-now?${params.toString()}`;
@@ -55,16 +60,18 @@ export function generateQRUrl(
 
 /**
  * Verify QR hash (NO EXPIRY CHECK)
+ * Verifies that the userId matches the hash
  */
 export function verifyQRHash(params: {
   identifier: string;
   type: string;
   provider: string;
+  userId: string;
   hash: string;
 }): boolean {
-  const { identifier, type, provider, hash } = params;
+  const { identifier, type, provider, userId, hash } = params;
   
-  const payload = `${identifier}|${type}|${provider}|${SECRET_KEY}`;
+  const payload = `${identifier}|${type}|${provider}|${userId}|${SECRET_KEY}`;
   const expectedHash = simpleHash(payload);
   
   // Constant time comparison
@@ -99,6 +106,7 @@ export function parseQRUrl(url: string): {
   identifier: string;
   type: string;
   provider: string;
+  userId: string;
   hash: string;
 } | null {
   try {
@@ -108,13 +116,14 @@ export function parseQRUrl(url: string): {
     const identifier = params.get('id');
     const type = params.get('t');
     const provider = params.get('p');
+    const userId = params.get('u');
     const hash = params.get('h');
     
-    if (!identifier || !type || !provider || !hash) {
+    if (!identifier || !type || !provider || !userId || !hash) {
       return null;
     }
     
-    return { identifier, type, provider, hash };
+    return { identifier, type, provider, userId, hash };
   } catch {
     return null;
   }
@@ -122,17 +131,20 @@ export function parseQRUrl(url: string): {
 
 /**
  * Generate QR Display Link (NO EXPIRY)
+ * Includes userId for identification
  */
 export function generateQRDisplayLink(
   baseUrl: string,
   identifier: string,
   type: string,
-  provider: string
+  provider: string,
+  userId: string
 ): string {
   const buyNowLink = generateQRUrl(baseUrl, {
     identifier: identifier,
     type: type,
     provider: provider,
+    userId: userId,
   });
 
   const url = new URL(buyNowLink);
@@ -147,6 +159,7 @@ export function generateQRDisplayLink(
 
   queryParams.set('t', type);
   queryParams.set('p', encodeURIComponent(provider));
+  queryParams.set('u', userId);
 
   const queryString = queryParams.toString();
   if (queryString) {

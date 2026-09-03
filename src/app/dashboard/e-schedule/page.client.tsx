@@ -1,6 +1,3 @@
-// app/dashboard/subscriptions/page.client.tsx
-// COMPLETE WITH LOADING, SUCCESS & ERROR MODALS
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -48,10 +45,11 @@ import {
   Clock,
   Mail,
   User,
+  Wallet,
 } from "lucide-react";
 
 // Import QR hash utilities
-import { generateQRUrl } from "~/lib/qr-hash";
+import { generateQRUrl, generateQRDisplayLink } from "~/lib/qr-hash";
 
 // Types
 interface SavedMeter {
@@ -351,13 +349,15 @@ const SavedItem = ({
   onRemove,
   onGenerateQR,
   onSetDefault,
+  userId,
 }: {
   item: SavedMeter;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
-  onGenerateQR: () => void;
+  onGenerateQR: (identifier: string, provider: string, serviceType: string, userId: string) => void;
   onSetDefault: () => void;
+  userId: string;
 }) => {
   const hasCustomerInfo = item.customerName || item.customerAddress || item.customerPhone || item.customerEmail;
 
@@ -454,7 +454,7 @@ const SavedItem = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onGenerateQR();
+            onGenerateQR(item.meterNumber, item.disco, "Electricity", userId); // ✅ Pass userId
           }}
           className="rounded-lg p-2 text-gray-400 hover:text-[#1e293b] transition-colors"
           title="View QR Code"
@@ -480,9 +480,11 @@ const SavedItem = ({
 const QRCodeListView = ({
   items,
   onGenerateQR,
+  userId,
 }: {
   items: SavedMeter[];
-  onGenerateQR: (identifier: string, provider: string, serviceType: string) => void;
+  onGenerateQR: (identifier: string, provider: string, serviceType: string, userId: string) => void;
+  userId: string;
 }) => {
   if (items.length === 0) {
     return (
@@ -499,7 +501,7 @@ const QRCodeListView = ({
       {items.map((item) => (
         <button
           key={item.id}
-          onClick={() => onGenerateQR(item.meterNumber, item.disco, "Electricity")}
+          onClick={() => onGenerateQR(item.meterNumber, item.disco, "Electricity", userId)} // ✅ Pass userId
           className="flex flex-col items-center rounded-lg border-2 border-gray-200 p-3 transition-all hover:border-[#1e293b] hover:shadow-md dark:border-gray-700 dark:hover:border-gray-500"
         >
           <div className="relative mb-2">
@@ -539,6 +541,7 @@ const QRCodeModal = ({
   identifier,
   serviceType,
   provider,
+  userId,
   onQuickOrder,
   businessName = "Bilscore",
 }: {
@@ -547,6 +550,7 @@ const QRCodeModal = ({
   identifier: string;
   serviceType: string;
   provider: string;
+  userId: string;
   onQuickOrder: () => void;
   businessName?: string;
 }) => {
@@ -567,6 +571,7 @@ const QRCodeModal = ({
     identifier: identifier,
     type: serviceType.toLowerCase(),
     provider: provider,
+    userId: userId, // ✅ Use userId
   });
 
   const urlParams = new URLSearchParams(qrValue.split('?')[1]);
@@ -1414,7 +1419,7 @@ export function SubscriptionClient({
   const [transactionId, setTransactionId] = useState("");
   const [isEnsuringWallet, setIsEnsuringWallet] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [qrData, setQrData] = useState<{ identifier: string; provider: string; serviceType: string } | null>(null);
+  const [qrData, setQrData] = useState<{ identifier: string; provider: string; serviceType: string; userId: string } | null>(null);
   const [showAddMeterModal, setShowAddMeterModal] = useState(false);
   const [successData, setSuccessData] = useState<{
     transactionId: string;
@@ -1640,8 +1645,9 @@ export function SubscriptionClient({
     setPinError("");
   };
 
-  const handleGenerateQR = (identifier: string, provider: string, serviceType: string) => {
-    setQrData({ identifier, provider, serviceType });
+  // ✅ UPDATED: Handle Generate QR with userId
+  const handleGenerateQR = (identifier: string, provider: string, serviceType: string, userId: string) => {
+    setQrData({ identifier, provider, serviceType, userId });
     setShowQRModal(true);
   };
 
@@ -1823,6 +1829,7 @@ export function SubscriptionClient({
             identifier={qrData.identifier}
             provider={qrData.provider}
             serviceType={qrData.serviceType}
+            userId={qrData.userId}
             onQuickOrder={handleQuickOrder}
           />
         )}
@@ -1916,12 +1923,9 @@ export function SubscriptionClient({
                         isSelected={selectedMeter === item.id}
                         onSelect={() => handleMeterSelect(item.id)}
                         onRemove={() => handleRemoveMeter(item.id)}
-                        onGenerateQR={() => {
-                          handleGenerateQR(item.meterNumber, item.disco, "Electricity");
-                        }}
-                        onSetDefault={() => {
-                          handleSetDefaultMeter(item.id);
-                        }}
+                        onGenerateQR={handleGenerateQR}
+                        onSetDefault={() => handleSetDefaultMeter(item.id)}
+                        userId={user.id} // ✅ Pass userId
                       />
                     ))
                   ) : (
@@ -1943,9 +1947,8 @@ export function SubscriptionClient({
               ) : (
                 <QRCodeListView
                   items={meters}
-                  onGenerateQR={(identifier, provider, serviceType) => {
-                    handleGenerateQR(identifier, provider, serviceType);
-                  }}
+                  onGenerateQR={handleGenerateQR}
+                  userId={user.id} // ✅ Pass userId
                 />
               )}
             </div>

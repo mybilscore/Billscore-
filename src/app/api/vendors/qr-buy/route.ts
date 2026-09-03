@@ -1,5 +1,5 @@
 // app/api/vendors/qr-buy/route.ts
-// COMPLETE UPDATED VERSION - WITH FULL METER INFORMATION SAVING AND QR_CODE channel
+// COMPLETE FIXED VERSION
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -17,6 +17,8 @@ import {
 } from "@prisma/client";
 import { compare } from "bcrypt";
 import { verifyQRHash } from "~/lib/qr-hash";
+import { getServerSession } from "next-auth";
+import { authOptions } from "~/lib/auth";
 
 // ============================================================
 // MINIMAL LOGGING
@@ -73,132 +75,7 @@ function normalizePhoneNumber(phone: string): string {
 }
 
 // ============================================================
-// AUTH HELPERS
-// ============================================================
-
-async function getOptionalUser() {
-  try {
-    const { getServerSession } = await import("next-auth");
-    const { authOptions } = await import("~/lib/auth");
-    const session = await getServerSession(authOptions);
-    
-    if (session?.user?.id) {
-      const user = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: {
-          id: true,
-          pinHash: true,
-          pinAttempts: true,
-          pinLockedUntil: true,
-          hasWallet: true,
-          fullName: true,
-          email: true,
-          phone: true,
-          wallet: {
-            select: {
-              id: true,
-              walletBalance: true,
-            },
-          },
-        },
-      });
-      return user;
-    }
-  } catch (error) {
-    log('info', 'No user session - guest purchase');
-  }
-  return null;
-}
-
-async function verifyGuestPin(pin: string): Promise<boolean> {
-  const guestPin = process.env.GUEST_PURCHASE_PIN || "1234";
-  return pin === guestPin;
-}
-
-async function getOrCreateGuestUser(phone?: string) {
-  const timestamp = Date.now();
-  const guestEmail = `guest_${timestamp}@temp.com`;
-  const guestPhone = phone ? normalizePhoneNumber(phone) : `GUEST${timestamp.toString().slice(-10)}`;
-  
-  let guestUser = await prisma.user.findFirst({
-    where: {
-      email: guestEmail,
-      role: UserRole.GUEST,
-    },
-    select: {
-      id: true,
-      pinHash: true,
-      pinAttempts: true,
-      pinLockedUntil: true,
-      hasWallet: true,
-      fullName: true,
-      email: true,
-      phone: true,
-      wallet: {
-        select: {
-          id: true,
-          walletBalance: true,
-        },
-      },
-    },
-  });
-
-  if (!guestUser) {
-    let finalPhone = guestPhone;
-    let phoneExists = await prisma.user.findFirst({
-      where: { phone: finalPhone },
-    });
-    
-    if (phoneExists) {
-      finalPhone = `${guestPhone}_${timestamp.toString().slice(-6)}`;
-    }
-    
-    const created = await prisma.user.create({
-      data: {
-        fullName: "Guest User",
-        email: guestEmail,
-        phone: finalPhone,
-        role: UserRole.GUEST,
-        hasWallet: true,
-        wallet: {
-          create: {
-            accountNumber: `GUEST${timestamp.toString().slice(-10)}`,
-            bankName: "BILSCORE",
-            accountName: "Guest User",
-            walletBalance: 0,
-            ledgerBalance: 0,
-            currency: "NGN",
-            isActive: true,
-            kycLevel: 0,
-          },
-        },
-      },
-      select: {
-        id: true,
-        pinHash: true,
-        pinAttempts: true,
-        pinLockedUntil: true,
-        hasWallet: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        wallet: {
-          select: {
-            id: true,
-            walletBalance: true,
-          },
-        },
-      },
-    });
-    log('info', `Created guest user: ${created.id} with phone: ${finalPhone}`);
-    return created;
-  }
-
-  return guestUser;
-}
-
-// ============================================================
-// SAVE METER HELPER (UPDATED WITH COMPLETE INFO)
+// SAVE METER HELPER
 // ============================================================
 
 async function saveMeterAsync(
@@ -254,12 +131,11 @@ async function saveMeterAsync(
     log('info', `Meter saved/updated: ${meterNumber}`);
   } catch (error) {
     log('error', 'Failed to save meter', error);
-    // Non-critical - ignore
   }
 }
 
 // ============================================================
-// SAVE DECODER HELPER (non-blocking)
+// SAVE DECODER HELPER
 // ============================================================
 
 async function saveDecoderAsync(userId: string, smartCardNumber: string, provider: string, packageCode: string) {
@@ -294,10 +170,6 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // Try to get authenticated user, but don't require it
-    let user = await getOptionalUser();
-    let isGuest = false;
-
     const body = await request.json();
     const { 
       serviceType, 
@@ -310,12 +182,13 @@ export async function POST(request: NextRequest) {
       packageCode,
       qrHash,
       phone,
+      userId, // ✅ userId from frontend
     } = body;
 
-    log('info', `QR Buy request: ${serviceType} for ${identifier}, amount: ${amount}, user: ${user?.id || 'guest'}`);
+    log('info', `QR Buy request: ${serviceType} for ${identifier}, amount: ${amount}, userId: ${userId || 'not specified'}`);
 
     // ============================================================
-    // STATIC CHANNEL - QR_CODE for QR purchases
+    // STATIC CHANNEL - QR_CODE
     // ============================================================
     const CHANNEL_DISPLAY = "QR_CODE";
 
@@ -365,14 +238,33 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Verify QR hash if provided
+    // ============================================================
+    // ✅ FIXED: Verify QR hash with userId
+    // ============================================================
     if (qrHash) {
-      const isValidHash = verifyQRHash({
-        identifier: identifier,
-        type: serviceType,
-        provider: provider || discoCode || "unknown",
-        hash: qrHash,
-      });
+      // Try with userId first (new QR codes)
+      let isValidHash = false;
+      
+      if (userId) {
+        isValidHash = verifyQRHash({
+          identifier: identifier,
+          type: serviceType,
+          provider: provider || discoCode || "unknown",
+          userId: userId, // ✅ Added userId
+          hash: qrHash,
+        });
+      }
+      
+      // If that fails and we have a userId from the QR, try without it (backward compatibility)
+      if (!isValidHash && userId) {
+        // Try without userId (old QR codes)
+        isValidHash = verifyQRHash({
+          identifier: identifier,
+          type: serviceType,
+          provider: provider || discoCode || "unknown",
+          hash: qrHash,
+        });
+      }
 
       if (!isValidHash) {
         return NextResponse.json({
@@ -384,34 +276,139 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // HANDLE GUEST VS AUTHENTICATED USER
+    // FIND THE USER
     // ============================================================
 
-    let isPinValid = false;
+    let user = null;
+    let isGuest = false;
+    let isQrOwner = false;
 
-    if (!user) {
-      // Guest purchase
-      isGuest = true;
-      log('info', 'Guest purchase mode');
+    // 1. If userId is provided (QR owner), use that
+    if (userId) {
+      log('info', `Looking up QR owner: ${userId}`);
+      user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          pinHash: true,
+          pinAttempts: true,
+          pinLockedUntil: true,
+          hasWallet: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          wallet: {
+            select: {
+              id: true,
+              walletBalance: true,
+            },
+          },
+        },
+      });
 
-      // Verify guest PIN
-      isPinValid = await verifyGuestPin(pin);
-      log('info', `Guest PIN verification: ${isPinValid}`);
-
-      if (!isPinValid) {
+      if (!user) {
         return NextResponse.json({
           success: false,
-          error: "Invalid guest PIN. Please check and try again.",
-        }, { status: 401 });
+          error: "User not found for this QR code",
+        }, { status: 404 });
       }
 
-      // Create guest user for tracking
-      user = await getOrCreateGuestUser(phone);
-      log('info', `Guest user: ${user.id}`);
-
-      // No guest purchase limit - guests can buy any amount
+      isQrOwner = true;
+      log('info', `QR owner found: ${user.fullName} (${user.id})`);
     } else {
-      // Authenticated user - verify their PIN
+      // 2. Try session user
+      try {
+        const session = await getServerSession(authOptions);
+        if (session?.user?.id) {
+          user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: {
+              id: true,
+              pinHash: true,
+              pinAttempts: true,
+              pinLockedUntil: true,
+              hasWallet: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              wallet: {
+                select: {
+                  id: true,
+                  walletBalance: true,
+                },
+              },
+            },
+          });
+          log('info', `Session user found: ${user?.fullName}`);
+        }
+      } catch (error) {
+        log('info', 'No user session');
+      }
+
+      // 3. Guest mode
+      if (!user) {
+        isGuest = true;
+        log('info', 'Guest purchase mode');
+        
+        const guestPin = process.env.GUEST_PURCHASE_PIN || "1234";
+        const isPinValid = pin === guestPin;
+        
+        if (!isPinValid) {
+          return NextResponse.json({
+            success: false,
+            error: "Invalid guest PIN. Please check and try again.",
+          }, { status: 401 });
+        }
+
+        // Create guest user
+        const timestamp = Date.now();
+        const guestEmail = `guest_${timestamp}@temp.com`;
+        const guestPhone = phone ? normalizePhoneNumber(phone) : `GUEST${timestamp.toString().slice(-10)}`;
+        
+        user = await prisma.user.findFirst({
+          where: { email: guestEmail, role: UserRole.GUEST },
+        });
+
+        if (!user) {
+          let finalPhone = guestPhone;
+          let phoneExists = await prisma.user.findFirst({
+            where: { phone: finalPhone },
+          });
+          if (phoneExists) {
+            finalPhone = `${guestPhone}_${timestamp.toString().slice(-6)}`;
+          }
+          
+          user = await prisma.user.create({
+            data: {
+              fullName: "Guest User",
+              email: guestEmail,
+              phone: finalPhone,
+              role: UserRole.GUEST,
+              hasWallet: true,
+              wallet: {
+                create: {
+                  accountNumber: `GUEST${timestamp.toString().slice(-10)}`,
+                  bankName: "BILSCORE",
+                  accountName: "Guest User",
+                  walletBalance: 0,
+                  ledgerBalance: 0,
+                  currency: "NGN",
+                  isActive: true,
+                  kycLevel: 0,
+                },
+              },
+            },
+          });
+        }
+        log('info', `Guest user: ${user.id}`);
+      }
+    }
+
+    // ============================================================
+    // PIN VERIFICATION
+    // ============================================================
+
+    if (!isGuest) {
       if (!user.pinHash) {
         return NextResponse.json({
           success: false,
@@ -427,10 +424,11 @@ export async function POST(request: NextRequest) {
         }, { status: 403 });
       }
 
-      isPinValid = await compare(pin, user.pinHash);
-      log('info', `User PIN verification: ${isPinValid}`);
+      log('info', `Verifying PIN for user: ${user.fullName} (${user.id})`);
+      const isValidPin = await compare(pin, user.pinHash);
+      log('info', `PIN verification result: ${isValidPin}`);
 
-      if (!isPinValid) {
+      if (!isValidPin) {
         const updatedUser = await prisma.user.update({
           where: { id: user.id },
           data: {
@@ -470,8 +468,13 @@ export async function POST(request: NextRequest) {
           pinLockedUntil: null,
         },
       });
+    }
 
-      // Check wallet balance for authenticated user
+    // ============================================================
+    // CHECK WALLET BALANCE (non-guest only)
+    // ============================================================
+
+    if (!isGuest) {
       if (!user.wallet) {
         return NextResponse.json({
           success: false,
@@ -516,14 +519,14 @@ export async function POST(request: NextRequest) {
           totalSpent: 0,
           totalCommissionEarned: 0,
           firstTransactionAt: new Date(),
-          tags: isGuest ? ['guest'] : [],
+          tags: isGuest ? ['guest'] : (isQrOwner ? ['qr_owner'] : []),
         });
         log('info', `Created customer: ${customer.id}`);
       }
     }
 
     // ============================================================
-    // CREATE TRANSACTION - channelDisplay = "QR_CODE"
+    // CREATE TRANSACTION
     // ============================================================
 
     const meterTypeEnum = serviceType === "electricity" 
@@ -560,9 +563,11 @@ export async function POST(request: NextRequest) {
           wasDebited: false,
           qrPurchase: true,
           isGuest: isGuest,
+          isQrOwner: isQrOwner,
           qrHash: qrHash,
           channel: "QR_CODE",
           channelDisplay: CHANNEL_DISPLAY,
+          userIdProvided: userId || null,
         },
       },
     });
@@ -588,7 +593,6 @@ export async function POST(request: NextRequest) {
 
     try {
       const vendorService = getVendorService();
-      // Increased timeout to 60 seconds
       const TIMEOUT_MS = 60000;
       
       let vendorPromise;
@@ -624,7 +628,6 @@ export async function POST(request: NextRequest) {
       const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
       vendorResult = result;
 
-      // Extract commission data
       if (result.data) {
         vendorCommission = result.data.commission || null;
         vendorTotalAmount = result.data.totalAmount || null;
@@ -654,10 +657,6 @@ export async function POST(request: NextRequest) {
       }
 
       if (result.success) {
-        // ============================================================
-        // SUCCESS - Complete Transaction
-        // ============================================================
-
         // Update customer stats
         await prisma.customer.update({
           where: { id: customer.id },
@@ -669,7 +668,7 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // Process wallet debit for authenticated users only
+        // Process wallet debit (skip for guests)
         if (!isGuest && user.wallet) {
           await prisma.$transaction([
             prisma.wallet.update({
@@ -689,7 +688,7 @@ export async function POST(request: NextRequest) {
                 balanceBefore: Number(user.wallet.walletBalance),
                 balanceAfter: Number(user.wallet.walletBalance) - amount,
                 reference: `QR_${transaction.id}`,
-                description: `QR Purchase: ${serviceType} for ${identifier}`,
+                description: `QR Purchase: ${serviceType} for ${identifier}${isQrOwner ? ' (QR Owner)' : ''}`,
                 status: TransactionStatus.SUCCESS,
                 category: serviceType === "electricity" ? "ELECTRICITY" : "CABLE_TV",
                 channel: channelType,
@@ -697,6 +696,7 @@ export async function POST(request: NextRequest) {
                   channel: "QR_CODE",
                   channelDisplay: CHANNEL_DISPLAY,
                   qrPurchase: true,
+                  isQrOwner: isQrOwner,
                 },
               },
             }),
@@ -730,7 +730,6 @@ export async function POST(request: NextRequest) {
             netProfit: grossProfit,
             totalCommission: (vendorCommission || 0) + (platformCommission || 0),
             effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
-            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               vendorResponse: result.data,
@@ -754,6 +753,7 @@ export async function POST(request: NextRequest) {
               completedAt: new Date().toISOString(),
               wasDebited: !isGuest,
               isGuest: isGuest,
+              isQrOwner: isQrOwner,
             },
           },
         });
@@ -789,6 +789,7 @@ export async function POST(request: NextRequest) {
                 pinVerified: true,
                 qrPurchase: true,
                 isGuest: isGuest,
+                isQrOwner: isQrOwner,
                 vendor: result.vendor,
                 vendorReference: result.vendorReference,
                 token: result.data?.token,
@@ -811,19 +812,14 @@ export async function POST(request: NextRequest) {
           log('info', 'Customer transaction recorded');
         }
 
-        // ============================================================
-        // SAVE METER WITH COMPLETE INFO (for electricity only)
-        // ============================================================
-
+        // Save meter/decoder
         if (serviceType === "electricity") {
-          // Extract customer info from vendor response
           const customerName = result.data?.customerName || result.data?.name || null;
           const customerAddress = result.data?.customerAddress || result.data?.address || null;
           const customerPhoneFromVendor = result.data?.customerPhone || result.data?.phone || null;
           const customerEmailFromVendor = result.data?.customerEmail || result.data?.email || null;
           const meterStatus = result.data?.status || result.data?.meterStatus || null;
 
-          // Save meter with complete information (non-blocking)
           saveMeterAsync(
             user.id, 
             identifier, 
@@ -837,7 +833,6 @@ export async function POST(request: NextRequest) {
             new Date()
           ).catch(() => {});
         } else if (serviceType === "cable") {
-          // Save decoder for cable purchases
           saveDecoderAsync(user.id, identifier, provider, packageCode || 'STANDARD').catch(() => {});
         }
 
@@ -869,6 +864,7 @@ export async function POST(request: NextRequest) {
             vendorSwitched: result.vendorSwitched,
             switchedFrom: result.switchedFrom,
             isGuest: isGuest,
+            isQrOwner: isQrOwner,
             totalTime: totalTime,
             channel: CHANNEL_DISPLAY,
             commission: {
@@ -891,10 +887,7 @@ export async function POST(request: NextRequest) {
         });
 
       } else {
-        // ============================================================
-        // VENDOR FAILED - No Debit
-        // ============================================================
-
+        // Vendor failed
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
@@ -904,7 +897,6 @@ export async function POST(request: NextRequest) {
             vendorReference: result.vendorReference || null,
             selectedVendorId: vendorId,
             failedVendors: result.vendorErrors || [],
-            // channelDisplay already set on creation
             metadata: {
               ...transaction.metadata,
               error: result.error || "Vendor transaction failed",
@@ -940,6 +932,7 @@ export async function POST(request: NextRequest) {
               pinVerified: true,
               qrPurchase: true,
               isGuest: isGuest,
+              isQrOwner: isQrOwner,
               channel: "QR_CODE",
               channelDisplay: CHANNEL_DISPLAY,
               failedAt: new Date().toISOString(),
@@ -963,43 +956,35 @@ export async function POST(request: NextRequest) {
       }
 
     } catch (error: any) {
-      // Check if this was a timeout error but we might have a successful result
-      if (error.message?.includes('timeout') && vendorResult) {
+      if (error.message?.includes('timeout') && vendorResult?.success) {
         log('warn', 'Vendor request timed out but we have a result - processing anyway');
-        
-        // If we have a vendorResult, process it as success
-        if (vendorResult.success) {
-          // Process the successful result (reuse the success logic above)
-          return NextResponse.json({
-            success: true,
-            data: {
-              transactionId: transaction.id,
-              reference: transaction.id,
-              vendorReference: vendorResult.vendorReference,
-              amount: amount,
-              identifier: identifier,
-              serviceType: serviceType,
-              token: vendorResult.data?.token || "TOKEN_GENERATED",
-              isGuest: isGuest,
-              vendor: vendorResult.vendor,
-              channel: CHANNEL_DISPLAY,
-              warning: "Request timed out but vendor transaction succeeded",
-              customerInfo: serviceType === "electricity" ? {
-                name: vendorResult.data?.customerName || vendorResult.data?.name || null,
-                address: vendorResult.data?.customerAddress || vendorResult.data?.address || null,
-                phone: vendorResult.data?.customerPhone || vendorResult.data?.phone || null,
-                email: vendorResult.data?.customerEmail || vendorResult.data?.email || null,
-                status: vendorResult.data?.status || vendorResult.data?.meterStatus || null,
-              } : null,
-            },
-          });
-        }
+        return NextResponse.json({
+          success: true,
+          data: {
+            transactionId: transaction.id,
+            reference: transaction.id,
+            vendorReference: vendorResult.vendorReference,
+            amount: amount,
+            identifier: identifier,
+            serviceType: serviceType,
+            token: vendorResult.data?.token || "TOKEN_GENERATED",
+            isGuest: isGuest,
+            isQrOwner: isQrOwner,
+            vendor: vendorResult.vendor,
+            channel: CHANNEL_DISPLAY,
+            warning: "Request timed out but vendor transaction succeeded",
+            customerInfo: serviceType === "electricity" ? {
+              name: vendorResult.data?.customerName || vendorResult.data?.name || null,
+              address: vendorResult.data?.customerAddress || vendorResult.data?.address || null,
+              phone: vendorResult.data?.customerPhone || vendorResult.data?.phone || null,
+              email: vendorResult.data?.customerEmail || vendorResult.data?.email || null,
+              status: vendorResult.data?.status || vendorResult.data?.meterStatus || null,
+            } : null,
+          },
+        });
       }
 
-      // ============================================================
-      // UNEXPECTED ERROR
-      // ============================================================
-
+      // Unexpected error
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -1007,7 +992,6 @@ export async function POST(request: NextRequest) {
           totalDebited: 0,
           vendor: vendorEnum || VtuVendor.VTPASS,
           selectedVendorId: vendorId,
-          // channelDisplay already set on creation
           metadata: {
             ...transaction.metadata,
             error: error.message || "Unknown error",
@@ -1039,6 +1023,7 @@ export async function POST(request: NextRequest) {
             errorType: error.name,
             qrPurchase: true,
             isGuest: isGuest,
+            isQrOwner: isQrOwner,
             channel: "QR_CODE",
             channelDisplay: CHANNEL_DISPLAY,
             failedAt: new Date().toISOString(),
