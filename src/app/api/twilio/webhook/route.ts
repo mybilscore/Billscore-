@@ -2398,48 +2398,58 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
       }
 
       // ✅ Build response
-      const appUrl = getAppUrl();
-      const credentialUpdateLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
+// ✅ Build response
+const appUrl = getAppUrl();
+const credentialUpdateLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
-      let response = `Welcome to Bilscore!\n\n`;
-      
-      response += `Account Details:\n`;
-      response += `Name: ${fullName}\n`;
-      response += `Username: ${username}\n`;
-      response += `Email: ${email}\n`;
-      response += `Phone: ${phone}\n\n`;
-      
-      if (wallet) {
-        response += `Wallet Details:\n`;
-        response += `Bank: ${wallet.bankName}\n`;
-        response += `Account Number: ${wallet.accountNumber}\n`;
-        response += `Account Name: ${wallet.accountName}\n`;
-        if (virtualAccountNo) {
-          response += `Virtual Account: ${virtualAccountNo}\n`;
-        }
-        if (isSimulation) {
-          response += `Mode: Simulation (Sandbox)\n`;
-        }
-        response += `Balance: ₦0\n\n`;
-      }
-      
-      response += `Default Credentials:\n`;
-      response += `Password: ${defaultPassword}\n`;
-      response += `PIN: ${defaultPin}\n\n`;
-      
-      response += `IMPORTANT: For security, please update your password and PIN using the link below:\n`;
-      response += `${credentialUpdateLink}\n\n`;
-      response += `This link expires in 7 days and can only be used once.\n\n`;
-      
-      response += `Quick Commands:\n`;
-      response += `• BALANCE - Check wallet balance\n`;
-      response += `• HELP - See all commands\n`;
-      response += `• AIRTIME [amount] - Buy airtime for your number\n`;
-      response += `• DATA - See available data plans\n\n`;
-      
-      response += `Need help? Reply with HELP anytime.`;
+let response = `Welcome to Bilscore!\n\n`;
 
-      return response;
+// Account Details Section
+response += `Account Details:\n`;
+response += `• Name: ${fullName}\n`;
+response += `• Username: ${username}\n`;
+response += `• Email: ${email}\n`;
+response += `• Phone: ${phone}\n\n`;
+
+// Wallet Details Section
+if (wallet) {
+  response += `Wallet Details:\n`;
+  response += `• Bank: ${wallet.bankName}\n`;
+  response += `• Acct No: ${wallet.accountNumber}\n`;
+  response += `• Acct Name: ${wallet.accountName}\n`;
+  if (virtualAccountNo) {
+    response += `• Virtual Acct: ${virtualAccountNo}\n`;
+  }
+  if (isSimulation) {
+    response += `• Mode: Simulation (Sandbox)\n`;
+  }
+  response += `• Balance: ₦0\n\n`;
+  
+  // Funding message
+  response += `💳 Fund your wallet by transferring to the account above.\n`;
+  response += `Your wallet will be credited instantly upon transfer.\n\n`;
+}
+
+// Default Credentials Section
+response += `Default Credentials:\n`;
+response += `• Password: ${defaultPassword}\n`;
+response += `• PIN: ${defaultPin}\n\n`;
+
+// Security Notice
+response += `⚠️ IMPORTANT: For security, please update your password and PIN using the link below:\n`;
+response += `${credentialUpdateLink}\n\n`;
+response += `This link expires in 7 days and can only be used once.\n\n`;
+
+// Quick Commands Section
+response += `Quick Commands:\n`;
+response += `• BALANCE - Check wallet balance\n`;
+response += `• HELP - See all commands\n`;
+response += `• AIRTIME [amount] - Buy airtime for your number\n`;
+response += `• DATA - See available data plans\n\n`;
+
+response += `Need help? Reply with HELP anytime.`;
+
+return response;
     }
 
     return `Welcome to Bilscore!\n\nTo register, please provide your details:\nREG [Full Name] [Email] [Username]\n\nExample: REG John Doe john@email.com johndoe`;
