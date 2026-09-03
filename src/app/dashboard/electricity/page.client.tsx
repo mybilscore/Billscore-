@@ -740,7 +740,7 @@ const SavedMeters = ({
                   </p>
                   
                   {/* Customer Information Section */}
-                  {hasCustomerInfo && (
+                  {/* {hasCustomerInfo && (
                     <div className="mt-1.5 p-1.5 bg-gray-50 dark:bg-gray-800/50 rounded border border-gray-100 dark:border-gray-700/50">
                       {meter.customerName && (
                         <div className="flex items-center gap-1 text-[9px] text-gray-700 dark:text-gray-300">
@@ -775,7 +775,7 @@ const SavedMeters = ({
                         </div>
                       )}
                     </div>
-                  )}
+                  )} */}
                   
                   {!hasCustomerInfo && (
                     <div className="mt-1 text-[9px] text-gray-400 dark:text-gray-500">
@@ -787,7 +787,7 @@ const SavedMeters = ({
                   )}
                 </button>
                 
-                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                {/* <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                   <button
                     onClick={() => onViewQR(meter.meterNumber, meter.disco, "Electricity")}
                     className="rounded-lg p-1.5 text-gray-400 hover:text-[#1e293b] transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -805,11 +805,11 @@ const SavedMeters = ({
                   <p className="text-[9px] text-gray-400">
                     {formatDate(meter.createdAt)}
                   </p>
-                </div>
+                </div> */}
               </div>
 
               {/* QR Display Link */}
-              <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
+              {/* <div className="mt-1 flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
                 <LinkIcon className="h-3 w-3 text-gray-400 flex-shrink-0" />
                 <span className="text-[9px] font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">QR Link:</span>
                 <p className="text-[9px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">
@@ -826,7 +826,7 @@ const SavedMeters = ({
                     <Copy className="h-3 w-3" />
                   )}
                 </button>
-              </div>
+              </div> */}
             </div>
           );
         })}

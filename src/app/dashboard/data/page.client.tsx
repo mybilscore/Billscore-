@@ -116,6 +116,25 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+// ✅ PROVIDER ICON MAPPING - LOCAL FALLBACK SYSTEM
+// This completely ignores API-provided icon paths and uses local mappings
+const PROVIDER_ICON_MAP: Record<string, string> = {
+  // By name (case insensitive)
+  'mtn': '/networks/mtn.jpg',
+  'airtel': '/networks/airtel.png',
+  'glo': '/networks/glo.jpg',
+  '9mobile': '/networks/9mobile.jpg',
+  'ninemobile': '/networks/9mobile.png',
+  'etisalat': '/networks/9mobile.png',
+  
+  // By code (case insensitive)
+  'mtn': '/networks/mtn.jpg',
+  'airtel': '/networks/airtel.png',
+  'glo': '/networks/glo.jpg',
+  '9mobile': '/networks/9mobile.jpg',
+  'ninemobile': '/networks/9mobile.png',
+};
+
 // ✅ LOADING MODAL WITH ANIMATED LOGO
 const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
   if (!isOpen) return null;
@@ -123,12 +142,8 @@ const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="flex flex-col items-center">
-        {/* Animated Logo */}
         <div className="relative">
-          {/* Outer ring pulse */}
           <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
-          
-          {/* Logo container with white background */}
           <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
             <div className="relative h-16 w-16">
               <Image
@@ -142,13 +157,11 @@ const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
           </div>
         </div>
 
-        {/* Loading Text */}
         <div className="mt-6 text-center">
           <h3 className="text-xl font-semibold text-white">Processing...</h3>
           <p className="mt-2 text-sm text-gray-300">Please wait while we complete your purchase</p>
         </div>
 
-        {/* Animated Dots */}
         <div className="mt-4 flex space-x-2">
           <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
           <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
@@ -387,7 +400,7 @@ const ServiceDetection = ({
   );
 };
 
-// ✅ Category Button - Complete with all icons
+// ✅ Category Button
 const CategoryButton = ({
   category,
   isSelected,
@@ -439,7 +452,72 @@ const CategoryButton = ({
   );
 };
 
-// ✅ Provider Button
+// ✅ Provider Icon - Uses LOCAL mapping, ignores API path
+const ProviderIcon = ({ 
+  provider, 
+  isSelected 
+}: { 
+  provider: Provider; 
+  isSelected: boolean;
+}) => {
+  const [imageError, setImageError] = useState(false);
+  
+  // Get icon path from LOCAL mapping, completely ignoring API-provided path
+  const getLocalIconPath = (provider: Provider): string | null => {
+    const name = provider.name?.toLowerCase() || '';
+    const code = provider.code?.toLowerCase() || '';
+    
+    // Try exact match by name
+    if (PROVIDER_ICON_MAP[name]) {
+      return PROVIDER_ICON_MAP[name];
+    }
+    
+    // Try match by code
+    if (PROVIDER_ICON_MAP[code]) {
+      return PROVIDER_ICON_MAP[code];
+    }
+    
+    // Try partial match in name
+    for (const [key, path] of Object.entries(PROVIDER_ICON_MAP)) {
+      if (name.includes(key) || key.includes(name)) {
+        return path;
+      }
+    }
+    
+    // Return null if no match found
+    return null;
+  };
+
+  const iconPath = getLocalIconPath(provider);
+
+  // If no icon path found or image failed to load, show fallback
+  if (!iconPath || imageError) {
+    return (
+      <div className={`h-10 w-10 rounded-full flex items-center justify-center text-base font-bold ${
+        isSelected ? "bg-blue-100 text-blue-700 dark:bg-blue-800/50 dark:text-blue-300" : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+      }`}>
+        {provider.name?.charAt(0) || '?'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-10 w-10 flex items-center justify-center">
+      <img
+        src={iconPath}
+        alt={provider.name}
+        className="h-10 w-10 object-contain"
+        onError={() => {
+          console.log(`[ProviderIcon] Failed to load: ${iconPath}`);
+          setImageError(true);
+        }}
+        loading="lazy"
+      />
+    </div>
+  );
+};
+
+// ✅ Provider Button - Uses local icon system
 const ProviderButton = ({
   provider,
   isSelected,
@@ -451,8 +529,6 @@ const ProviderButton = ({
   onClick: () => void;
   isAutoDetected?: boolean;
 }) => {
-  const [imageError, setImageError] = useState(false);
-
   return (
     <button
       onClick={onClick}
@@ -469,22 +545,9 @@ const ProviderButton = ({
           </span>
         </div>
       )}
-      <div className="h-10 w-10">
-        {!imageError && provider.iconPath ? (
-          <img
-            src={provider.iconPath}
-            alt={provider.name}
-            className="h-10 w-10 object-contain"
-            onError={() => setImageError(true)}
-          />
-        ) : (
-          <div className={`h-10 w-10 rounded-full flex items-center justify-center text-base font-bold ${
-            isSelected ? "bg-blue-100 text-blue-700 dark:bg-blue-800/50 dark:text-blue-300" : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-          }`}>
-            {provider.name.charAt(0)}
-          </div>
-        )}
-      </div>
+      
+      <ProviderIcon provider={provider} isSelected={isSelected} />
+      
       <span className={`mt-0.5 text-[10px] font-semibold ${isSelected ? "text-blue-700 dark:text-blue-300" : "text-gray-900 dark:text-white"}`}>
         {provider.name}
       </span>
@@ -527,11 +590,8 @@ const PlanCard = ({
       <div className="flex flex-col h-full justify-between">
         <div className="flex-1 min-w-0">
           <h4 className={`text-sm font-bold truncate ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
-            {plan.data}
-          </h4>
-          <p className={`text-[10px] truncate ${isSelected ? "text-white/80" : "text-gray-500 dark:text-gray-400"}`}>
             {plan.name}
-          </p>
+          </h4>
         </div>
         <div className={`text-left mt-1 ${isSelected ? "text-white" : "text-gray-900 dark:text-white"}`}>
           <p className="text-sm font-bold">{formatCurrency(plan.price)}</p>
@@ -945,7 +1005,6 @@ export function DataClient({
               Get the best data bundles from all networks
             </p>
           </div>
-         
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
