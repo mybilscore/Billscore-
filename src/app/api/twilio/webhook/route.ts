@@ -2252,16 +2252,25 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         username = `${username}_${Math.floor(100 + Math.random() * 900)}`;
       }
 
-      const randomPassword = Math.random().toString(36).slice(-8);
-      const hashedPassword = await hash(randomPassword, 10);
+      // ✅ Generate default credentials
+      const defaultPassword = Math.random().toString(36).slice(-10);
+      const defaultPin = Math.floor(1000 + Math.random() * 9000).toString();
+      const hashedPassword = await hash(defaultPassword, 10);
+      const hashedPin = await hash(defaultPin, 10);
 
-   const user = await prisma.user.create({
+      // ✅ Generate credential update token
+      const changeToken = `CRED_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      // ✅ Create user with default credentials
+      const user = await prisma.user.create({
         data: {
           fullName: fullName,
           email: email,
           username: username,
           phone: phone,
           passwordHash: hashedPassword,
+          pinHash: hashedPin,
           referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
           role: "END_USER",
           isVerified: true,
@@ -2271,31 +2280,151 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           pinAttempts: 0,
           pinLockedUntil: null,
           kycStatus: "PENDING",
-         
         },
       });
 
+      console.log(`✅ User created: ${user.id}`);
 
+      // ✅ Store credential token in audit log
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "WHATSAPP_REGISTRATION",
+          metadata: {
+            changeToken: changeToken,
+            changeTokenExpiry: changeTokenExpiry,
+            tokenUsed: false,
+            registrationDate: new Date().toISOString(),
+            phone: phone,
+          },
+          ipAddress: "whatsapp",
+          channel: "WHATSAPP",
+        },
+      });
 
-      
+      // ✅ ============================================================
+      // ✅ STEP: CREATE PALMPAY WALLET (COMPULSORY - MATCHING WEB REGISTRATION)
+      // ✅ ============================================================
+      let wallet: any = null;
+      let virtualAccountNo: string | null = null;
+      let isSimulation = false;
+      let palmpayError: string | null = null;
 
-      let wallet = null;
       try {
+        console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
+        
+        // ✅ Import the PalmPay wallet service
+        const { createPalmPayVirtualAccountForUser, isPalmPaySimulationMode } = await import("~/lib/palmpay/palmpay-wallet.service");
+        
+        const result = await createPalmPayVirtualAccountForUser(
+          user.id,
+          {
+            fullName: fullName,
+            email: email,
+            phone: phone,
+            role: "END_USER",
+          }
+        );
+
+        wallet = result.wallet;
+        virtualAccountNo = result.virtualAccount.virtualAccountNo;
+        isSimulation = isPalmPaySimulationMode();
+
+        console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
+        console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
+        
+      } catch (error: any) {
+        console.error('❌ PalmPay virtual account creation failed:', error);
+        palmpayError = error.message;
+        
+        // ✅ Create fallback wallet (matching web registration)
+        const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+        
         wallet = await prisma.wallet.create({
           data: {
             userId: user.id,
+            accountNumber: accountNumber,
+            bankName: "BILSCORE",
+            accountName: user.fullName,
             walletBalance: 0,
-            accountName: fullName,
-            accountNumber: `BIL${String(Math.floor(100000 + Math.random() * 900000)).padStart(6, '0')}`,
+            ledgerBalance: 0,
             currency: "NGN",
             isActive: true,
+            kycLevel: 1,
+            metadata: {
+              createdVia: "whatsapp_registration_fallback",
+              palmpayError: palmpayError,
+              timestamp: new Date().toISOString(),
+            },
           },
         });
-      } catch (walletError) {
-        console.error("Wallet creation error:", walletError);
-        return `Registration partially completed but wallet creation failed. Please try again.`;
+
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { hasWallet: true },
+        });
+
+        console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
       }
 
+      // ✅ ============================================================
+      // ✅ STEP: CREDIT WELCOME BONUS (MATCHING WEB REGISTRATION)
+      // ✅ ============================================================
+      const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
+
+      if (wallet) {
+        const existingBonus = await prisma.walletTransaction.findFirst({
+          where: {
+            walletId: wallet.id,
+            reference: { startsWith: 'WELCOME_BONUS_' },
+          },
+        });
+
+        if (!existingBonus) {
+          const currentBalance = Number(wallet.walletBalance || 0);
+
+          await prisma.$transaction([
+            prisma.wallet.update({
+              where: { id: wallet.id },
+              data: {
+                walletBalance: { increment: WELCOME_BONUS },
+                ledgerBalance: { increment: WELCOME_BONUS },
+              },
+            }),
+            prisma.walletTransaction.create({
+              data: {
+                walletId: wallet.id,
+                userId: user.id,
+                type: "CREDIT",
+                amount: WELCOME_BONUS,
+                balanceBefore: currentBalance,
+                balanceAfter: currentBalance + WELCOME_BONUS,
+                reference: `WELCOME_BONUS_${user.id}`,
+                description: `Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
+                status: "SUCCESS",
+                category: "SYSTEM",
+                metadata: {
+                  isWelcomeBonus: true,
+                  amount: WELCOME_BONUS,
+                  source: "whatsapp_registration",
+                  timestamp: new Date().toISOString(),
+                },
+              },
+            }),
+          ]);
+
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { 
+              walletBalance: currentBalance + WELCOME_BONUS,
+            },
+          });
+
+          console.log(`🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} credited`);
+        }
+      }
+
+      // ✅ Create customer
       try {
         await prisma.customer.create({
           data: {
@@ -2303,40 +2432,99 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
             phone: phone,
             fullName: fullName,
             email: email,
-            customerType: "INDIVIDUAL",
+            customerType: "REGULAR",
             isActive: true,
           },
         });
+        console.log(`✅ Customer created: ${user.id}`);
       } catch (customerError) {
-        console.error("Customer creation error:", customerError);
+        console.error("❌ Customer creation error:", customerError);
       }
 
+      // ✅ Create referral
       try {
         const refCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         await prisma.referral.create({
           data: {
             referrerId: user.id,
             referralCode: refCode,
-            status: "ACTIVE",
+            status: "PENDING",
           },
         });
+        console.log(`✅ Referral created: ${user.id}`);
       } catch (referralError) {
-        console.error("Referral creation error:", referralError);
+        console.error("❌ Referral creation error:", referralError);
       }
 
-      return `Welcome ${fullName}! Registration successful.
+      // ✅ Build response
+      const appUrl = getAppUrl();
+      const credentialUpdateLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
+      const finalWalletBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
 
-Wallet Number: ${wallet?.accountNumber || 'N/A'}
-Username: ${username}
-Email: ${email}
+      let response = `🎉 *Welcome to Bilscore, ${fullName}!*\n\n`;
+      response += `Your account has been created successfully.\n\n`;
+      response += `📋 *Account Details:*\n`;
+      response += `👤 Username: *${username}*\n`;
+      response += `📧 Email: *${email}*\n`;
+      response += `📱 Phone: *${phone}*\n\n`;
+      
+      if (wallet) {
+        response += `💰 *Wallet Details:*\n`;
+        response += `🏦 Account Number: *${wallet.accountNumber}*\n`;
+        response += `🏦 Bank: *${wallet.bankName}*\n`;
+        response += `💰 Balance: *₦${finalWalletBalance.toLocaleString()}*\n`;
+        
+        if (virtualAccountNo) {
+          response += `📱 Virtual Account: *${virtualAccountNo}*\n`;
+        }
+        if (isSimulation) {
+          response += `⚠️ *Mode: Simulation* (Sandbox environment)\n`;
+        }
+        if (palmpayError) {
+          response += `⚠️ *Note:* Fallback wallet created (PalmPay unavailable)\n`;
+        }
+        response += `\n`;
+        
+        if (WELCOME_BONUS > 0 && !existingBonus) {
+          response += `🎁 *Welcome Bonus:* ₦${WELCOME_BONUS.toLocaleString()} has been credited to your wallet!\n\n`;
+        }
+      }
+      
+      response += `🔑 *Default Credentials:*\n`;
+      response += `🔐 Password: *${defaultPassword}*\n`;
+      response += `🔢 PIN: *${defaultPin}*\n\n`;
+      
+      response += `⚠️ *Important:*\n`;
+      response += `For security, please update your password and PIN using the link below:\n\n`;
+      response += `🔗 *Update Credentials:*\n`;
+      response += `${credentialUpdateLink}\n\n`;
+      response += `⏰ This link expires in *7 days* and can only be used once.\n\n`;
+      
+      response += `📌 *Quick Commands:*\n`;
+      response += `• BALANCE - Check wallet balance\n`;
+      response += `• HELP - See all available commands\n`;
+      response += `• AIRTIME [amount] - Buy airtime for your number (no PIN needed)\n`;
+      response += `• DATA - See available data plans\n\n`;
+      
+      response += `_Need help? Reply with HELP anytime._`;
 
-Type HELP to see available commands.`;
+      return response;
     }
 
     return `Welcome to Bilscore!\n\nTo register, please provide your details:\nREG [Full Name] [Email] [Username]\n\nExample: REG John Doe john@email.com johndoe`;
   } catch (error: any) {
     console.error("[WhatsApp] Registration error:", error);
-    return formatErrorMessage(error);
+    
+    if (error.code === "P2002") {
+      const target = error.meta?.target || [];
+      let field = "User";
+      if (target.includes("email")) field = "Email";
+      else if (target.includes("phone")) field = "Phone number";
+      else if (target.includes("username")) field = "Username";
+      return `Registration failed: ${field} already in use.`;
+    }
+    
+    return `Registration failed: ${error.message || 'Please try again'}`;
   }
 }
 
