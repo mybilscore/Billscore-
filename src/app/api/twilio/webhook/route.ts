@@ -2302,9 +2302,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         },
       });
 
-      // ✅ ============================================================
-      // ✅ STEP: CREATE PALMPAY WALLET (COMPULSORY - MATCHING WEB REGISTRATION)
-      // ✅ ============================================================
+      // ✅ CREATE PALMPAY WALLET
       let wallet: any = null;
       let virtualAccountNo: string | null = null;
       let isSimulation = false;
@@ -2313,7 +2311,6 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
       try {
         console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
         
-        // ✅ Import the PalmPay wallet service
         const { createPalmPayVirtualAccountForUser, isPalmPaySimulationMode } = await import("~/lib/palmpay/palmpay-wallet.service");
         
         const result = await createPalmPayVirtualAccountForUser(
@@ -2337,7 +2334,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         console.error('❌ PalmPay virtual account creation failed:', error);
         palmpayError = error.message;
         
-        // ✅ Create fallback wallet (matching web registration)
+        // ✅ Create fallback wallet
         const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
         
         wallet = await prisma.wallet.create({
@@ -2367,12 +2364,12 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
       }
 
-      // ✅ ============================================================
-      // ✅ STEP: CREDIT WELCOME BONUS (MATCHING WEB REGISTRATION)
-      // ✅ ============================================================
+      // ✅ CREDIT WELCOME BONUS
       const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
+      let bonusCredited = false;
 
       if (wallet) {
+        // ✅ Check if bonus already exists (fixed scope)
         const existingBonus = await prisma.walletTransaction.findFirst({
           where: {
             walletId: wallet.id,
@@ -2420,11 +2417,12 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
             },
           });
 
+          bonusCredited = true;
           console.log(`🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} credited`);
         }
       }
 
-      // ✅ Create customer
+      // ✅ CREATE CUSTOMER - FIXED with tags
       try {
         await prisma.customer.create({
           data: {
@@ -2434,6 +2432,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
             email: email,
             customerType: "REGULAR",
             isActive: true,
+            tags: [], // ✅ Required field
           },
         });
         console.log(`✅ Customer created: ${user.id}`);
@@ -2441,12 +2440,12 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         console.error("❌ Customer creation error:", customerError);
       }
 
-      // ✅ Create referral
+      // ✅ CREATE REFERRAL - FIXED with referrer relation
       try {
         const refCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         await prisma.referral.create({
           data: {
-            referrerId: user.id,
+            referrerId: user.id, // ✅ Use referrerId
             referralCode: refCode,
             status: "PENDING",
           },
@@ -2459,7 +2458,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
       // ✅ Build response
       const appUrl = getAppUrl();
       const credentialUpdateLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
-      const finalWalletBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
+      const finalWalletBalance = wallet ? Number(wallet.walletBalance) + (bonusCredited ? WELCOME_BONUS : 0) : 0;
 
       let response = `🎉 *Welcome to Bilscore, ${fullName}!*\n\n`;
       response += `Your account has been created successfully.\n\n`;
@@ -2485,7 +2484,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         }
         response += `\n`;
         
-        if (WELCOME_BONUS > 0 && !existingBonus) {
+        if (bonusCredited) {
           response += `🎁 *Welcome Bonus:* ₦${WELCOME_BONUS.toLocaleString()} has been credited to your wallet!\n\n`;
         }
       }
