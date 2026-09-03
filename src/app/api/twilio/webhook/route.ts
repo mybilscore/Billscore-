@@ -2258,7 +2258,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           email: email,
           username: username,
           phone: phone,
-          password: await hash(Math.random().toString(36).slice(-8), 10),
+          passwordHash: await hash(Math.random().toString(36).slice(-8), 10),
           referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
           role: "USER",
           status: "ACTIVE",
