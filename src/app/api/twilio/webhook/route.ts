@@ -2261,21 +2261,63 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
       const changeToken = `CRED_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
       const changeTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-      // ✅ Retry logic for wallet creation
+      // ✅ Create user with default credentials
+      const user = await prisma.user.create({
+        data: {
+          fullName: fullName,
+          email: email,
+          username: username,
+          phone: phone,
+          passwordHash: hashedPassword,
+          pinHash: hashedPin,
+          referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+          role: "END_USER",
+          isVerified: true,
+          hasWallet: false,
+          walletBalance: 0,
+          preferredLanguage: "EN",
+          pinAttempts: 0,
+          pinLockedUntil: null,
+          kycStatus: "PENDING",
+        },
+      });
+
+      console.log(`✅ User created: ${user.id}`);
+
+      // ✅ Store credential token in audit log
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "WHATSAPP_REGISTRATION",
+          metadata: {
+            changeToken: changeToken,
+            changeTokenExpiry: changeTokenExpiry,
+            tokenUsed: false,
+            registrationDate: new Date().toISOString(),
+            phone: phone,
+          },
+          ipAddress: "whatsapp",
+          channel: "WHATSAPP",
+        },
+      });
+
+      // ✅ CREATE PALMPAY WALLET with retry logic
       let wallet: any = null;
+      let virtualAccountNo: string | null = null;
+      let isSimulation = false;
+      let palmpayError: string | null = null;
       let retryCount = 0;
       const MAX_RETRIES = 3;
-      let lastError: any = null;
 
       while (retryCount < MAX_RETRIES && !wallet) {
         try {
           retryCount++;
-          console.log(`📤 Attempt ${retryCount}/${MAX_RETRIES} - Creating PalmPay wallet for user...`);
+          console.log(`📤 Attempt ${retryCount}/${MAX_RETRIES} - Creating PalmPay wallet for user ${user.id}...`);
           
-          const { createPalmPayVirtualAccountForUser } = await import("~/lib/palmpay/palmpay-wallet.service");
+          const { createPalmPayVirtualAccountForUser, isPalmPaySimulationMode } = await import("~/lib/palmpay/palmpay-wallet.service");
           
           const result = await createPalmPayVirtualAccountForUser(
-            null,
+            user.id,
             {
               fullName: fullName,
               email: email,
@@ -2285,15 +2327,16 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           );
 
           wallet = result.wallet;
-          console.log(`✅ Wallet created successfully on attempt ${retryCount}`);
-          console.log(`🏦 Bank: ${wallet.bankName}`);
-          console.log(`👤 Account Name: ${wallet.accountName}`);
-          console.log(`🔢 Account Number: ${wallet.accountNumber}`);
+          virtualAccountNo = result.virtualAccount?.virtualAccountNo || null;
+          isSimulation = isPalmPaySimulationMode();
+
+          console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
+          console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
           break;
 
         } catch (error: any) {
-          lastError = error;
           console.error(`❌ Attempt ${retryCount} failed:`, error.message);
+          palmpayError = error.message;
           
           if (retryCount < MAX_RETRIES) {
             const delay = retryCount * 2000;
@@ -2303,65 +2346,27 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         }
       }
 
+      // ✅ If all retries failed, delete user and return error
       if (!wallet) {
         console.error(`❌ All ${MAX_RETRIES} attempts to create wallet failed`);
-        return `Registration failed: Unable to create wallet. Please try again later. Error: ${lastError?.message || 'Unknown error'}`;
+        
+        // Rollback: Delete the user since wallet creation failed
+        await prisma.user.delete({
+          where: { id: user.id },
+        }).catch(() => {});
+        
+        return `Registration failed: Unable to create wallet. Please try again later. Error: ${palmpayError || 'Unknown error'}`;
       }
 
-      // ✅ Create user with the wallet in a transaction
-      const result = await prisma.$transaction(async (tx) => {
-        const user = await tx.user.create({
-          data: {
-            fullName: fullName,
-            email: email,
-            username: username,
-            phone: phone,
-            passwordHash: hashedPassword,
-            pinHash: hashedPin,
-            referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-            role: "END_USER",
-            isVerified: true,
-            hasWallet: true,
-            walletBalance: 0,
-            preferredLanguage: "EN",
-            pinAttempts: 0,
-            pinLockedUntil: null,
-            kycStatus: "PENDING",
-          },
-        });
+      // ✅ Update user with wallet info
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { hasWallet: true },
+      });
 
-        console.log(`✅ User created: ${user.id}`);
-
-        // ✅ Update wallet with userId
-        const updatedWallet = await tx.wallet.update({
-          where: { id: wallet.id },
-          data: {
-            userId: user.id,
-            accountName: fullName,
-          },
-        });
-
-        console.log(`✅ Wallet linked to user: ${updatedWallet.accountNumber}`);
-
-        // ✅ Store credential token in audit log
-        await tx.auditLog.create({
-          data: {
-            userId: user.id,
-            action: "WHATSAPP_REGISTRATION",
-            metadata: {
-              changeToken: changeToken,
-              changeTokenExpiry: changeTokenExpiry,
-              tokenUsed: false,
-              registrationDate: new Date().toISOString(),
-              phone: phone,
-            },
-            ipAddress: "whatsapp",
-            channel: "WHATSAPP",
-          },
-        });
-
-        // ✅ Create customer
-        await tx.customer.create({
+      // ✅ CREATE CUSTOMER
+      try {
+        await prisma.customer.create({
           data: {
             userId: user.id,
             phone: phone,
@@ -2372,21 +2377,27 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
             tags: [],
           },
         });
+        console.log(`✅ Customer created: ${user.id}`);
+      } catch (customerError) {
+        console.error("❌ Customer creation error:", customerError);
+      }
 
-        // ✅ Create referral
+      // ✅ CREATE REFERRAL
+      try {
         const refCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        await tx.referral.create({
+        await prisma.referral.create({
           data: {
             referrerId: user.id,
             referralCode: refCode,
             status: "PENDING",
           },
         });
+        console.log(`✅ Referral created: ${user.id}`);
+      } catch (referralError) {
+        console.error("❌ Referral creation error:", referralError);
+      }
 
-        return { user, wallet: updatedWallet };
-      });
-
-      // ✅ Build response with actual wallet details from PalmPay
+      // ✅ Build response
       const appUrl = getAppUrl();
       const credentialUpdateLink = `${appUrl}/auth/update-credentials?token=${changeToken}`;
 
@@ -2398,11 +2409,17 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
       response += `Email: ${email}\n`;
       response += `Phone: ${phone}\n\n`;
       
-      if (result.wallet) {
+      if (wallet) {
         response += `Wallet Details:\n`;
-        response += `Bank: ${result.wallet.bankName}\n`; // ✅ Shows actual bank (PalmPay)
-        response += `Account Number: ${result.wallet.accountNumber}\n`;
-        response += `Account Name: ${result.wallet.accountName}\n`; // ✅ Shows actual account name
+        response += `Bank: ${wallet.bankName}\n`;
+        response += `Account Number: ${wallet.accountNumber}\n`;
+        response += `Account Name: ${wallet.accountName}\n`;
+        if (virtualAccountNo) {
+          response += `Virtual Account: ${virtualAccountNo}\n`;
+        }
+        if (isSimulation) {
+          response += `Mode: Simulation (Sandbox)\n`;
+        }
         response += `Balance: ₦0\n\n`;
       }
       
