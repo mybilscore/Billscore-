@@ -1,5 +1,5 @@
 // app/api/vendors/subscription/create/route.ts
-// COMPLETE UPDATED VERSION - With channelDisplay support
+// COMPLETE UPDATED WITH YOLA SUPPORT
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -22,7 +22,6 @@ import {
   CustomerType,
   RefundStatus,
 } from "@prisma/client";
-import { getVendorService } from "~/lib/vendors/vendor.service";
 import { compare } from "bcrypt";
 import { CacheService } from "~/lib/cache/cache.service";
 
@@ -47,28 +46,192 @@ function log(level: 'info' | 'warn' | 'error', message: string, data?: any) {
 }
 
 // ============================================================
-// HELPERS
+// DISCO MAPPING - COMPLETE WITH YOLA
 // ============================================================
 
 function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
   if (!discoCode) return null;
   
-  const discoMap: Record<string, DisCo> = {
+  // Normalize: trim, uppercase, remove special characters
+  const normalized = discoCode.toString().toUpperCase().trim();
+  
+  // ============================================================
+  // DIRECT MAPPING - Exact matches
+  // ============================================================
+  const exactMap: Record<string, DisCo> = {
+    'ABUJA': DisCo.ABUJA,
     'IKEJA': DisCo.IKEJA,
     'EKO': DisCo.EKO,
-    'ABUJA': DisCo.ABUJA,
-    'KANO': DisCo.KANO,
-    'PHCN': DisCo.PHCN,
-    'IBADAN': DisCo.IBADAN,
     'BENIN': DisCo.BENIN,
     'ENUGU': DisCo.ENUGU,
+    'IBADAN': DisCo.IBADAN,
     'JOS': DisCo.JOS,
+    'KANO': DisCo.KANO,
     'PORT_HARCOURT': DisCo.PORT_HARCOURT,
     'PORTHARCOURT': DisCo.PORT_HARCOURT,
+    'KADUNA': DisCo.KADUNA,
+    'YOLA': DisCo.YOLA, // ✅ Added YOLA
   };
   
-  const normalized = discoCode.toUpperCase().trim();
-  return discoMap[normalized] || null;
+  if (exactMap[normalized]) {
+    return exactMap[normalized];
+  }
+  
+  // ============================================================
+  // ACRONYM MAPPING - Common abbreviations
+  // ============================================================
+  const acronymMap: Record<string, DisCo> = {
+    'AEDC': DisCo.ABUJA,
+    'IKEDC': DisCo.IKEJA,
+    'EKEDC': DisCo.EKO,
+    'BEDC': DisCo.BENIN,
+    'EEDC': DisCo.ENUGU,
+    'IBEDC': DisCo.IBADAN,
+    'JED': DisCo.JOS,
+    'JEDC': DisCo.JOS,
+    'KEDCO': DisCo.KANO,
+    'PHED': DisCo.PORT_HARCOURT,
+    'PHEDC': DisCo.PORT_HARCOURT,
+    'KAEDCO': DisCo.KADUNA,
+    'KEDC': DisCo.KANO,
+    'YEDC': DisCo.YOLA, // ✅ Added YEDC acronym
+  };
+  
+  if (acronymMap[normalized]) {
+    return acronymMap[normalized];
+  }
+  
+  // ============================================================
+  // PARTIAL MATCH - Contains keyword
+  // ============================================================
+  const partialMap: Record<string, DisCo> = {
+    'ABUJA': DisCo.ABUJA,
+    'IKEJA': DisCo.IKEJA,
+    'EKO': DisCo.EKO,
+    'BENIN': DisCo.BENIN,
+    'ENUGU': DisCo.ENUGU,
+    'IBADAN': DisCo.IBADAN,
+    'JOS': DisCo.JOS,
+    'KANO': DisCo.KANO,
+    'PORT': DisCo.PORT_HARCOURT,
+    'HARCOURT': DisCo.PORT_HARCOURT,
+    'RIVERS': DisCo.PORT_HARCOURT,
+    'KADUNA': DisCo.KADUNA,
+    'SOKOTO': DisCo.KADUNA,
+    'KEBBI': DisCo.KADUNA,
+    'ZAMFARA': DisCo.KADUNA,
+    'YOLA': DisCo.YOLA, // ✅ Added YOLA partial match
+    'ADAMAWA': DisCo.YOLA, // ✅ Added Adamawa state mapping
+  };
+  
+  for (const [key, value] of Object.entries(partialMap)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return value;
+    }
+  }
+  
+  // ============================================================
+  // REGION MAPPING - Map cities/states to DisCos
+  // ============================================================
+  const regionMap: Record<string, DisCo> = {
+    // Eko (Lagos Island)
+    'LAGOS': DisCo.EKO,
+    'VI': DisCo.EKO,
+    'IKOYI': DisCo.EKO,
+    'SURULERE': DisCo.EKO,
+    'BADAGRY': DisCo.EKO,
+    'APAPA': DisCo.EKO,
+    'MARINA': DisCo.EKO,
+    
+    // Ikeja (Lagos Mainland)
+    'MAINLAND': DisCo.IKEJA,
+    'YABA': DisCo.IKEJA,
+    'MARYLAND': DisCo.IKEJA,
+    'IKEJA': DisCo.IKEJA,
+    'OGBA': DisCo.IKEJA,
+    'AGEGE': DisCo.IKEJA,
+    
+    // Abuja
+    'ABUJA': DisCo.ABUJA,
+    'NIGER': DisCo.ABUJA,
+    'NASARAWA': DisCo.ABUJA,
+    'KOGI': DisCo.ABUJA,
+    'GWAGWALADA': DisCo.ABUJA,
+    'KUBWA': DisCo.ABUJA,
+    'BWARI': DisCo.ABUJA,
+    
+    // Ibadan
+    'IBADAN': DisCo.IBADAN,
+    'OGUN': DisCo.IBADAN,
+    'OYO': DisCo.IBADAN,
+    'OSUN': DisCo.IBADAN,
+    'KWARA': DisCo.IBADAN,
+    
+    // Benin
+    'BENIN': DisCo.BENIN,
+    'ONDO': DisCo.BENIN,
+    'EKITI': DisCo.BENIN,
+    'DELTA': DisCo.BENIN,
+    'EDO': DisCo.BENIN,
+    'ASABA': DisCo.BENIN,
+    'WARRI': DisCo.BENIN,
+    
+    // Enugu
+    'ENUGU': DisCo.ENUGU,
+    'ANAMBRA': DisCo.ENUGU,
+    'IMO': DisCo.ENUGU,
+    'ABIA': DisCo.ENUGU,
+    'EBONYI': DisCo.ENUGU,
+    'AWKA': DisCo.ENUGU,
+    'UMUAHIA': DisCo.ENUGU,
+    'OWERRI': DisCo.ENUGU,
+    
+    // Jos & Yola
+    'JOS': DisCo.JOS,
+    'PLATEAU': DisCo.JOS,
+    'BAUCHI': DisCo.JOS,
+    'GOMBE': DisCo.JOS,
+    'TARABA': DisCo.JOS,
+    'ADAMAWA': DisCo.YOLA, // ✅ Adamawa now maps to YOLA
+    'YOLA': DisCo.YOLA, // ✅ YOLA city
+    'JALINGO': DisCo.JOS,
+    
+    // Kano
+    'KANO': DisCo.KANO,
+    'KATSINA': DisCo.KANO,
+    'JIGAWA': DisCo.KANO,
+    
+    // Port Harcourt
+    'PORT': DisCo.PORT_HARCOURT,
+    'HARCOURT': DisCo.PORT_HARCOURT,
+    'RIVERS': DisCo.PORT_HARCOURT,
+    'BAYELSA': DisCo.PORT_HARCOURT,
+    'CROSS RIVER': DisCo.PORT_HARCOURT,
+    'AKWA IBOM': DisCo.PORT_HARCOURT,
+    'CALABAR': DisCo.PORT_HARCOURT,
+    'UYO': DisCo.PORT_HARCOURT,
+    'YENAGOA': DisCo.PORT_HARCOURT,
+    
+    // Kaduna
+    'KADUNA': DisCo.KADUNA,
+    'SOKOTO': DisCo.KADUNA,
+    'KEBBI': DisCo.KADUNA,
+    'ZAMFARA': DisCo.KADUNA,
+    'ZARIA': DisCo.KADUNA,
+  };
+  
+  for (const [key, value] of Object.entries(regionMap)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return value;
+    }
+  }
+  
+  // ============================================================
+  // LOGGING for debugging
+  // ============================================================
+  log('warn', `⚠️ [DisCo Mapping] Could not map "${discoCode}" (normalized: "${normalized}")`);
+  
+  return null;
 }
 
 function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
@@ -88,176 +251,68 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
 }
 
 // ============================================================
-// REFUND HELPER
+// SAVE METER HELPER
 // ============================================================
 
-async function processRefund(
-  transaction: any,
-  user: any,
-  amount: number,
-  reason: string,
-  reasonCode: string = "VENDOR_FAILURE",
-  initiatedBy: string = "SYSTEM"
+async function saveMeterAsync(
+  userId: string, 
+  meterNumber: string, 
+  disco: string, 
+  meterType: string,
+  customerName?: string,
+  customerAddress?: string,
+  customerPhone?: string,
+  customerEmail?: string,
+  meterStatus?: string,
+  lastVerified?: Date
 ) {
-  const existingRefund = await prisma.refund.findFirst({
-    where: { 
-      transactionId: transaction.id,
-      status: { not: 'CANCELLED' }
-    }
-  });
-
-  if (existingRefund) return existingRefund;
-
-  const wallet = await prisma.wallet.findUnique({
-    where: { userId: user.id },
-  });
-
-  if (!wallet) throw new Error("Wallet not found");
-
-  const refundReference = `REF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-
-  const refund = await prisma.refund.create({
-    data: {
-      refundReference,
-      transactionId: transaction.id,
-      userId: user.id,
-      amount: amount,
-      fee: 0,
-      totalRefunded: amount,
-      status: RefundStatus.PROCESSING,
-      type: "AUTOMATIC",
-      reason: reason,
-      reasonCode: reasonCode,
-      initiatedBy: initiatedBy,
-      walletId: wallet.id,
-      initiatedAt: new Date(),
-      metadata: {
-        originalTransaction: {
-          id: transaction.id,
-          amount: transaction.amount,
-          product: transaction.product,
-          createdAt: transaction.createdAt,
-        },
-      },
-    },
-  });
-
-  await prisma.refundAuditLog.create({
-    data: {
-      refundId: refund.id,
-      action: 'CREATED',
-      performedBy: initiatedBy,
-      notes: `Refund initiated for transaction ${transaction.id}`,
-    },
-  });
-
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          walletBalance: {
-            increment: amount,
-          },
-        },
-      });
-
-      const wt = await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          userId: user.id,
-          type: "CREDIT",
-          amount: amount,
-          balanceBefore: wallet.walletBalance,
-          balanceAfter: wallet.walletBalance + amount,
-          reference: refundReference,
-          description: `Refund for failed subscription: ${reason}`,
-          status: TransactionStatus.SUCCESS,
-          category: "REFUND",
-          metadata: {
-            refundId: refund.id,
-            transactionId: transaction.id,
-            refundType: "AUTOMATIC",
-          },
-        },
-      });
-
-      await tx.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          totalRefunded: amount,
-          refundStatus: RefundStatus.COMPLETED,
-          refundId: refund.id,
-          metadata: {
-            ...transaction.metadata,
-            refund: {
-              id: refund.id,
-              processedAt: new Date().toISOString(),
-              amount: amount,
-              reason: reason,
-              reasonCode: reasonCode,
-            },
-          },
-        },
-      });
-
-      await tx.refund.update({
-        where: { id: refund.id },
-        data: {
-          status: RefundStatus.COMPLETED,
-          walletTransactionId: wt.id,
-          processedBy: initiatedBy,
-          processedAt: new Date(),
-          completedAt: new Date(),
-        },
-      });
-
-      await tx.refundAuditLog.create({
-        data: {
-          refundId: refund.id,
-          action: 'COMPLETED',
-          performedBy: initiatedBy,
-          notes: `Refund completed - amount: ${amount}`,
-        },
-      });
+    const existing = await prisma.savedMeter.findFirst({
+      where: { userId, meterNumber },
     });
 
-    await prisma.refundNotification.create({
-      data: {
-        refundId: refund.id,
-        userId: user.id,
-        type: "COMPLETED",
-        channel: "MOBILE_PUSH",
-        message: `Your refund of ₦${amount} for subscription has been processed.`,
-        metadata: {
-          refundId: refund.id,
-          timestamp: new Date().toISOString(),
+    const data = {
+      userId,
+      meterNumber,
+      disco: disco.toUpperCase(),
+      meterType: meterType || "Prepaid",
+      customerName: customerName || null,
+      customerAddress: customerAddress || null,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      meterStatus: meterStatus || null,
+      lastVerified: lastVerified || new Date(),
+      isDefault: existing?.isDefault || false,
+    };
+
+    if (existing) {
+      await prisma.savedMeter.update({
+        where: { id: existing.id },
+        data: {
+          disco: disco.toUpperCase(),
+          meterType: meterType || "Prepaid",
+          customerName: customerName || existing.customerName,
+          customerAddress: customerAddress || existing.customerAddress,
+          customerPhone: customerPhone || existing.customerPhone,
+          customerEmail: customerEmail || existing.customerEmail,
+          meterStatus: meterStatus || existing.meterStatus,
+          lastVerified: lastVerified || new Date(),
         },
-      },
-    });
+      });
+      log('info', `✅ Meter updated with customer info: ${meterNumber} - ${customerName || 'No name'}`);
+    } else {
+      await prisma.savedMeter.create({ data });
+      log('info', `✅ Meter saved with customer info: ${meterNumber} - ${customerName || 'No name'}`);
+    }
 
-    return refund;
-
-  } catch (error: any) {
-    log('error', `Refund failed: ${error.message}`);
-
-    await prisma.refund.update({
-      where: { id: refund.id },
-      data: {
-        status: RefundStatus.FAILED,
-        metadata: {
-          ...refund.metadata,
-          error: error.message,
-        },
-      },
-    });
-
-    throw error;
+    await CacheService.invalidateSavedMeters(userId).catch(() => {});
+  } catch (error) {
+    log('error', '❌ Failed to save meter:', error);
   }
 }
 
 // ============================================================
-// MAIN API ROUTE - OPTIMIZED
+// MAIN API ROUTE
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -266,10 +321,21 @@ export async function POST(request: NextRequest) {
   try {
     const sessionUser = await requireAuth("/auth/sign-in");
     const body = await request.json();
-    const { meterNumber, discoCode, amount, deliveryDate, pin } = body;
+    const { 
+      meterNumber, 
+      discoCode, 
+      amount, 
+      deliveryDate, 
+      pin,
+      customerName,
+      customerAddress,
+      customerPhone,
+      customerEmail,
+      meterStatus,
+    } = body;
 
     // ============================================================
-    // STATIC CHANNEL - Always WEB_APP for web routes
+    // STATIC CHANNEL
     // ============================================================
     const CHANNEL_DISPLAY = "WEB_APP";
 
@@ -324,6 +390,40 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // MAP DISCO - WITH YOLA SUPPORT
+    // ============================================================
+    
+    log('info', `🔍 Mapping disco code: "${discoCode}"`);
+    const discoEnum = mapDiscoCode(discoCode);
+    
+    if (!discoEnum) {
+      log('error', `❌ Invalid disco code: "${discoCode}"`);
+      
+      const validDiscos = [
+        'ABUJA (AEDC) - Abuja, Niger, Kogi, Nasarawa',
+        'IKEJA (IKEDC) - Ikeja, Lagos Mainland',
+        'EKO (EKEDC) - Lagos Island, Badagry',
+        'BENIN (BEDC) - Edo, Delta, Ondo, Ekiti',
+        'ENUGU (EEDC) - Enugu, Anambra, Ebonyi, Imo, Abia',
+        'IBADAN (IBEDC) - Oyo, Ogun, Osun, Kwara, Ondo',
+        'JOS (JED) - Plateau, Bauchi, Gombe, Taraba',
+        'KANO (KEDCO) - Kano, Katsina, Jigawa',
+        'PORT HARCOURT (PHED) - Rivers, Bayelsa, Cross River, Akwa Ibom',
+        'KADUNA (KAEDCO) - Kaduna, Sokoto, Kebbi, Zamfara',
+        'YOLA (YEDC) - Adamawa, Yola', // ✅ Added YOLA
+      ];
+      
+      return NextResponse.json({
+        success: false,
+        error: `Invalid DisCo: "${discoCode}". Please select a valid DisCo.`,
+        validDiscos: validDiscos,
+        suggestion: "For Yola (Adamawa), please use 'YOLA' or 'YEDC'",
+      }, { status: 400 });
+    }
+    
+    log('info', `✅ Disco mapped: "${discoCode}" -> ${discoEnum}`);
+
+    // ============================================================
     // PARALLEL FETCH: user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
@@ -338,7 +438,6 @@ export async function POST(request: NextRequest) {
     let customer = cachedCustomer;
     let walletBalance = cachedBalance?.balance;
 
-    // Fallback to database if cache misses
     if (!user) {
       const dbUser = await prisma.user.findUnique({
         where: { id: userId },
@@ -422,6 +521,8 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
+    const walletId = user.wallet.id;
+
     // ============================================================
     // PIN VERIFICATION
     // ============================================================
@@ -476,7 +577,6 @@ export async function POST(request: NextRequest) {
       }, { status: statusCode });
     }
 
-    // Reset PIN attempts on success
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -496,108 +596,8 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const discoEnum = mapDiscoCode(discoCode);
-    if (!discoEnum) {
-      return NextResponse.json({
-        success: false,
-        error: "Invalid DisCo selected",
-      }, { status: 400 });
-    }
-
-    const walletId = user.wallet.id;
-
     // ============================================================
-    // PURCHASE TOKEN WITH TIMEOUT
-    // ============================================================
-
-    let token = null;
-    let tokenSaved = false;
-    let vendorReference = null;
-    let deliveryStatus = "SCHEDULED";
-    let vtuTransactionId = null;
-    let tokenVaultId = null;
-    let vendorId: string | null = null;
-    let vendorEnum: VtuVendor | null = null;
-    let wasDebited = false;
-    
-    let vendorCommission: number | null = null;
-    let vendorTotalAmount: number | null = null;
-    let commissionRate: number | null = null;
-    let commissionType: string | null = null;
-    let commissionDetails: any = null;
-    let costPrice: number | null = null;
-    let grossProfit: number | null = null;
-    let profitMargin: number | null = null;
-    let platformCommission: number | null = null;
-
-    try {
-      const vendorService = getVendorService();
-
-      const TIMEOUT_MS = 25000;
-      const vendorPromise = vendorService.buyElectricity(
-        {
-          meterNumber: meterNumber,
-          amount: amount,
-          discoCode: discoCode,
-          meterType: "Prepaid",
-          phone: user.phone,
-        },
-        user.id
-      );
-
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Vendor timeout after 25 seconds')), TIMEOUT_MS);
-      });
-
-      const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
-
-      // Extract commission data
-      if (result.data) {
-        vendorCommission = result.data.commission || null;
-        vendorTotalAmount = result.data.totalAmount || null;
-        
-        if (result.metadata?.commissionDetails) {
-          commissionDetails = result.metadata.commissionDetails;
-          commissionRate = commissionDetails.rate ? parseFloat(commissionDetails.rate) : null;
-          commissionType = commissionDetails.rate_type || null;
-        }
-        
-        costPrice = vendorTotalAmount ?? amount;
-        grossProfit = amount - costPrice;
-        profitMargin = amount > 0 ? (grossProfit / amount) * 100 : 0;
-        platformCommission = grossProfit;
-      }
-
-      vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
-
-      if (result.vendor) {
-        const vendorRecord = await prisma.vendor.findFirst({
-          where: { code: result.vendor as string },
-          select: { id: true },
-        });
-        if (vendorRecord) {
-          vendorId = vendorRecord.id;
-        }
-      }
-
-      if (result.success && result.data?.token) {
-        token = result.data.token;
-        vendorReference = result.vendorReference;
-        tokenSaved = true;
-        wasDebited = true;
-        deliveryStatus = "TOKEN_PURCHASED";
-        log('info', `Token purchased for ${meterNumber}`);
-      } else {
-        log('warn', `Token purchase failed: ${result.error}`);
-        deliveryStatus = "PENDING_PURCHASE";
-      }
-    } catch (error: any) {
-      log('error', `Token purchase error: ${error.message}`);
-      deliveryStatus = "PENDING_PURCHASE";
-    }
-
-    // ============================================================
-    // CREATE PREORDER - channelDisplay = "WEB_APP"
+    // CREATE PREORDER
     // ============================================================
 
     const preOrder = await prisma.preOrder.create({
@@ -611,7 +611,7 @@ export async function POST(request: NextRequest) {
         serviceFee: 0,
         totalDebited: 0,
         deliveryDate: selectedDate,
-        status: tokenSaved ? PreOrderStatus.PURCHASED : PreOrderStatus.PENDING,
+        status: PreOrderStatus.PENDING,
         isCancelled: false,
         channel: ChannelType.WEB_APP,
         metadata: {
@@ -620,145 +620,28 @@ export async function POST(request: NextRequest) {
           isReserved: true,
           reservedAmount: amount,
           scheduledDate: deliveryDate,
-          tokenPurchased: tokenSaved,
-          token: token,
+          tokenPurchased: false,
           walletId: walletId,
           paymentPending: true,
           source: "SubscriptionAPI",
-          wasDebited: wasDebited,
+          wasDebited: false,
           channel: "WEB_APP",
           channelDisplay: CHANNEL_DISPLAY,
-          commission: {
-            vendorCommission,
-            vendorTotalAmount,
-            commissionRate,
-            platformProfit: platformCommission,
+          discoCode: discoCode,
+          discoEnum: discoEnum,
+          customerData: {
+            name: customerName || null,
+            address: customerAddress || null,
+            phone: customerPhone || null,
+            email: customerEmail || null,
+            status: meterStatus || null,
           },
         },
       },
     });
 
     // ============================================================
-    // IF TOKEN PURCHASED, CREATE VTU TRANSACTION AND TOKEN VAULT
-    // ============================================================
-
-    if (tokenSaved && token) {
-      const vtuTransaction = await prisma.vtuTransaction.create({
-        data: {
-          userId: user.id,
-          transactionType: VtuType.ELECTRICITY_PREORDER,
-          product: discoCode || "ELECTRICITY",
-          amount: amount,
-          totalDebited: amount,
-          meterNumber: meterNumber,
-          status: TransactionStatus.PENDING,
-          vendor: vendorEnum,
-          vendorReference: vendorReference,
-          vendorId: vendorId || undefined,
-          token: token,
-          scheduledFor: selectedDate,
-          channel: ChannelType.WEB_APP,
-          channelDisplay: CHANNEL_DISPLAY,
-          preOrder: { connect: { id: preOrder.id } },
-          vendorCommission: vendorCommission,
-          vendorTotalAmount: vendorTotalAmount,
-          commissionRate: commissionRate,
-          commissionType: commissionType,
-          commissionMetadata: commissionDetails,
-          costPrice: costPrice,
-          sellingPrice: amount,
-          grossProfit: grossProfit,
-          profitMargin: profitMargin,
-          platformCommission: platformCommission,
-          platformTotalAmount: amount,
-          netProfit: grossProfit,
-          totalCommission: (vendorCommission || 0) + (platformCommission || 0),
-          effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
-          metadata: {
-            preOrderId: preOrder.id,
-            deliveryDate: deliveryDate,
-            vendorReference: vendorReference,
-            serviceType: "electricity",
-            isSubscription: true,
-            isScheduled: true,
-            tokenPurchased: true,
-            paymentPending: true,
-            source: "SubscriptionAPI",
-            wasDebited: true,
-            channel: "WEB_APP",
-            channelDisplay: CHANNEL_DISPLAY,
-            commission: {
-              vendorCommission,
-              vendorTotalAmount,
-              commissionRate,
-              commissionType,
-              commissionDetails: commissionDetails,
-              platformCommission: platformCommission,
-              grossProfit: grossProfit,
-              profitMargin: profitMargin,
-              costPrice: costPrice,
-              sellingPrice: amount,
-            },
-          },
-        },
-      });
-
-      vtuTransactionId = vtuTransaction.id;
-
-      await prisma.preOrder.update({
-        where: { id: preOrder.id },
-        data: { transactionId: vtuTransaction.id },
-      });
-
-      const tokenExpiry = new Date();
-      tokenExpiry.setDate(tokenExpiry.getDate() + 30);
-
-      const tokenVault = await prisma.tokenVault.create({
-        data: {
-          userId: user.id,
-          transactionId: vtuTransaction.id,
-          token: token,
-          tokenType: TokenType.ELECTRICITY,
-          meterNumber: meterNumber,
-          disCo: discoEnum,
-          amount: amount,
-          validFrom: new Date(),
-          validUntil: tokenExpiry,
-          status: TokenStatus.STORED,
-          scheduledFor: selectedDate,
-          deliveryChannel: DeliveryChannel.MOBILE_PUSH,
-          isRefunded: false,
-          metadata: {
-            vendorReference: vendorReference,
-            preOrderId: preOrder.id,
-            deliveryDate: deliveryDate,
-            serviceType: "electricity",
-            isScheduled: true,
-            paymentPending: true,
-            source: "SubscriptionAPI",
-            wasDebited: true,
-            channel: "WEB_APP",
-            channelDisplay: CHANNEL_DISPLAY,
-            commission: {
-              vendorCommission,
-              vendorTotalAmount,
-              commissionRate,
-              platformProfit: platformCommission,
-            },
-          },
-        },
-      });
-
-      tokenVaultId = tokenVault.id;
-
-      await prisma.preOrder.update({
-        where: { id: preOrder.id },
-        data: { tokenVaultId: tokenVault.id },
-      });
-    }
-
-    // ============================================================
-    // RESERVE AMOUNT - channelDisplay = "WEB_APP"
+    // RESERVE AMOUNT
     // ============================================================
 
     const reserveTransaction = await prisma.walletTransaction.create({
@@ -770,9 +653,7 @@ export async function POST(request: NextRequest) {
         balanceBefore: walletBalance,
         balanceAfter: walletBalance,
         reference: `RESERVE_${preOrder.id}`,
-        description: tokenSaved 
-          ? `Token purchased & reserved for delivery on ${new Date(deliveryDate).toLocaleDateString()}`
-          : `Reserved for electricity delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
+        description: `Reserved for electricity delivery on ${new Date(deliveryDate).toLocaleDateString()}`,
         status: TransactionStatus.PENDING,
         category: WalletCategory.ELECTRICITY,
         channel: ChannelType.WEB_APP,
@@ -784,21 +665,20 @@ export async function POST(request: NextRequest) {
           amountReserved: amount,
           status: "RESERVED",
           scheduledDate: deliveryDate,
-          tokenPurchased: tokenSaved,
-          tokenVaultId: tokenVaultId,
-          vtuTransactionId: vtuTransactionId,
-          token: token,
           walletId: walletId,
           paymentPending: true,
           source: "SubscriptionAPI",
-          wasDebited: wasDebited,
+          wasDebited: false,
           channel: "WEB_APP",
           channelDisplay: CHANNEL_DISPLAY,
-          commission: {
-            vendorCommission,
-            vendorTotalAmount,
-            commissionRate,
-            platformProfit: platformCommission,
+          discoCode: discoCode,
+          discoEnum: discoEnum,
+          customerData: {
+            name: customerName || null,
+            address: customerAddress || null,
+            phone: customerPhone || null,
+            email: customerEmail || null,
+            status: meterStatus || null,
           },
         },
       },
@@ -810,7 +690,7 @@ export async function POST(request: NextRequest) {
 
     await prisma.job.create({
       data: {
-        type: JobType.SUBSCRIPTION_PROCESSING,
+        type: JobType.PREORDER_DELIVERY,
         status: JobStatus.PENDING,
         payload: {
           preOrderId: preOrder.id,
@@ -820,28 +700,40 @@ export async function POST(request: NextRequest) {
           deliveryDate: deliveryDate,
           walletId: walletId,
           reserveTransactionId: reserveTransaction.id,
-          tokenVaultId: tokenVaultId,
-          vtuTransactionId: vtuTransactionId,
-          token: token,
-          tokenPurchased: tokenSaved,
-          wasDebited: wasDebited,
           meterNumber: meterNumber,
           discoCode: discoCode,
+          discoEnum: discoEnum,
+          customerName: customerName || null,
+          customerAddress: customerAddress || null,
+          customerPhone: customerPhone || null,
+          customerEmail: customerEmail || null,
+          meterStatus: meterStatus || null,
           source: "SubscriptionAPI",
           channel: "WEB_APP",
           channelDisplay: CHANNEL_DISPLAY,
-          commission: {
-            vendorCommission,
-            vendorTotalAmount,
-            commissionRate,
-            platformProfit: platformCommission,
-          },
         },
         priority: 5,
         maxAttempts: 3,
         scheduledFor: selectedDate,
       },
     });
+
+    // ============================================================
+    // SAVE METER WITH CUSTOMER DATA
+    // ============================================================
+
+    saveMeterAsync(
+      user.id, 
+      meterNumber, 
+      discoCode, 
+      'Prepaid',
+      customerName || null,
+      customerAddress || null,
+      customerPhone || null,
+      customerEmail || null,
+      meterStatus || null,
+      new Date()
+    ).catch(() => {});
 
     // ============================================================
     // INVALIDATE CACHE
@@ -855,7 +747,7 @@ export async function POST(request: NextRequest) {
     ]);
 
     const totalTime = Date.now() - startTime;
-    log('info', `Subscription created in ${totalTime}ms`);
+    log('info', `✅ Subscription created in ${totalTime}ms for disco: ${discoEnum}`);
 
     return NextResponse.json({
       success: true,
@@ -864,33 +756,28 @@ export async function POST(request: NextRequest) {
         type: "electricity",
         amount: Number(preOrder.amount),
         scheduledDate: deliveryDate,
-        deliveryStatus: deliveryStatus,
-        tokenPurchased: tokenSaved,
-        token: token,
-        tokenVaultId: tokenVaultId,
-        vtuTransactionId: vtuTransactionId,
+        deliveryStatus: "SCHEDULED",
+        tokenPurchased: false,
         amountReserved: amount,
         walletBalance: walletBalance,
         reservedAmount: amount,
         walletId: walletId,
-        wasDebited: wasDebited,
+        wasDebited: false,
         channel: CHANNEL_DISPLAY,
-        commission: {
-          vendorCommission: vendorCommission,
-          vendorTotalAmount: vendorTotalAmount,
-          commissionRate: commissionRate,
-          platformProfit: platformCommission,
-          grossProfit: grossProfit,
-          profitMargin: profitMargin,
+        disco: discoEnum,
+        message: "Subscription created! Token will be purchased on delivery date.",
+        customerInfo: {
+          name: customerName,
+          address: customerAddress,
+          phone: customerPhone,
+          email: customerEmail,
+          status: meterStatus,
         },
-        message: tokenSaved 
-          ? "Token purchased and reserved! Balance will be deducted on delivery date."
-          : "Subscription created! Token purchase will be completed before delivery date.",
       },
     }, { status: 201 });
 
   } catch (error: any) {
-    log('error', 'Subscription creation failed', error.message);
+    log('error', '❌ Subscription creation failed', error.message);
     return NextResponse.json({
       success: false,
       error: error.message || "Failed to create subscription",

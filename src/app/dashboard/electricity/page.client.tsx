@@ -1,10 +1,11 @@
 // app/dashboard/buy/electricity/page.client.tsx
-// COMPLETE WITH MODAL IMPLEMENTATION & OPTIONAL METER NUMBER
+// COMPLETE WITH LOADING MODAL IMPLEMENTATION
 
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import QRCode from "react-qr-code";
 import {
   Zap,
@@ -119,6 +120,49 @@ const formatDate = (dateString: string) => {
   if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
   if (days < 365) return `${Math.floor(days / 30)} months ago`;
   return `${Math.floor(days / 365)} years ago`;
+};
+
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        {/* Animated Logo */}
+        <div className="relative">
+          {/* Outer ring pulse */}
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          
+          {/* Logo container with white background */}
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Loading Text */}
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your purchase</p>
+        </div>
+
+        {/* Animated Dots */}
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // ✅ SUCCESS MODAL COMPONENT
@@ -882,6 +926,7 @@ export function ElectricityClient({
   // ✅ Modal states
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
   const [successData, setSuccessData] = useState<{
     transactionId: string;
     meterNumber: string;
@@ -975,7 +1020,6 @@ export function ElectricityClient({
           return;
         }
         
-        // ✅ Log the disco ID for debugging
         console.log('🔍 [Verify Meter] Sending request:', {
           serviceID: disco.serviceID || disco.code,
           meterNumber,
@@ -1268,6 +1312,8 @@ export function ElectricityClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
@@ -1309,6 +1355,9 @@ export function ElectricityClient({
 
       const result = await response.json();
 
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
+
       if (!response.ok || !result.success) {
         throw new Error(result.error || "Purchase failed");
       }
@@ -1349,6 +1398,8 @@ export function ElectricityClient({
       }
 
     } catch (err: any) {
+      // ✅ Close loading modal on error
+      setShowLoadingModal(false);
       setError(err.message || "Purchase failed. Please try again.");
       setErrorMessage(err.message || "Purchase failed. Please try again.");
       setShowErrorModal(true);
@@ -1852,6 +1903,9 @@ export function ElectricityClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL */}
+      <LoadingModal isOpen={showLoadingModal} />
 
       {/* ✅ SUCCESS MODAL */}
       {successData && (

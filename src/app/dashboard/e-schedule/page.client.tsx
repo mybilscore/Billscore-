@@ -1,10 +1,11 @@
 // app/dashboard/subscriptions/page.client.tsx
-// COMPLETE UPDATED VERSION - With auto-population and customer info display
+// COMPLETE WITH LOADING, SUCCESS & ERROR MODALS
 
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import {
@@ -120,7 +121,229 @@ const formatDate = (dateString: string) => {
   return date.toLocaleDateString("en-NG", { month: "short", day: "numeric", year: "numeric" });
 };
 
-// ✅ Saved Item Component - With customer info display
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we schedule your delivery</p>
+        </div>
+
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ SUCCESS MODAL COMPONENT
+const SuccessModal = ({
+  isOpen,
+  onClose,
+  transactionId,
+  amount,
+  identifier,
+  serviceType,
+  provider,
+  isScheduled,
+  onBuyMore,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  transactionId: string;
+  amount: number;
+  identifier: string;
+  serviceType: string;
+  provider: string;
+  isScheduled?: boolean;
+  onBuyMore?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 animate-bounce">
+          <CalendarIcon className="h-10 w-10 text-green-600 dark:text-green-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          {isScheduled ? "Schedule Created! 🎉" : "Subscription Confirmed! 🎉"}
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          {isScheduled 
+            ? "Your electricity token has been scheduled successfully" 
+            : "Your subscription has been confirmed"}
+        </p>
+
+        <div className="mb-6 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-800/50">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Service</span>
+            <span className="font-medium text-gray-900 dark:text-white">{serviceType}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Provider</span>
+            <span className="font-medium text-gray-900 dark:text-white">{provider}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Identifier</span>
+            <span className="font-medium text-gray-900 dark:text-white">{identifier}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Amount</span>
+            <span className="font-bold text-green-600 dark:text-green-400">
+              {formatCurrency(amount)}
+            </span>
+          </div>
+          {isScheduled && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
+              <span className="font-medium text-yellow-600 dark:text-yellow-400">
+                Scheduled ⏳
+              </span>
+            </div>
+          )}
+          {transactionId && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Transaction ID</span>
+              <span className="font-mono text-xs text-gray-600 dark:text-gray-300">
+                {transactionId.slice(0, 8)}...{transactionId.slice(-6)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Done
+          </button>
+          {onBuyMore && (
+            <button
+              onClick={() => {
+                onBuyMore();
+                onClose();
+              }}
+              className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Schedule Another
+            </button>
+          )}
+        </div>
+
+        <p className="mt-3 text-center text-[10px] text-gray-400">
+          This window will close automatically in a few seconds
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ✅ ERROR MODAL COMPONENT
+const ErrorModal = ({
+  isOpen,
+  onClose,
+  error,
+  onRetry,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  error: string;
+  onRetry?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+          <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Action Failed
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          We couldn't complete your request
+        </p>
+
+        <div className="mb-6 rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
+          <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              if (onRetry) onRetry();
+              onClose();
+            }}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              window.location.href = "/support";
+            }}
+            className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Contact Support
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Saved Item Component
 const SavedItem = ({
   item,
   isSelected,
@@ -172,7 +395,6 @@ const SavedItem = ({
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {item.meterNumber} • {item.disco} • {item.meterType}
           </p>
-          {/* ✅ Show customer info if available */}
           {hasCustomerInfo && (
             <div className="mt-1 space-y-0.5">
               {item.customerName && (
@@ -528,7 +750,7 @@ const QRCodeModal = ({
   );
 };
 
-// Add Meter Modal - WITH FULL VERIFICATION
+// Add Meter Modal
 const AddMeterModal = ({
   isOpen,
   onClose,
@@ -547,8 +769,6 @@ const AddMeterModal = ({
   const [name, setName] = useState("");
   const [meterType, setMeterType] = useState("Prepaid");
   const [isDefault, setIsDefault] = useState(false);
-  
-  // Verification states
   const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [customerName, setCustomerName] = useState<string>("");
@@ -565,7 +785,6 @@ const AddMeterModal = ({
       setName(editingItem.name || "");
       setMeterType(editingItem.meterType);
       setIsDefault(editingItem.isDefault);
-      // If editing, mark as verified if meter number exists
       if (editingItem.meterNumber) {
         setIsVerified(true);
         setCustomerName(editingItem.customerName || "Saved Meter");
@@ -577,7 +796,6 @@ const AddMeterModal = ({
     }
   }, [editingItem]);
 
-  // Reset form when modal closes
   const handleClose = () => {
     if (!editingItem) {
       setMeterNumber("");
@@ -598,7 +816,6 @@ const AddMeterModal = ({
 
   if (!isOpen) return null;
 
-  // Handle meter verification
   const handleVerifyMeter = async () => {
     if (!meterNumber || meterNumber.length < 7) {
       setVerificationError("Please enter a valid meter number (minimum 7 digits)");
@@ -645,24 +862,19 @@ const AddMeterModal = ({
         setCustomerPhone(result.data.customerPhone || "");
         setCustomerEmail(result.data.customerEmail || "");
         setMeterStatus(result.data.status || "Active");
-        // Auto-populate name if not set
         if (!name) {
           setName(result.data.customerName || `${disco} Meter`);
         }
         toast.success(`✅ Meter verified: ${result.data.customerName}`);
       } else {
-        setVerificationError(result.error || "Meter verification failed. Please check the meter number.");
+        setVerificationError(result.error || "Meter verification failed");
         setIsVerified(false);
-        toast.error("❌ Meter verification failed", {
-          description: result.error || "Please check the meter number",
-        });
+        toast.error("❌ Meter verification failed");
       }
     } catch (err: any) {
       setVerificationError(err.message || "Verification failed");
       setIsVerified(false);
-      toast.error("❌ Verification failed", {
-        description: err.message || "Please try again",
-      });
+      toast.error("❌ Verification failed");
     } finally {
       setIsVerifying(false);
     }
@@ -844,7 +1056,6 @@ const AddMeterModal = ({
                   )}
                 </button>
                 
-                {/* Verification Result - FULL INFO */}
                 {isVerified && customerName && (
                   <div className="mt-2 rounded-lg border border-green-200 bg-green-50 p-2.5 dark:border-green-900/30 dark:bg-green-900/20">
                     <div className="flex items-start gap-2">
@@ -1216,6 +1427,12 @@ export function SubscriptionClient({
   const [activeSubTab, setActiveSubTab] = useState<"meters" | "qrcodes">("meters");
   const [editingMeter, setEditingMeter] = useState<SavedMeter | null>(null);
   
+  // ✅ Modal states
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  
   // PIN State
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
@@ -1385,13 +1602,10 @@ export function SubscriptionClient({
     }
   };
 
-  // ✅ Updated: Auto-populate meter data when selected
   const handleMeterSelect = (meterId: string) => {
     const meter = meters.find(m => m.id === meterId);
     if (meter) {
       setSelectedMeter(meterId);
-      // Auto-populate the meter data (no re-verification needed)
-      // The form will use the selected meter data
       setError("");
       setPinError("");
       
@@ -1462,7 +1676,6 @@ export function SubscriptionClient({
   };
 
   const handleCreateSubscription = async () => {
-    // Validate PIN first
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
       toast.error("Please enter your transaction PIN");
@@ -1488,6 +1701,8 @@ export function SubscriptionClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
@@ -1502,7 +1717,6 @@ export function SubscriptionClient({
         deliveryDate,
         paymentOption: "schedule_only",
         pin: pin,
-        // ✅ Pass customer data if available
         customerName: currentMeter?.customerName || null,
         customerAddress: currentMeter?.customerAddress || null,
         customerPhone: currentMeter?.customerPhone || null,
@@ -1517,6 +1731,9 @@ export function SubscriptionClient({
       });
 
       const result = await response.json();
+
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
 
       if (!response.ok || !result.success) {
         if (result.error?.toLowerCase().includes('pin') || result.status === 401 || result.status === 403) {
@@ -1555,29 +1772,7 @@ export function SubscriptionClient({
         isScheduled: true,
       });
       setSuccess(true);
-
-      const deliveryLabel = formatDate(deliveryDate);
-      const amountLabel = formatCurrency(amount);
-      
-      if (result.data?.tokenPurchased) {
-        toast.success(`✅ Electricity Token Scheduled with Token!`, {
-          description: `Token: ${result.data.token} • Delivery: ${deliveryLabel} • ${amountLabel}`,
-          duration: 6000,
-          icon: "🔑",
-        });
-      } else if (result.data?.deliveryStatus === "PENDING_PURCHASE") {
-        toast.info(`⏳ Electricity Token Scheduled - Token Pending`, {
-          description: `Delivery: ${deliveryLabel} • ${amountLabel} • We'll purchase token before delivery`,
-          duration: 5000,
-          icon: "⏳",
-        });
-      } else {
-        toast.success(`📅 Electricity Token Scheduled Successfully!`, {
-          description: `Delivery: ${deliveryLabel} • ${amountLabel}`,
-          duration: 5000,
-          icon: "📅",
-        });
-      }
+      setShowSuccessModal(true);
 
       setPin("");
       setTimeout(() => {
@@ -1586,7 +1781,11 @@ export function SubscriptionClient({
 
       resetForm();
     } catch (err: any) {
+      // ✅ Close loading modal on error
+      setShowLoadingModal(false);
       setError(err.message || "Failed to create subscription");
+      setErrorMessage(err.message || "Failed to create subscription");
+      setShowErrorModal(true);
       if (!pinError) {
         toast.error("❌ Failed to create subscription", {
           description: err.message || "Please try again",
@@ -1751,7 +1950,7 @@ export function SubscriptionClient({
               )}
             </div>
 
-            {/* Amount & Delivery Date - COMBINED CARD */}
+            {/* Amount & Delivery Date */}
             <AmountAndDeliveryCard
               recommendedAmounts={recommendedAmounts}
               selectedAmount={selectedAmount}
@@ -1809,7 +2008,6 @@ export function SubscriptionClient({
                     </span>
                   </div>
 
-                  {/* Show customer info if available */}
                   {currentMeter?.customerName && (
                     <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Customer</span>
@@ -1955,6 +2153,38 @@ export function SubscriptionClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL */}
+      <LoadingModal isOpen={showLoadingModal} />
+
+      {/* ✅ SUCCESS MODAL */}
+      {successData && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+          }}
+          transactionId={successData.transactionId}
+          amount={successData.amount}
+          identifier={successData.identifier}
+          serviceType={successData.serviceType}
+          provider={successData.provider}
+          isScheduled={successData.isScheduled}
+          onBuyMore={resetForm}
+        />
+      )}
+
+      {/* ✅ ERROR MODAL */}
+      <ErrorModal
+        isOpen={showErrorModal}
+        onClose={() => {
+          setShowErrorModal(false);
+        }}
+        error={errorMessage}
+        onRetry={() => {
+          handleCreateSubscription();
+        }}
+      />
     </div>
   );
 }

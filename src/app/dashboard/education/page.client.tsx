@@ -1,9 +1,10 @@
-// app/dashboard/buy/education/page.client.tsx
+// app/dashboard/buy/education/page.client.tsx - COMPLETE WITH LOADING & SUCCESS MODALS
 
 "use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   GraduationCap,
   Check,
@@ -74,6 +75,239 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your purchase</p>
+        </div>
+
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ SUCCESS MODAL COMPONENT
+const SuccessModal = ({
+  isOpen,
+  onClose,
+  transactionId,
+  product,
+  variation,
+  quantity,
+  amount,
+  pinDetails,
+  onBuyMore,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  transactionId: string;
+  product: string;
+  variation: string;
+  quantity: number;
+  amount: number;
+  pinDetails?: string;
+  onBuyMore?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 animate-bounce">
+          <GraduationCap className="h-10 w-10 text-green-600 dark:text-green-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Education Purchase Successful! 🎓
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Your educational PIN(s) have been generated successfully
+        </p>
+
+        <div className="mb-6 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-800/50">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Product</span>
+            <span className="font-medium text-gray-900 dark:text-white">{product}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Variation</span>
+            <span className="font-medium text-gray-900 dark:text-white">{variation}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Quantity</span>
+            <span className="font-medium text-gray-900 dark:text-white">{quantity}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Amount</span>
+            <span className="font-bold text-green-600 dark:text-green-400">
+              {formatCurrency(amount)}
+            </span>
+          </div>
+          {pinDetails && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">PIN(s)</span>
+              <span className="font-mono text-xs font-bold text-gray-900 dark:text-white break-all max-w-[200px] text-right">
+                {pinDetails}
+              </span>
+            </div>
+          )}
+          {transactionId && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Transaction ID</span>
+              <span className="font-mono text-xs text-gray-600 dark:text-gray-300">
+                {transactionId.slice(0, 8)}...{transactionId.slice(-6)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {pinDetails && (
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(pinDetails);
+              toast.success("PIN(s) copied to clipboard!");
+            }}
+            className="w-full mb-3 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 flex items-center justify-center gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            Copy PIN(s)
+          </button>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Done
+          </button>
+          {onBuyMore && (
+            <button
+              onClick={() => {
+                onBuyMore();
+                onClose();
+              }}
+              className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Buy More
+            </button>
+          )}
+        </div>
+
+        <p className="mt-3 text-center text-[10px] text-gray-400">
+          This window will close automatically in a few seconds
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ✅ ERROR MODAL COMPONENT
+const ErrorModal = ({
+  isOpen,
+  onClose,
+  error,
+  onRetry,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  error: string;
+  onRetry?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+          <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Purchase Failed
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          We couldn't complete your education purchase
+        </p>
+
+        <div className="mb-6 rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
+          <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              if (onRetry) onRetry();
+              onClose();
+            }}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              window.location.href = "/support";
+            }}
+            className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Contact Support
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ✅ Product Button
 const ProductButton = ({
   product,
@@ -126,7 +360,7 @@ const ProductButton = ({
   );
 };
 
-// ✅ Variation Card (shows price directly)
+// ✅ Variation Card
 const VariationCard = ({
   variation,
   isSelected,
@@ -195,7 +429,7 @@ const VariationCard = ({
   );
 };
 
-// ✅ Profile Verification Component (for JAMB) - FIXED: Uses parent state
+// ✅ Profile Verification Component (for JAMB)
 const ProfileVerification = ({
   profileId,
   setProfileId,
@@ -224,14 +458,14 @@ const ProfileVerification = ({
     setError(null);
 
     try {
-    const response = await fetch("/api/vendors/education/verify-profile", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    profileId,
-    variationCode,
-  }),
-});
+      const response = await fetch("/api/vendors/education/verify-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profileId,
+          variationCode,
+        }),
+      });
 
       const result = await response.json();
 
@@ -321,52 +555,6 @@ const ProfileVerification = ({
   );
 };
 
-// ✅ Status Message Component
-const StatusMessage = ({ 
-  error, 
-  success, 
-  transactionId 
-}: { 
-  error: string; 
-  success: boolean; 
-  transactionId: string;
-}) => {
-  if (!error && !success) return null;
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/30 dark:bg-red-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-red-700 dark:text-red-400">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (success) {
-    return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-medium text-green-700 dark:text-green-400">
-              Purchase successful! 🎉
-            </p>
-            {transactionId && (
-              <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
-                ID: {transactionId}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-};
-
 // ✅ Main Component
 export function EducationClient({
   user: initialUser,
@@ -383,7 +571,21 @@ export function EducationClient({
   const [transactionId, setTransactionId] = useState<string>("");
   const [isEnsuringWallet, setIsEnsuringWallet] = useState(false);
   
-  // ✅ JAMB Profile Verification states - Managed in parent
+  // ✅ Modal states
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    transactionId: string;
+    product: string;
+    variation: string;
+    quantity: number;
+    amount: number;
+    pinDetails?: string;
+  } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  
+  // ✅ JAMB Profile Verification states
   const [profileId, setProfileId] = useState<string>("");
   const [profileVerified, setProfileVerified] = useState<{ customerName: string; status: string } | null>(null);
   const [isVerifyingProfile, setIsVerifyingProfile] = useState(false);
@@ -402,7 +604,6 @@ export function EducationClient({
     if (currentProduct && currentProduct.variations.length > 0) {
       setSelectedVariation(currentProduct.variations[0]);
     }
-    // Reset profile verification when product changes
     setProfileVerified(null);
     setProfileId("");
   }, [selectedProduct]);
@@ -468,12 +669,24 @@ export function EducationClient({
     setProfileVerified(data);
   };
 
+  // ✅ Reset form for "Buy More" functionality
+  const resetForm = () => {
+    setSelectedVariation(null);
+    setQuantity(1);
+    setPin("");
+    setError("");
+    setPinError("");
+    setSuccess(false);
+    setTransactionId("");
+    setProfileVerified(null);
+    setProfileId("");
+  };
+
   const getTotalAmount = () => {
     return (selectedVariation?.price || 0) * quantity;
   };
 
   const handlePurchase = async () => {
-    // Validate PIN
     if (!pin || pin.length < 4) {
       setPinError("Please enter your 4-6 digit transaction PIN");
       return;
@@ -489,7 +702,6 @@ export function EducationClient({
       return;
     }
 
-    // ✅ For JAMB, require profile verification
     if (requiresProfile && !profileVerified) {
       setError("Please verify your JAMB Profile ID first");
       return;
@@ -511,13 +723,14 @@ export function EducationClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
     setPinError("");
 
     try {
-      // ✅ Build payload according to VTpass docs
       const payload: any = {
         serviceId: selectedProduct,
         variationCode: selectedVariation.id,
@@ -527,7 +740,6 @@ export function EducationClient({
         pin: pin,
       };
 
-      // ✅ For JAMB, include billersCode (Profile ID)
       if (requiresProfile && profileId) {
         payload.billersCode = profileId;
       }
@@ -542,13 +754,48 @@ export function EducationClient({
 
       const result = await response.json();
 
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
+
       if (!response.ok || !result.success) {
         throw new Error(result.error || "Purchase failed");
       }
 
       setSuccess(true);
-      setTransactionId(result.data?.transactionId || result.data?.reference);
+      const txId = result.data?.transactionId || result.data?.reference || "";
+      setTransactionId(txId);
       setPin("");
+
+      // ✅ Extract PIN details
+      const token = result.data?.token || result.data?.purchased_code;
+      const tokens = result.data?.tokens || [];
+      const cards = result.data?.cards || [];
+      
+      let pinDetails = "";
+      if (cards.length > 0) {
+        pinDetails = `${cards[0]?.Serial || ''} - ${cards[0]?.Pin || ''}`;
+        if (cards.length > 1) {
+          pinDetails += ` (+${cards.length - 1} more)`;
+        }
+      } else if (tokens.length > 0) {
+        pinDetails = tokens[0];
+        if (tokens.length > 1) {
+          pinDetails += ` (+${tokens.length - 1} more)`;
+        }
+      } else if (token) {
+        pinDetails = token;
+      }
+
+      // ✅ Store success data for modal
+      setSuccessData({
+        transactionId: txId,
+        product: currentProduct?.name || "Unknown",
+        variation: selectedVariation.name,
+        quantity: quantity,
+        amount: totalAmount,
+        pinDetails: pinDetails || undefined,
+      });
+      setShowSuccessModal(true);
 
       // Refresh balance
       const balanceResponse = await fetch("/api/user/balance");
@@ -560,46 +807,12 @@ export function EducationClient({
         });
       }
 
-      // ✅ Format success message with PIN/token details
-      const token = result.data?.token || result.data?.purchased_code;
-      const tokens = result.data?.tokens || [];
-      const cards = result.data?.cards || [];
-      
-      let description = "";
-      if (cards.length > 0) {
-        description = `Card: ${cards[0]?.Serial || ''} - ${cards[0]?.Pin || ''}`;
-        if (cards.length > 1) {
-          description += ` (+${cards.length - 1} more)`;
-        }
-      } else if (tokens.length > 0) {
-        description = `Token: ${tokens[0]}`;
-        if (tokens.length > 1) {
-          description += ` (+${tokens.length - 1} more)`;
-        }
-      } else if (token) {
-        description = `PIN: ${token}`;
-      } else {
-        description = 'Check your email for PIN(s)';
-      }
-
-      toast.success(`✅ ${currentProduct?.name || 'Education'} purchase successful!`, {
-        description: description,
-        duration: 6000,
-        icon: "🎓",
-      });
-
-      setTimeout(() => {
-        setSuccess(false);
-      }, 5000);
-
     } catch (err: any) {
+      // ✅ Close loading modal on error
+      setShowLoadingModal(false);
       setError(err.message || "Purchase failed. Please try again.");
-      toast.error("❌ Purchase failed", {
-        description: err.message || "Please try again",
-      });
-      setTimeout(() => {
-        setError("");
-      }, 5000);
+      setErrorMessage(err.message || "Purchase failed. Please try again.");
+      setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
@@ -649,7 +862,7 @@ export function EducationClient({
               </div>
             </div>
 
-            {/* ✅ JAMB Profile Verification (only shown when JAMB is selected) - FIXED: Pass setProfileId */}
+            {/* JAMB Profile Verification */}
             {selectedProduct === 'jamb' && (
               <ProfileVerification
                 profileId={profileId}
@@ -715,16 +928,6 @@ export function EducationClient({
                 </button>
               </div>
             </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/30 dark:bg-red-900/20">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Sidebar - Order Summary */}
@@ -733,138 +936,130 @@ export function EducationClient({
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Order Summary
               </h3>
-              
-              <StatusMessage 
-                error={error} 
-                success={success} 
-                transactionId={transactionId} 
-              />
 
-              {!error && !success && (
-                <div className="space-y-3 text-sm">
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Product</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
+                    {currentProduct?.name || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Book className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Variation</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
+                    {selectedVariation?.name || "Not selected"}
+                  </span>
+                </div>
+
+                {requiresProfile && profileVerified && (
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <GraduationCap className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Product</span>
+                      <IdCard className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-600 dark:text-gray-400">Profile ID</span>
                     </div>
-                    <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
-                      {currentProduct?.name || "Not selected"}
+                    <span className="font-medium text-gray-900 dark:text-white text-xs">
+                      {profileId} ✅
                     </span>
                   </div>
+                )}
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Book className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Variation</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white truncate max-w-[120px]">
-                      {selectedVariation?.name || "Not selected"}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Quantity</span>
                   </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {quantity}
+                  </span>
+                </div>
 
-                  {requiresProfile && profileVerified && (
-                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <IdCard className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-600 dark:text-gray-400">Profile ID</span>
-                      </div>
-                      <span className="font-medium text-gray-900 dark:text-white text-xs">
-                        {profileId} ✅
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Quantity</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {quantity}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Unit Price</span>
                   </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedVariation ? formatCurrency(selectedVariation.price) : "—"}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Unit Price</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedVariation ? formatCurrency(selectedVariation.price) : "—"}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
                   </div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    {totalAmount > 0 ? formatCurrency(0) : "—"}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
-                    </div>
-                    <span className="font-medium text-gray-500 dark:text-gray-400">
-                      {totalAmount > 0 ? formatCurrency(0) : "—"}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                   </div>
+                  <span className={`font-medium ${user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(user.walletBalance)}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
-                    </div>
-                    <span className={`font-medium ${user.walletBalance >= totalAmount ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {formatCurrency(user.walletBalance)}
-                    </span>
-                  </div>
+                <div className="flex items-center justify-between py-3 mt-2 border-t border-gray-200 dark:border-gray-700">
+                  <span className="font-semibold text-gray-900 dark:text-white">Total</span>
+                  <span className="text-xl font-bold text-[#1e293b] dark:text-white">
+                    {totalAmount > 0 ? formatCurrency(totalAmount) : "—"}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-3 mt-2 border-t border-gray-200 dark:border-gray-700">
-                    <span className="font-semibold text-gray-900 dark:text-white">Total</span>
-                    <span className="text-xl font-bold text-[#1e293b] dark:text-white">
-                      {totalAmount > 0 ? formatCurrency(totalAmount) : "—"}
-                    </span>
-                  </div>
-
-                  {totalAmount > 0 && user.walletBalance < totalAmount && (
-                    <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        ⚠️ Insufficient balance. You need {formatCurrency(totalAmount - user.walletBalance)} more.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Transaction PIN Input */}
-                  <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                      Transaction PIN
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type={showPin ? "text" : "password"}
-                        value={pin}
-                        onChange={handlePinChange}
-                        placeholder="Enter 4-6 digit PIN"
-                        maxLength={6}
-                        className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
-                          pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
-                        } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPin(!showPin)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {pinError && (
-                      <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
-                        {pinError}
-                      </p>
-                    )}
-                    <p className="mt-1 text-xs text-gray-400">
-                      Enter your 4-6 digit transaction PIN to confirm this purchase
+                {totalAmount > 0 && user.walletBalance < totalAmount && (
+                  <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      ⚠️ Insufficient balance. You need {formatCurrency(totalAmount - user.walletBalance)} more.
                     </p>
                   </div>
+                )}
+
+                {/* Transaction PIN Input */}
+                <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Transaction PIN
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={pin}
+                      onChange={handlePinChange}
+                      placeholder="Enter 4-6 digit PIN"
+                      maxLength={6}
+                      className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
+                        pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
+                      } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {pinError && (
+                    <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {pinError}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-400">
+                    Enter your 4-6 digit transaction PIN to confirm this purchase
+                  </p>
                 </div>
-              )}
+              </div>
 
               <button
                 onClick={handlePurchase}
@@ -935,6 +1130,38 @@ export function EducationClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL */}
+      <LoadingModal isOpen={showLoadingModal} />
+
+      {/* ✅ SUCCESS MODAL */}
+      {successData && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+          }}
+          transactionId={successData.transactionId}
+          product={successData.product}
+          variation={successData.variation}
+          quantity={successData.quantity}
+          amount={successData.amount}
+          pinDetails={successData.pinDetails}
+          onBuyMore={resetForm}
+        />
+      )}
+
+      {/* ✅ ERROR MODAL */}
+      <ErrorModal
+        isOpen={showErrorModal}
+        onClose={() => {
+          setShowErrorModal(false);
+        }}
+        error={errorMessage}
+        onRetry={() => {
+          handlePurchase();
+        }}
+      />
     </div>
   );
 }

@@ -11,38 +11,68 @@ function generateVirtualAccountNumber(): string {
   return random.toString().padStart(10, "0");
 }
 
-// ✅ Map plan to category based on validity
+// ✅ Map plan to category - SME separate, others by validity
 function getPlanCategory(plan: any): string {
-  if (plan.category) return plan.category;
+  // 1. Check if it's an SME plan
+  const isSME = plan.planType?.toUpperCase() === 'SME' || 
+                plan.planType?.toUpperCase() === 'SME_DATA' ||
+                plan.name?.toUpperCase().includes('SME') ||
+                (plan.planType?.toUpperCase() === 'SME' && plan.amountMB >= 5000);
 
-  if (plan.planType?.toUpperCase() === 'SME') return 'SME';
+  // 2. If SME, return 'SME' immediately
+  if (isSME) {
+    return 'SME';
+  }
 
-  const validity = plan.validity || 0;
-  const unit = plan.validityUnit?.toUpperCase() || 'DAYS';
+  // 3. Get validity from schema fields
+  let validityValue = plan.validity || 0;
+  const validityUnit = plan.validityUnit?.toUpperCase() || 'DAYS';
 
-  if (unit === 'HOURS' || unit === 'MINUTES') return 'Hourly';
-  
-  if (unit === 'DAYS') {
-    if (validity <= 1) return 'Daily';
-    if (validity <= 7) return 'Weekly';
-    if (validity <= 30) return 'Monthly';
-    if (validity <= 60) return '2 Monthly';
-    if (validity <= 365) return 'Yearly';
-    return 'Monthly';
+  // If validity is 0, derive from amountMB
+  if (validityValue === 0 && plan.amountMB) {
+    const mb = plan.amountMB || 0;
+    if (mb <= 50) validityValue = 1;
+    else if (mb <= 100) validityValue = 1;
+    else if (mb <= 200) validityValue = 7;
+    else if (mb <= 350) validityValue = 7;
+    else if (mb <= 750) validityValue = 30;
+    else if (mb <= 1500) validityValue = 30;
+    else if (mb <= 2500) validityValue = 60;
+    else if (mb <= 5120) validityValue = 365;
+    else validityValue = 30;
+  }
+
+  if (validityValue === 0) validityValue = 30;
+
+  // 4. Determine category based on validity ONLY
+  if (validityUnit === 'HOURS' || validityUnit === 'MINUTES') {
+    return 'Hourly';
   }
   
-  if (unit === 'MONTHS') {
-    if (validity <= 1) return 'Monthly';
-    if (validity <= 2) return '2 Monthly';
-    if (validity <= 12) return 'Yearly';
-    return 'Monthly';
+  if (validityUnit === 'DAYS') {
+    if (validityValue <= 3) return 'Daily';
+    if (validityValue <= 14) return 'Weekly';
+    if (validityValue <= 30) return 'Monthly';
+    if (validityValue <= 60) return '2 Monthly';
+    if (validityValue <= 90) return '2 Monthly';
+    return 'Yearly';
   }
   
-  if (unit === 'YEARS') return 'Yearly';
+  if (validityUnit === 'MONTHS') {
+    if (validityValue <= 1) return 'Monthly';
+    if (validityValue <= 3) return '2 Monthly';
+    if (validityValue <= 12) return 'Yearly';
+    return 'Yearly';
+  }
+  
+  if (validityUnit === 'YEARS') {
+    return 'Yearly';
+  }
 
   return 'Monthly';
 }
 
+// ✅ Sort categories - SME first, then by validity
 function sortCategories(categories: any[]) {
   const order: Record<string, number> = {
     'SME': 0,
@@ -51,8 +81,7 @@ function sortCategories(categories: any[]) {
     'Monthly': 3,
     '2 Monthly': 4,
     'Yearly': 5,
-    'Gifting': 6,
-    'Hourly': 7,
+    'Hourly': 6,
   };
 
   return categories.sort((a, b) => {
@@ -76,7 +105,6 @@ async function fetchVTPassPlans(networkParam: string | null) {
     const secretKey = process.env.VTPASS_SANDBOX_SECRET_KEY || process.env.VTPASS_LIVE_SECRET_KEY;
     const publicKey = process.env.VTPASS_SANDBOX_PUBLIC_KEY || process.env.VTPASS_LIVE_PUBLIC_KEY;
 
-    // ✅ Determine which service IDs to fetch
     let serviceIds: string[] = [];
     
     if (networkParam) {
@@ -116,54 +144,30 @@ async function fetchVTPassPlans(networkParam: string | null) {
           signal: AbortSignal.timeout(30000),
         });
 
-        console.log(`📊 [VTPass] Response status: ${response.status}`);
-        
-        const responseText = await response.text();
-        console.log(`📊 [VTPass] Response sample: ${responseText.substring(0, 500)}`);
-        
-        let data;
-        try {
-          data = JSON.parse(responseText);
-        } catch (e) {
-          console.warn(`⚠️ [VTPass] Could not parse JSON for ${serviceId}`);
+        if (!response.ok) {
+          console.warn(`⚠️ [VTPass] HTTP ${response.status} for ${serviceId}`);
           continue;
         }
+        
+        const data = await response.json();
 
-        // ✅ Check for successful response
         if (data.response_description === "000" && data.content) {
-          // ✅ Extract variations - handle both "variations" and "varations"
           const variations = data.content?.variations || data.content?.varations || [];
           console.log(`📊 [VTPass] Found ${variations.length} variations for ${serviceId}`);
           
-          // ✅ Log first variation to debug
-          if (variations.length > 0) {
-            console.log(`📊 [VTPass] First variation:`, JSON.stringify(variations[0], null, 2));
-          }
-          
-          const mappedPlans = variations.map((v: any, index: number) => {
-            // ✅ CORRECT: Use variation_amount for price
+          const mappedPlans = variations.map((v: any) => {
             const price = parseFloat(v.variation_amount) || 0;
-            
-            // Get network from service ID
-            let networkName = 'MTN';
-            if (serviceId.includes('glo')) networkName = 'GLO';
-            else if (serviceId.includes('airtel')) networkName = 'AIRTEL';
-            else if (serviceId.includes('etisalat')) networkName = '9MOBILE';
-            
-            // ✅ Extract data amount from variation name
             const name = v.name || '';
             let dataAmount = '0MB';
             let amountMB = 0;
             
-            // Try to extract MB/GB from name
-            const dataMatch = name.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
-            if (dataMatch) {
-              const num = parseFloat(dataMatch[1]);
-              const unit = dataMatch[2].toUpperCase();
+            const mbMatch = name.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
+            if (mbMatch) {
+              const num = parseFloat(mbMatch[1]);
+              const unit = mbMatch[2].toUpperCase();
               amountMB = unit === 'GB' ? num * 1024 : num;
               dataAmount = `${num}${unit}`;
             } else {
-              // Fallback: use price to estimate
               const p = price;
               if (p <= 50) { amountMB = 25; dataAmount = '25MB'; }
               else if (p <= 100) { amountMB = 50; dataAmount = '50MB'; }
@@ -179,69 +183,61 @@ async function fetchVTPassPlans(networkParam: string | null) {
               else { amountMB = Math.floor(p / 2); dataAmount = `${amountMB}MB`; }
             }
 
-            // Extract validity from name
             let validityDays = 30;
             const dayMatch = name.match(/(\d+)\s*(day|days|hr|hrs|month|months|year|years)/i);
             if (dayMatch) {
               const num = parseInt(dayMatch[1]);
               const unit = dayMatch[2].toLowerCase();
-              if (unit.includes('day')) {
-                validityDays = num;
-              } else if (unit.includes('month')) {
-                validityDays = num * 30;
-              } else if (unit.includes('year')) {
-                validityDays = num * 365;
-              } else if (unit.includes('hr')) {
-                validityDays = 1;
-              }
+              if (unit.includes('day')) validityDays = num;
+              else if (unit.includes('month')) validityDays = num * 30;
+              else if (unit.includes('year')) validityDays = num * 365;
+              else if (unit.includes('hr')) validityDays = 1;
             }
 
-            // Determine category
-            let categoryName = 'Monthly';
+            // Check if it's SME
+            let planType = 'Monthly';
             const lowerName = name.toLowerCase();
-            
-            if (lowerName.includes('sme')) {
-              categoryName = 'SME';
+            if (lowerName.includes('sme') || lowerName.includes('sme_data')) {
+              planType = 'SME';
             } else if (validityDays <= 1) {
-              categoryName = 'Daily';
+              planType = 'Daily';
             } else if (validityDays <= 7) {
-              categoryName = 'Weekly';
+              planType = 'Weekly';
             } else if (validityDays <= 30) {
-              categoryName = 'Monthly';
+              planType = 'Monthly';
             } else if (validityDays <= 60) {
-              categoryName = '2 Monthly';
+              planType = '2 Monthly';
             } else if (validityDays > 60) {
-              categoryName = 'Yearly';
+              planType = 'Yearly';
             }
 
-            // ✅ Generate unique ID using variation_code + network + index
-            const uniqueId = `${serviceId}-${v.variation_code || v.id || index}-${networkName}`;
+            let networkName = 'MTN';
+            if (serviceId.includes('glo')) networkName = 'GLO';
+            else if (serviceId.includes('airtel')) networkName = 'AIRTEL';
+            else if (serviceId.includes('etisalat')) networkName = '9MOBILE';
 
             return {
-              id: uniqueId,
+              id: v.variation_code || `${serviceId}-${v.name || 'plan'}`,
               name: name || `${dataAmount} Data`,
               data: dataAmount,
               price: price,
-              validity: `${validityDays} days`,
-              planCode: v.variation_code || v.id || uniqueId,
+              validity: validityDays,
+              validityUnit: 'DAYS',
               vendorPrice: price,
               description: name || '',
               amountMB: amountMB,
-              planType: categoryName,
+              planType: planType,
               network: networkName,
               service_type: serviceId,
               variation_code: v.variation_code || '',
               variation_name: name || '',
-              validity_days: validityDays,
+              ourPrice: price,
             };
           });
           
-          // ✅ Filter out plans with price 0
           const filteredPlans = mappedPlans.filter(p => p.price > 0);
-          console.log(`📊 [VTPass] Mapped ${filteredPlans.length} plans with price > 0 for ${serviceId}`);
+          console.log(`📊 [VTPass] Mapped ${filteredPlans.length} plans for ${serviceId}`);
           allPlans = [...allPlans, ...filteredPlans];
-        } else {
-          console.warn(`⚠️ [VTPass] Failed to fetch ${serviceId}:`, data.response_description || data.code || 'Unknown error');
         }
       } catch (e) {
         console.warn(`Failed to fetch ${serviceId} plans:`, e);
@@ -278,36 +274,48 @@ async function getActiveVendor() {
 function formatPlans(plans: any[], networkConfigs: any[]) {
   const groupedByNetwork: Record<string, any> = {};
 
+  console.log(`📊 [formatPlans] Processing ${plans.length} plans`);
+
+  // Initialize networks from configs
+  for (const config of networkConfigs) {
+    const networkKey = config.network.toLowerCase();
+    groupedByNetwork[networkKey] = {
+      id: networkKey,
+      name: config.displayName || config.network,
+      code: config.code || config.network,
+      color: config.color || '#000000',
+      iconPath: config.logo || `/networks/${networkKey}.jpg`,
+      categories: {},
+      hasPlans: false,
+      network: config.network,
+    };
+  }
+
   for (const plan of plans) {
     let networkKey = plan.network?.toLowerCase() || 'mtn';
     let networkName = plan.network || 'MTN';
     
-    // Try to find network config
-    const config = networkConfigs.find(n => 
-      n.network === networkName || 
-      n.code === networkName ||
-      n.displayName === networkName
-    );
-    
-    if (config) {
-      networkName = config.displayName || networkName;
-    }
-
     if (!groupedByNetwork[networkKey]) {
+      const config = networkConfigs.find(n => 
+        n.network === networkName || 
+        n.code === networkName ||
+        n.displayName === networkName
+      );
+      
       groupedByNetwork[networkKey] = {
         id: networkKey,
-        name: networkName,
-        code: networkName,
+        name: config?.displayName || networkName || 'Unknown',
+        code: config?.code || networkName || 'UNKNOWN',
         color: config?.color || '#000000',
         iconPath: config?.logo || `/networks/${networkKey}.jpg`,
         categories: {},
+        hasPlans: false,
         network: plan.network,
-        service_type: plan.service_type || 'data',
       };
     }
 
-    // Determine category
-    let categoryName = plan.planType || 'Monthly';
+    // ✅ Use the fixed getPlanCategory function
+    const categoryName = getPlanCategory(plan);
 
     if (!groupedByNetwork[networkKey].categories[categoryName]) {
       groupedByNetwork[networkKey].categories[categoryName] = {
@@ -317,27 +325,78 @@ function formatPlans(plans: any[], networkConfigs: any[]) {
       };
     }
 
-    // Add plan to category
+    // ✅ USE ourPrice ONLY for display
+    let displayPrice = Number(plan.ourPrice) || 0;
+    
+    // ✅ Skip plans with no ourPrice
+    if (displayPrice <= 0) {
+      console.log(`⚠️ [formatPlans] Skipping plan with no ourPrice: ${plan.name} (ourPrice: ${plan.ourPrice})`);
+      continue;
+    }
+
+    groupedByNetwork[networkKey].hasPlans = true;
+
+    // Get validity display
+    let validityDisplay = '30 days';
+    if (plan.validity && plan.validity > 0) {
+      const unit = plan.validityUnit?.toLowerCase() || 'days';
+      if (unit === 'days' || unit === 'day') {
+        if (plan.validity === 1) validityDisplay = '1 day';
+        else if (plan.validity < 7) validityDisplay = `${plan.validity} days`;
+        else if (plan.validity === 7) validityDisplay = '7 days';
+        else if (plan.validity < 30) validityDisplay = `${plan.validity} days`;
+        else if (plan.validity === 30) validityDisplay = '30 days';
+        else if (plan.validity === 60) validityDisplay = '60 days';
+        else if (plan.validity === 365) validityDisplay = '1 year';
+        else validityDisplay = `${plan.validity} days`;
+      } else if (unit === 'months' || unit === 'month') {
+        if (plan.validity === 1) validityDisplay = '1 month';
+        else if (plan.validity < 12) validityDisplay = `${plan.validity} months`;
+        else if (plan.validity === 12) validityDisplay = '1 year';
+        else validityDisplay = `${plan.validity} months`;
+      } else if (unit === 'years' || unit === 'year') {
+        if (plan.validity === 1) validityDisplay = '1 year';
+        else validityDisplay = `${plan.validity} years`;
+      } else if (unit === 'hours' || unit === 'hour') {
+        validityDisplay = `${plan.validity} hours`;
+      } else if (unit === 'minutes' || unit === 'minute') {
+        validityDisplay = `${plan.validity} minutes`;
+      }
+    }
+
+    // Get data display
+    let dataDisplay = plan.data || `${plan.amountMB || 0}MB`;
+    if (!dataDisplay || dataDisplay === '0MB') {
+      const mb = plan.amountMB || 0;
+      if (mb >= 1024) {
+        dataDisplay = `${(mb / 1024).toFixed(1)}GB`;
+      } else {
+        dataDisplay = `${mb}MB`;
+      }
+    }
+
     groupedByNetwork[networkKey].categories[categoryName].plans.push({
-      id: plan.id || plan.planCode || `${networkKey}-${categoryName}-${plan.price}`,
-      name: plan.name || plan.variation_name || plan.data,
-      data: plan.data || `${plan.amountMB || 0}MB`,
-      price: typeof plan.price === 'number' ? plan.price : parseFloat(plan.price) || 0,
-      validity: typeof plan.validity === 'string' ? plan.validity : `${plan.validity_days || 30} days`,
-      planCode: plan.planCode || plan.variation_code || plan.id,
+      id: plan.id || `${networkKey}-${categoryName}-${displayPrice}`,
+      name: plan.name || plan.variation_name || dataDisplay,
+      data: dataDisplay,
+      price: displayPrice, // ✅ ourPrice
+      validity: validityDisplay,
+      planCode: plan.id || `${networkKey}-${categoryName}-${displayPrice}`,
       vendorPrice: typeof plan.vendorPrice === 'number' ? plan.vendorPrice : parseFloat(plan.vendorPrice) || 0,
       description: plan.description || '',
       amountMB: plan.amountMB || 0,
-      planType: plan.planType || categoryName,
-      variation_code: plan.variation_code || plan.planCode,
-      variation_name: plan.variation_name || plan.name,
+      planType: categoryName,
+      variation_code: plan.variation_code || '',
+      variation_name: plan.variation_name || plan.name || '',
       service_id: plan.service_type || 'data',
       network: plan.network,
+      validityDays: plan.validity || 30,
+      validityUnit: plan.validityUnit || 'DAYS',
     });
   }
 
   // Convert to array and sort categories
-  return Object.keys(groupedByNetwork).map((key) => ({
+  const result = Object.keys(groupedByNetwork).map((key) => ({
     ...groupedByNetwork[key],
     categories: sortCategories(
       Object.keys(groupedByNetwork[key].categories).map((catKey) => ({
@@ -347,6 +406,17 @@ function formatPlans(plans: any[], networkConfigs: any[]) {
       }))
     ),
   }));
+
+  // Log category distribution
+  result.forEach(provider => {
+    if (provider.hasPlans) {
+      console.log(`📊 [formatPlans] ${provider.name} categories:`, 
+        provider.categories.map(c => `${c.name}(${c.plans.length})`).join(', ')
+      );
+    }
+  });
+
+  return result.filter(p => p.hasPlans);
 }
 
 // ✅ Get network configs
@@ -433,7 +503,7 @@ export default async function DataPage() {
     walletBalance: walletBalance,
   };
 
-  // ✅ Get active vendor
+  // Get active vendor
   const vendorService = await getActiveVendor();
   let vendorInfo = null;
   let providers: any[] = [];
@@ -448,10 +518,10 @@ export default async function DataPage() {
 
     console.log(`📊 [DATA] Active vendor: ${vendorInfo.name} (${vendorInfo.code})`);
 
-    // ✅ Get network configs
+    // Get network configs
     const networkConfigs = await getNetworkConfigs();
+    console.log(`📊 [DATA] Found ${networkConfigs.length} network configs`);
 
-    // ✅ Fetch plans based on vendor
     let plans: any[] = [];
 
     if (vendorInfo.code === 'VTPASS' || vendorInfo.code === 'VT_PASS') {
@@ -459,24 +529,58 @@ export default async function DataPage() {
       plans = await fetchVTPassPlans(null);
     } else {
       console.log(`📊 [DATA] Fetching ${vendorInfo.code} plans from database...`);
+      
       const dbPlans = await prisma.dataPlan.findMany({
         where: {
           vendorId: vendorService.vendorId,
           isActive: true,
           status: PlanStatus.ACTIVE,
         },
+        select: {
+          id: true,
+          name: true,
+          planType: true,
+          amountMB: true,
+          ourPrice: true,
+          vendorPrice: true,
+          validity: true,
+          validityUnit: true,
+          network: true,
+          description: true,
+          isActiveForWhatsApp: true,
+          whatsappPriority: true,
+          vendorPlanId: true,
+          vendorNetworkCode: true,
+          vendorPlanType: true,
+          vendorMetadata: true,
+        },
         orderBy: [
           { network: 'asc' },
           { amountMB: 'asc' },
         ],
-        include: {
-          networkConfig: true,
-        },
       });
+      
       plans = dbPlans;
+      console.log(`📊 [DATA] Database returned ${plans.length} plans`);
+      
+      // Log networks found
+      const networksFound = [...new Set(plans.map(p => p.network))];
+      console.log(`📊 [DATA] Networks in database:`, networksFound);
+      
+      // Log sample plan
+      if (plans.length > 0) {
+        console.log(`📊 [DATA] Sample plan:`, {
+          id: plans[0].id,
+          name: plans[0].name,
+          network: plans[0].network,
+          planType: plans[0].planType,
+          ourPrice: plans[0].ourPrice,
+          validity: plans[0].validity,
+          validityUnit: plans[0].validityUnit,
+        });
+      }
     }
 
-    // ✅ Format plans
     providers = formatPlans(plans, networkConfigs);
     networks = networkConfigs.map(n => ({
       id: n.id,

@@ -1,9 +1,8 @@
-// app/dashboard/buy/data/page.client.tsx - Complete with both VTpass and BilalSada support
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   Phone,
   Wifi,
@@ -27,6 +26,9 @@ import {
   CalendarClock,
   X,
   History,
+  Gift,
+  Building2,
+  Star,
 } from "lucide-react";
 
 interface Plan {
@@ -40,7 +42,6 @@ interface Plan {
   description?: string;
   amountMB?: number;
   planType?: string;
-  // ✅ VTpass specific fields
   network?: string;
   variation_code?: string;
   variation_name?: string;
@@ -62,7 +63,6 @@ interface Provider {
   color: string;
   iconPath: string;
   categories: Category[];
-  // ✅ VTpass specific
   network?: string;
   service_type?: string;
 }
@@ -114,6 +114,49 @@ const formatCurrency = (amount: number) => {
     currency: "NGN",
     minimumFractionDigits: 0,
   }).format(amount);
+};
+
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        {/* Animated Logo */}
+        <div className="relative">
+          {/* Outer ring pulse */}
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          
+          {/* Logo container with white background */}
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Loading Text */}
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your purchase</p>
+        </div>
+
+        {/* Animated Dots */}
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // ✅ SUCCESS MODAL COMPONENT
@@ -344,7 +387,59 @@ const ServiceDetection = ({
   );
 };
 
-// Provider Button
+// ✅ Category Button - Complete with all icons
+const CategoryButton = ({
+  category,
+  isSelected,
+  onClick,
+  planCount,
+}: {
+  category: Category;
+  isSelected: boolean;
+  onClick: () => void;
+  planCount: number;
+}) => {
+  const getIcon = (name: string) => {
+    const icons: { [key: string]: React.ReactNode } = {
+      'SME': <Briefcase className="h-3 w-3" />,
+      'Corporate': <Building2 className="h-3 w-3" />,
+      'Gifting': <Gift className="h-3 w-3" />,
+      'Daily': <Calendar className="h-3 w-3" />,
+      'Weekly': <CalendarDays className="h-3 w-3" />,
+      'Monthly': <CalendarRange className="h-3 w-3" />,
+      '2 Monthly': <CalendarCheck className="h-3 w-3" />,
+      'Yearly': <CalendarClock className="h-3 w-3" />,
+      'Hourly': <Clock className="h-3 w-3" />,
+    };
+    return icons[name] || <Briefcase className="h-3 w-3" />;
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-200 ${
+        isSelected
+          ? "bg-[#1e293b] text-white border-[#1e293b] shadow-sm"
+          : "bg-white text-gray-700 border-gray-200 hover:border-[#1e293b] hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:border-gray-500"
+      }`}
+    >
+      {getIcon(category.name)}
+      <span>{category.name}</span>
+      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+        isSelected 
+          ? 'bg-white/20 text-white' 
+          : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+      }`}>
+        {planCount}
+      </span>
+      {isSelected && (
+        <Check className="h-2.5 w-2.5" />
+      )}
+    </button>
+  );
+};
+
+// ✅ Provider Button
 const ProviderButton = ({
   provider,
   isSelected,
@@ -405,56 +500,7 @@ const ProviderButton = ({
   );
 };
 
-// Category Button
-const CategoryButton = ({
-  category,
-  isSelected,
-  onClick,
-  planCount,
-}: {
-  category: Category;
-  isSelected: boolean;
-  onClick: () => void;
-  planCount: number;
-}) => {
-  const getIcon = (name: string) => {
-    const icons: { [key: string]: React.ReactNode } = {
-      'SME': <Briefcase className="h-3 w-3" />,
-      'Daily': <Calendar className="h-3 w-3" />,
-      'Weekly': <CalendarDays className="h-3 w-3" />,
-      'Monthly': <CalendarRange className="h-3 w-3" />,
-      '2 Monthly': <CalendarCheck className="h-3 w-3" />,
-      'Yearly': <CalendarClock className="h-3 w-3" />,
-    };
-    return icons[name] || <Calendar className="h-3 w-3" />;
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-200 ${
-        isSelected
-          ? "bg-[#1e293b] text-white border-[#1e293b] shadow-sm"
-          : "bg-white text-gray-700 border-gray-200 hover:border-[#1e293b] hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:border-gray-500"
-      }`}
-    >
-      {getIcon(category.name)}
-      <span>{category.name}</span>
-      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
-        isSelected 
-          ? 'bg-white/20 text-white' 
-          : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-      }`}>
-        {planCount}
-      </span>
-      {isSelected && (
-        <Check className="h-2.5 w-2.5" />
-      )}
-    </button>
-  );
-};
-
-// Plan Card
+// ✅ Plan Card
 const PlanCard = ({
   plan,
   isSelected,
@@ -532,6 +578,7 @@ export function DataClient({
   // ✅ Modal states
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
   const [successData, setSuccessData] = useState<{
     transactionId: string;
     phoneNumber: string;
@@ -770,6 +817,8 @@ export function DataClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
@@ -811,8 +860,10 @@ export function DataClient({
 
       const result = await response.json();
 
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
+
       if (!response.ok || !result.success) {
-        // ✅ Handle specific VTpass errors
         if (result.error?.toLowerCase().includes('insufficient') || 
             result.error?.toLowerCase().includes('balance')) {
           throw new Error('Insufficient balance in vendor wallet. Please try again later.');
@@ -859,6 +910,8 @@ export function DataClient({
       }
 
     } catch (err: any) {
+      // ✅ Close loading modal on error
+      setShowLoadingModal(false);
       setError(err.message || "Purchase failed. Please try again.");
       setErrorMessage(err.message || "Purchase failed. Please try again.");
       setShowErrorModal(true);
@@ -892,15 +945,7 @@ export function DataClient({
               Get the best data bundles from all networks
             </p>
           </div>
-          {vendorInfo && (
-            <div className="flex items-center gap-2 rounded-full bg-[#1e293b] px-3 py-1.5 text-xs text-white">
-              <span className="font-medium">Active:</span>
-              <span>{vendorInfo.name}</span>
-              <span className="text-[10px] opacity-60">
-                ({isVTpass ? 'VTpass' : isBilalSada ? 'BilalSada' : vendorInfo.code})
-              </span>
-            </div>
-          )}
+         
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1291,7 +1336,7 @@ export function DataClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Filter plans by category (SME, Daily, Weekly, Monthly, 2 Monthly, Yearly)
+                  Filter plans by category (SME, Corporate, Gifting, Daily, Weekly, Monthly, 2 Monthly, Yearly)
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
@@ -1314,6 +1359,9 @@ export function DataClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL */}
+      <LoadingModal isOpen={showLoadingModal} />
 
       {/* ✅ SUCCESS MODAL */}
       {successData && (

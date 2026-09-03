@@ -1,8 +1,9 @@
-// app/dashboard/buy/cable/page.client.tsx - COMPLETE UPDATED VERSION
+// app/dashboard/buy/cable/page.client.tsx - COMPLETE WITH SUCCESS MODAL
 
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import {
   Tv,
   Check,
@@ -109,6 +110,153 @@ const formatDate = (dateString: string) => {
   return `${Math.floor(days / 365)} years ago`;
 };
 
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        {/* Animated Logo */}
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your subscription</p>
+        </div>
+
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ SUCCESS MODAL COMPONENT
+const SuccessModal = ({
+  isOpen,
+  onClose,
+  transactionId,
+  decoderNumber,
+  amount,
+  provider,
+  packageName,
+  onBuyMore,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  transactionId: string;
+  decoderNumber: string;
+  amount: number;
+  provider: string;
+  packageName: string;
+  onBuyMore?: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 animate-in zoom-in-95 duration-200">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 animate-bounce">
+          <Tv className="h-10 w-10 text-green-600 dark:text-green-400" />
+        </div>
+
+        <h3 className="mb-2 text-center text-2xl font-bold text-gray-900 dark:text-white">
+          Cable Subscription Successful! 🎉
+        </h3>
+        <p className="mb-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Your cable TV subscription has been activated successfully
+        </p>
+
+        <div className="mb-6 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-800/50">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Provider</span>
+            <span className="font-medium text-gray-900 dark:text-white">{provider}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Decoder Number</span>
+            <span className="font-medium text-gray-900 dark:text-white">{decoderNumber}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Package</span>
+            <span className="font-medium text-gray-900 dark:text-white">{packageName}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Amount</span>
+            <span className="font-bold text-green-600 dark:text-green-400">
+              {formatCurrency(amount)}
+            </span>
+          </div>
+          {transactionId && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-3 dark:border-gray-700">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Transaction ID</span>
+              <span className="font-mono text-xs text-gray-600 dark:text-gray-300">
+                {transactionId.slice(0, 8)}...{transactionId.slice(-6)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onClose}
+            className="w-full rounded-xl bg-[#1e293b] py-3 text-sm font-semibold text-white transition-all hover:bg-[#0f172a] hover:scale-[1.01]"
+          >
+            Done
+          </button>
+          {onBuyMore && (
+            <button
+              onClick={() => {
+                onBuyMore();
+                onClose();
+              }}
+              className="w-full rounded-xl border border-gray-200 py-3 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Buy Another Subscription
+            </button>
+          )}
+        </div>
+
+        <p className="mt-3 text-center text-[10px] text-gray-400">
+          This window will close automatically in a few seconds
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // ✅ Updated RecentDecoders Component - Shows customer info
 const RecentDecoders = ({
   decoders,
@@ -207,7 +355,6 @@ const RecentDecoders = ({
                 <p className="text-[10px] text-gray-500 dark:text-gray-400">
                   {decoder.decoderNumber}
                 </p>
-                {/* ✅ Show customer info */}
                 {decoder.customerName && (
                   <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
                     <User className="h-2.5 w-2.5" />
@@ -445,50 +592,37 @@ const PackageFilters = ({
   );
 };
 
-// ✅ Status Message Component
-const StatusMessage = ({ 
-  error, 
-  success, 
-  transactionId 
-}: { 
-  error: string; 
-  success: boolean; 
-  transactionId: string;
+// ✅ Provider Tab Button
+const ProviderTab = ({
+  provider,
+  isSelected,
+  onClick,
+}: {
+  provider: Provider;
+  isSelected: boolean;
+  onClick: () => void;
 }) => {
-  if (!error && !success) return null;
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/30 dark:bg-red-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-red-700 dark:text-red-400">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (success) {
-    return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20 mb-3">
-        <div className="flex items-start gap-2">
-          <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-medium text-green-700 dark:text-green-400">
-              Subscription successful! 🎉
-            </p>
-            {transactionId && (
-              <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">
-                ID: {transactionId}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-lg px-4 py-2.5 transition-all duration-200 ${
+        isSelected
+          ? "bg-[#1e293b] text-white shadow-md"
+          : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+      }`}
+    >
+      <span className="text-xl">{provider.logo}</span>
+      <span className={`text-sm font-medium ${isSelected ? "text-white" : "text-gray-700 dark:text-gray-300"}`}>
+        {provider.name}
+      </span>
+      <span className={`text-[10px] ${isSelected ? "text-white/70" : "text-gray-400"}`}>
+        ({provider.packages.length})
+      </span>
+      {isSelected && (
+        <Check className="h-3.5 w-3.5 text-white" />
+      )}
+    </button>
+  );
 };
 
 // ✅ Main Component
@@ -517,10 +651,16 @@ export function CableClient({
   const [loadingDecoders, setLoadingDecoders] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   
-  // ✅ Dropdown states
-  const [showProviderDropdown, setShowProviderDropdown] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  // ✅ Modal states
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    transactionId: string;
+    decoderNumber: string;
+    amount: number;
+    provider: string;
+    packageName: string;
+  } | null>(null);
   
   const [pin, setPin] = useState<string>("");
   const [showPin, setShowPin] = useState(false);
@@ -528,26 +668,6 @@ export function CableClient({
 
   const currentProvider = providers.find((p) => p.id === selectedProvider);
   const packages = currentProvider?.packages || [];
-
-  // ✅ Filter providers based on search
-  const filteredProviders = providers.filter((p) =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // ✅ Handle click outside to close dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowProviderDropdown(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
 
   // ✅ Fetch packages from VTpass API
   useEffect(() => {
@@ -673,7 +793,6 @@ export function CableClient({
     setPinError("");
     setShowCustomerLookup(true);
     
-    // Find the decoder in saved list to get customer info
     const decoder = savedDecoders.find(d => d.decoderNumber === decoderNumber);
     if (decoder) {
       if (decoder.customerName) {
@@ -706,8 +825,6 @@ export function CableClient({
           setFilteredPackages(matchedProvider.packages);
         }
         toast.success(`✅ Switched to ${matchedProvider.name} based on saved decoder`);
-      } else {
-        toast.info(`ℹ️ Saved decoder provider "${provider}" found, but no matching package provider available`);
       }
     }
   };
@@ -749,8 +866,6 @@ export function CableClient({
     }
     setError("");
     setPinError("");
-    setShowProviderDropdown(false);
-    setSearchTerm("");
   };
 
   const handlePackageSelect = (pkg: Package) => {
@@ -778,7 +893,7 @@ export function CableClient({
     setPinError("");
   };
 
-  // ✅ Verify Decoder Function - Stores complete customer info
+  // ✅ Verify Decoder Function
   const handleVerifyDecoder = async () => {
     if (!smartCardNumber || smartCardNumber.length < 10) {
       setError("Please enter a valid smart card number (minimum 10 digits)");
@@ -822,7 +937,6 @@ export function CableClient({
       const result = await response.json();
 
       if (result.success && result.data) {
-        // ✅ Store ALL customer info
         setCustomerName(result.data.customerName || "Customer Found");
         setCustomerAddress(result.data.customerAddress || "");
         setCustomerPhone(result.data.customerPhone || "");
@@ -844,15 +958,11 @@ export function CableClient({
       } else {
         setError(result.error || "Customer not found. Please check the smart card number.");
         setShowCustomerLookup(false);
-        toast.error("❌ Customer not found", {
-          description: "Please verify the smart card number",
-        });
+        toast.error("❌ Customer not found");
       }
     } catch (err: any) {
       setError(err.message || "Verification failed");
-      toast.error("❌ Verification failed", {
-        description: err.message || "Please try again",
-      });
+      toast.error("❌ Verification failed");
     } finally {
       setIsVerifying(false);
     }
@@ -903,6 +1013,8 @@ export function CableClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
@@ -923,12 +1035,16 @@ export function CableClient({
 
       const result = await response.json();
 
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
+
       if (!response.ok || !result.success) {
         throw new Error(result.error || "Purchase failed");
       }
 
       setSuccess(true);
-      setTransactionId(result.data?.transactionId || result.data?.reference);
+      const txId = result.data?.transactionId || result.data?.reference || "";
+      setTransactionId(txId);
       setPin("");
       setSmartCardNumber("");
       setShowCustomerLookup(false);
@@ -937,6 +1053,16 @@ export function CableClient({
       setCustomerPhone("");
       setCustomerEmail("");
       setDecoderStatus("");
+
+      // ✅ Store success data for modal
+      setSuccessData({
+        transactionId: txId,
+        decoderNumber: smartCardNumber || "Not provided",
+        amount: selectedPackage.price,
+        provider: currentProvider?.name || "Unknown",
+        packageName: selectedPackage.name,
+      });
+      setShowSuccessModal(true);
 
       const balanceResponse = await fetch("/api/user/balance");
       const balanceData = await balanceResponse.json();
@@ -954,24 +1080,33 @@ export function CableClient({
       }
 
       toast.success("✅ Subscription successful!", {
-        description: `${currentProvider?.name} - ${selectedPackage.name} for ${formatCurrency(selectedPackage.price)}`,
+        description: `${currentProvider?.name} - ${selectedPackage.name}`,
       });
-
-      setTimeout(() => {
-        setSuccess(false);
-      }, 5000);
 
     } catch (err: any) {
+      setShowLoadingModal(false);
       setError(err.message || "Purchase failed. Please try again.");
-      toast.error("❌ Purchase failed", {
-        description: err.message || "Please try again",
-      });
-      setTimeout(() => {
-        setError("");
-      }, 5000);
+      toast.error("❌ Purchase failed");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ✅ Reset form for "Buy More" functionality
+  const resetForm = () => {
+    setSelectedPackage(null);
+    setSmartCardNumber("");
+    setPin("");
+    setError("");
+    setPinError("");
+    setSuccess(false);
+    setTransactionId("");
+    setShowCustomerLookup(false);
+    setCustomerName("");
+    setCustomerAddress("");
+    setCustomerPhone("");
+    setCustomerEmail("");
+    setDecoderStatus("");
   };
 
   if (isEnsuringWallet) {
@@ -1041,7 +1176,7 @@ export function CableClient({
               </div>
             )}
 
-            {/* ✅ Combined Smart Card Number & Provider Selection */}
+            {/* Combined Smart Card Number & Provider Selection */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Decoder Details
@@ -1065,88 +1200,24 @@ export function CableClient({
                 </div>
               </div>
 
-              {/* ✅ Provider Dropdown */}
-              <div className="mt-4 relative" ref={dropdownRef}>
+              {/* Provider Tabs */}
+              <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   Select Provider
                 </label>
-                <button
-                  onClick={() => setShowProviderDropdown(!showProviderDropdown)}
-                  className="w-full flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-left focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                >
-                  <div className="flex items-center gap-3">
-                    {currentProvider ? (
-                      <>
-                        <span className="text-2xl">{currentProvider.logo}</span>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {currentProvider.name}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {currentProvider.packages.length} packages available
-                          </p>
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-gray-500 dark:text-gray-400">
-                        Select a provider
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDownIcon className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${showProviderDropdown ? 'rotate-180' : ''}`} />
-                </button>
-
-                {/* Dropdown List */}
-                {showProviderDropdown && (
-                  <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                    {/* Search Input */}
-                    <div className="sticky top-0 bg-white dark:bg-gray-900 p-2 border-b border-gray-200 dark:border-gray-700">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <input
-                          type="text"
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          placeholder="Search provider..."
-                          className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                    </div>
-
-                    {filteredProviders.length > 0 ? (
-                      filteredProviders.map((provider) => (
-                        <button
-                          key={provider.id}
-                          onClick={() => handleProviderSelect(provider.id)}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-0 ${
-                            selectedProvider === provider.id ? 'bg-blue-50 dark:bg-blue-950/40' : ''
-                          }`}
-                        >
-                          <span className="text-2xl">{provider.logo}</span>
-                          <div className="flex-1 text-left">
-                            <p className={`font-medium ${selectedProvider === provider.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-white'}`}>
-                              {provider.name}
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {provider.packages.length} packages
-                            </p>
-                          </div>
-                          {selectedProvider === provider.id && (
-                            <Check className="h-5 w-5 text-blue-500" />
-                          )}
-                        </button>
-                      ))
-                    ) : (
-                      <div className="px-4 py-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                        No provider found matching "{searchTerm}"
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {providers.map((provider) => (
+                    <ProviderTab
+                      key={provider.id}
+                      provider={provider}
+                      isSelected={selectedProvider === provider.id}
+                      onClick={() => handleProviderSelect(provider.id)}
+                    />
+                  ))}
+                </div>
               </div>
 
-              {/* ✅ Verify Button */}
+              {/* Verify Button */}
               {smartCardNumber.length >= 10 && !showCustomerLookup && (
                 <button
                   onClick={handleVerifyDecoder}
@@ -1167,7 +1238,7 @@ export function CableClient({
                 </button>
               )}
 
-              {/* ✅ Re-verify Button */}
+              {/* Re-verify Button */}
               {showCustomerLookup && (
                 <button
                   onClick={handleVerifyDecoder}
@@ -1188,7 +1259,7 @@ export function CableClient({
                 </button>
               )}
 
-              {/* ✅ Customer Lookup Result - Complete Info */}
+              {/* Customer Lookup Result */}
               {showCustomerLookup && (
                 <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900/30 dark:bg-green-900/20">
                   <div className="flex items-start gap-2">
@@ -1227,7 +1298,7 @@ export function CableClient({
               )}
             </div>
 
-            {/* Available Packages - 3-COLUMN GRID */}
+            {/* Available Packages */}
             {currentProvider && packages.length > 0 && (
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between mb-3">
@@ -1246,13 +1317,11 @@ export function CableClient({
                   </div>
                 </div>
 
-                {/* Filters */}
                 <PackageFilters
                   packages={packages}
                   onFilterChange={handleFilterChange}
                 />
 
-                {/* 3-COLUMN PACKAGE GRID */}
                 <div className="mt-3">
                   {filteredPackages.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1285,7 +1354,6 @@ export function CableClient({
                   )}
                 </div>
 
-                {/* Package count */}
                 {filteredPackages.length > 0 && (
                   <div className="mt-3 text-center">
                     <span className="text-[10px] text-gray-400">
@@ -1297,155 +1365,146 @@ export function CableClient({
             )}
           </div>
 
-          {/* Sidebar - Order Summary and Wallet Info */}
+          {/* Sidebar - Order Summary */}
           <div className="space-y-6">
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900 sticky top-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Order Summary
               </h3>
-              
-              <StatusMessage 
-                error={error} 
-                success={success} 
-                transactionId={transactionId} 
-              />
 
-              {!error && !success && (
-                <div className="space-y-3 text-sm">
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600 dark:text-gray-400">Provider</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {currentProvider?.name || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Tv className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Package</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px]">
+                    {selectedPackage?.name || "Not selected"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Radio className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Channels</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedPackage?.channels || "—"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Validity</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {selectedPackage?.validity || "—"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Customer</span>
+                  </div>
+                  <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px]">
+                    {showCustomerLookup ? customerName || "Verified" : "Not verified"}
+                  </span>
+                </div>
+                
+                {showCustomerLookup && customerAddress && (
                   <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-600 dark:text-gray-400">Provider</span>
+                      <MapPin className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-600 dark:text-gray-400">Address</span>
                     </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {currentProvider?.name || "Not selected"}
+                    <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px] truncate">
+                      {customerAddress}
                     </span>
                   </div>
+                )}
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Tv className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Package</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px]">
-                      {selectedPackage?.name || "Not selected"}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
                   </div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    {selectedPackage ? formatCurrency(0) : "—"}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Radio className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Channels</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPackage?.channels || "—"}
-                    </span>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
                   </div>
+                  <span className={`font-medium ${user.walletBalance >= (selectedPackage?.price || 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(user.walletBalance)}
+                  </span>
+                </div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Validity</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {selectedPackage?.validity || "—"}
-                    </span>
-                  </div>
+                <div className="flex items-center justify-between py-3 mt-2 border-t border-gray-200 dark:border-gray-700">
+                  <span className="font-semibold text-gray-900 dark:text-white">Total</span>
+                  <span className="text-xl font-bold text-[#1e293b] dark:text-white">
+                    {selectedPackage ? formatCurrency(selectedPackage.price) : "—"}
+                  </span>
+                </div>
 
-                  {/* ✅ Show customer info in order summary */}
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Customer</span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px]">
-                      {showCustomerLookup ? customerName || "Verified" : "Not verified"}
-                    </span>
-                  </div>
-                  
-                  {showCustomerLookup && customerAddress && (
-                    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-600 dark:text-gray-400">Address</span>
-                      </div>
-                      <span className="font-medium text-gray-900 dark:text-white text-right text-xs max-w-[140px] truncate">
-                        {customerAddress}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Service Fee</span>
-                    </div>
-                    <span className="font-medium text-gray-500 dark:text-gray-400">
-                      {selectedPackage ? formatCurrency(0) : "—"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Wallet Balance</span>
-                    </div>
-                    <span className={`font-medium ${user.walletBalance >= (selectedPackage?.price || 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {formatCurrency(user.walletBalance)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-3 mt-2 border-t border-gray-200 dark:border-gray-700">
-                    <span className="font-semibold text-gray-900 dark:text-white">Total</span>
-                    <span className="text-xl font-bold text-[#1e293b] dark:text-white">
-                      {selectedPackage ? formatCurrency(selectedPackage.price) : "—"}
-                    </span>
-                  </div>
-
-                  {selectedPackage && user.walletBalance < selectedPackage.price && (
-                    <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        ⚠️ Insufficient balance. You need {formatCurrency(selectedPackage.price - user.walletBalance)} more.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Transaction PIN Input */}
-                  <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                      Transaction PIN
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type={showPin ? "text" : "password"}
-                        value={pin}
-                        onChange={handlePinChange}
-                        placeholder="Enter 4-6 digit PIN"
-                        maxLength={6}
-                        className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
-                          pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
-                        } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPin(!showPin)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {pinError && (
-                      <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
-                        {pinError}
-                      </p>
-                    )}
-                    <p className="mt-1 text-xs text-gray-400">
-                      Enter your 4-6 digit transaction PIN to confirm this purchase
+                {selectedPackage && user.walletBalance < selectedPackage.price && (
+                  <div className="mt-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      ⚠️ Insufficient balance. You need {formatCurrency(selectedPackage.price - user.walletBalance)} more.
                     </p>
                   </div>
+                )}
+
+                {/* Transaction PIN Input */}
+                <div className="mt-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Transaction PIN
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={pin}
+                      onChange={handlePinChange}
+                      placeholder="Enter 4-6 digit PIN"
+                      maxLength={6}
+                      className={`w-full pl-9 pr-10 py-2.5 text-sm rounded-lg border ${
+                        pinError ? "border-red-400 ring-2 ring-red-200" : "border-gray-200"
+                      } bg-gray-50 focus:border-[#1e293b] focus:ring-2 focus:ring-[#1e293b]/20 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {pinError && (
+                    <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {pinError}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-400">
+                    Enter your 4-6 digit transaction PIN to confirm this purchase
+                  </p>
                 </div>
-              )}
+              </div>
 
               <button
                 onClick={handlePurchase}
@@ -1489,7 +1548,7 @@ export function CableClient({
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
-                  Search and select your provider
+                  Select your provider from the tabs
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-[#1e293b]">•</span>
@@ -1516,6 +1575,25 @@ export function CableClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL */}
+      <LoadingModal isOpen={showLoadingModal} />
+
+      {/* ✅ SUCCESS MODAL */}
+      {successData && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+          }}
+          transactionId={successData.transactionId}
+          decoderNumber={successData.decoderNumber}
+          amount={successData.amount}
+          provider={successData.provider}
+          packageName={successData.packageName}
+          onBuyMore={resetForm}
+        />
+      )}
     </div>
   );
 }

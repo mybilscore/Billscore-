@@ -251,6 +251,7 @@ enum DisCo {
   ENUGU
   JOS
   PORT_HARCOURT
+  YOLA
 }
 
 enum NetworkProvider {
@@ -1866,6 +1867,9 @@ model VtuTransaction {
   amount                Decimal
   serviceFee            Decimal               @default(0)
   totalDebited          Decimal               @default(0)
+  
+  dataAmountMB          Int?                  // Data amount in MB (for DATA transactions)
+  dataDisplay           String?               // Display string like "1GB", "500MB"
   
   // Refund tracking
   totalRefunded         Decimal               @default(0)

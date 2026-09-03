@@ -1,9 +1,8 @@
-// app/dashboard/buy/airtime/page.client.tsx - COMPLETE WITH MODAL & NO PHONE VALIDATION
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   Phone,
   Wifi,
@@ -88,6 +87,51 @@ const formatDate = (dateString: string | null) => {
   if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
   if (days < 365) return `${Math.floor(days / 30)} months ago`;
   return `${Math.floor(days / 365)} years ago`;
+};
+
+// ✅ LOADING MODAL WITH ANIMATED LOGO
+// ✅ LOADING MODAL WITH ANIMATED LOGO - BLEND WHITE BACKGROUND
+// ✅ LOADING MODAL WITH ANIMATED LOGO - WHITE BACKGROUND
+const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="flex flex-col items-center">
+        {/* Animated Logo */}
+        <div className="relative">
+          {/* Outer ring pulse */}
+          <div className="absolute inset-0 rounded-full bg-white/20 animate-ping" />
+          
+          {/* Logo container with white background */}
+          <div className="relative h-24 w-24 rounded-full bg-white shadow-2xl flex items-center justify-center animate-pulse border-2 border-gray-200/50">
+            <div className="relative h-16 w-16">
+              <Image
+                src="/uploads/log-icon.jpeg"
+                alt="Bilscore"
+                fill
+                className="object-contain p-1"
+                priority
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Loading Text */}
+        <div className="mt-6 text-center">
+          <h3 className="text-xl font-semibold text-white">Processing...</h3>
+          <p className="mt-2 text-sm text-gray-300">Please wait while we complete your purchase</p>
+        </div>
+
+        {/* Animated Dots */}
+        <div className="mt-4 flex space-x-2">
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 rounded-full bg-white/80 animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // ✅ SUCCESS MODAL COMPONENT
@@ -408,6 +452,7 @@ export function AirtimeClient({
   // ✅ Modal states
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
   const [successData, setSuccessData] = useState<{
     transactionId: string;
     phoneNumber: string;
@@ -641,12 +686,6 @@ export function AirtimeClient({
       return;
     }
 
-    // ✅ REMOVED: Phone number validation - now optional
-    // if (!phoneNumber || phoneNumber.length < 10) {
-    //   setError("Please enter a valid phone number");
-    //   return;
-    // }
-
     if (!user.hasWallet) {
       setError("You need a wallet to make purchases");
       return;
@@ -657,6 +696,8 @@ export function AirtimeClient({
       return;
     }
 
+    // ✅ Show loading modal
+    setShowLoadingModal(true);
     setIsLoading(true);
     setError("");
     setSuccess(false);
@@ -667,7 +708,7 @@ export function AirtimeClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phoneNumber: phoneNumber || "", // Send empty string if not provided
+          phoneNumber: phoneNumber || "",
           amount: amount,
           network: selectedNetworkData?.code || "MTN",
           pin: pin,
@@ -675,6 +716,9 @@ export function AirtimeClient({
       });
 
       const result = await response.json();
+
+      // ✅ Close loading modal
+      setShowLoadingModal(false);
 
       if (!response.ok || !result.success) {
         throw new Error(result.error || "Purchase failed");
@@ -713,6 +757,8 @@ export function AirtimeClient({
       }
 
     } catch (err: any) {
+      // ✅ Close loading modal on error
+      setShowLoadingModal(false);
       setError(err.message || "Purchase failed. Please try again.");
       setErrorMessage(err.message || "Purchase failed. Please try again.");
       setShowErrorModal(true);
@@ -1099,6 +1145,9 @@ export function AirtimeClient({
           </div>
         </div>
       </div>
+
+      {/* ✅ LOADING MODAL WITH ANIMATED LOGO */}
+      <LoadingModal isOpen={showLoadingModal} />
 
       {/* ✅ SUCCESS MODAL */}
       {successData && (

@@ -1,4 +1,4 @@
-// app/api/vendors/data/purchase/route.ts - Fixed for both VTpass and BilalSada
+// app/api/vendors/data/purchase/route.ts - COMPLETE UPDATED WITH DATA AMOUNT STORAGE
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -87,6 +87,50 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
   };
   
   return vendorMap[normalized] || null;
+}
+
+// ============================================================
+// HELPER: Get data amount from plan
+// ============================================================
+
+async function getDataAmountFromPlan(planId: string | undefined, planCode: string, provider: string): Promise<{ amountMB: number; display: string }> {
+  // Default values
+  let amountMB = 0;
+  let display = planCode || 'Unknown';
+
+  // If planId is provided, try to get from database
+  if (planId) {
+    try {
+      const dataPlan = await prisma.dataPlan.findUnique({
+        where: { id: planId },
+        select: { amountMB: true, data: true, name: true },
+      });
+      
+      if (dataPlan) {
+        amountMB = dataPlan.amountMB || 0;
+        display = dataPlan.data || dataPlan.name || `${amountMB}MB`;
+        return { amountMB, display };
+      }
+    } catch (error) {
+      log('warn', 'Failed to fetch data plan from database', error);
+    }
+  }
+
+  // Try to extract from planCode
+  if (planCode) {
+    const match = planCode.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
+    if (match) {
+      const num = parseFloat(match[1]);
+      const unit = match[2].toUpperCase();
+      amountMB = unit === 'GB' ? num * 1024 : num;
+      display = `${num}${unit}`;
+      return { amountMB, display };
+    }
+  }
+
+  // Estimate from amount
+  const amount = 0; // We'll use the transaction amount
+  return { amountMB, display };
 }
 
 // ============================================================
@@ -317,6 +361,61 @@ export async function POST(request: NextRequest) {
     const CHANNEL_DISPLAY = "WEB_APP";
 
     // ============================================================
+    // GET DATA AMOUNT FROM PLAN
+    // ============================================================
+    
+    let dataAmountMB = 0;
+    let dataDisplay = planCode || 'Unknown';
+    
+    // ✅ Try to get from database if planId provided
+    if (planId) {
+      try {
+        const dataPlan = await prisma.dataPlan.findUnique({
+          where: { id: planId },
+          select: { amountMB: true, data: true, name: true },
+        });
+        
+        if (dataPlan) {
+          dataAmountMB = dataPlan.amountMB || 0;
+          dataDisplay = dataPlan.data || dataPlan.name || `${dataAmountMB}MB`;
+          log('info', `📊 Data amount from plan: ${dataDisplay} (${dataAmountMB}MB)`);
+        }
+      } catch (error) {
+        log('warn', 'Failed to fetch data plan from database', error);
+      }
+    }
+    
+    // ✅ If not found in DB, try to extract from planCode
+    if (dataAmountMB === 0 && planCode) {
+      const match = planCode.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
+      if (match) {
+        const num = parseFloat(match[1]);
+        const unit = match[2].toUpperCase();
+        dataAmountMB = unit === 'GB' ? num * 1024 : num;
+        dataDisplay = `${num}${unit}`;
+        log('info', `📊 Data amount extracted from planCode: ${dataDisplay} (${dataAmountMB}MB)`);
+      }
+    }
+    
+    // ✅ If still not found, estimate from amount
+    if (dataAmountMB === 0) {
+      const amt = Number(amount);
+      if (amt <= 50) { dataAmountMB = 25; dataDisplay = '25MB'; }
+      else if (amt <= 100) { dataAmountMB = 50; dataDisplay = '50MB'; }
+      else if (amt <= 200) { dataAmountMB = 100; dataDisplay = '100MB'; }
+      else if (amt <= 300) { dataAmountMB = 200; dataDisplay = '200MB'; }
+      else if (amt <= 500) { dataAmountMB = 350; dataDisplay = '350MB'; }
+      else if (amt <= 1000) { dataAmountMB = 750; dataDisplay = '750MB'; }
+      else if (amt <= 1500) { dataAmountMB = 1024; dataDisplay = '1GB'; }
+      else if (amt <= 2000) { dataAmountMB = 2048; dataDisplay = '2GB'; }
+      else if (amt <= 3000) { dataAmountMB = 3072; dataDisplay = '3GB'; }
+      else if (amt <= 5000) { dataAmountMB = 5120; dataDisplay = '5GB'; }
+      else if (amt <= 10000) { dataAmountMB = 10240; dataDisplay = '10GB'; }
+      else { dataAmountMB = Math.floor(amt / 2); dataDisplay = `${dataAmountMB}MB`; }
+      log('info', `📊 Data amount estimated from amount: ${dataDisplay} (${dataAmountMB}MB)`);
+    }
+
+    // ============================================================
     // PARALLEL FETCH user + customer + balance
     // ============================================================
     const userId = sessionUser.id;
@@ -412,11 +511,9 @@ export async function POST(request: NextRequest) {
     // CHECK IF PLAN EXISTS IN DATABASE (for BilalSada)
     // ============================================================
     
-    // ✅ Only try to find dataPlanId if planId is provided
     let dataPlanId: string | undefined = undefined;
     
     if (planId) {
-      // For BilalSada, planId is the database ID
       const dataPlan = await prisma.dataPlan.findUnique({
         where: { id: planId },
         select: { id: true },
@@ -429,7 +526,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD - channelDisplay = "WEB_APP"
+    // CREATE TRANSACTION RECORD - WITH DATA AMOUNT
     // ============================================================
     
     const transaction = await prisma.vtuTransaction.create({
@@ -445,7 +542,10 @@ export async function POST(request: NextRequest) {
         status: TransactionStatus.PENDING,
         channel: ChannelType.WEB_APP,
         channelDisplay: CHANNEL_DISPLAY,
-        dataPlanId: dataPlanId, // ✅ Only set if plan exists in DB
+        dataPlanId: dataPlanId,
+        // ✅ STORE DATA AMOUNT
+        dataAmountMB: dataAmountMB,
+        dataDisplay: dataDisplay,
         metadata: {
           source: "DataAPI",
           timestamp: new Date().toISOString(),
@@ -455,13 +555,16 @@ export async function POST(request: NextRequest) {
           pinVerified: false,
           channel: "WEB_APP",
           channelDisplay: CHANNEL_DISPLAY,
-          // ✅ Store vendor info
           vendor: vendor || 'UNKNOWN',
           variationCode: variationCode || planCode,
           isVTpass: vendor === 'VTPASS' || vendor === 'VT_PASS',
+          dataAmountMB: dataAmountMB,
+          dataDisplay: dataDisplay,
         },
       },
     });
+
+    log('info', `📊 Transaction created with data amount: ${dataDisplay} (${dataAmountMB}MB)`);
 
     // ============================================================
     // PIN VERIFICATION
@@ -628,7 +731,6 @@ export async function POST(request: NextRequest) {
     try {
       const vendorService = getVendorService();
 
-      // ✅ Build request based on vendor type
       const requestData: any = {
         phoneNumber: phoneNumber,
         planCode: planCode,
@@ -636,7 +738,6 @@ export async function POST(request: NextRequest) {
         amount: amount,
       };
 
-      // ✅ If VTpass, add variationCode
       if (vendor === 'VTPASS' || vendor === 'VT_PASS') {
         requestData.variationCode = variationCode || planCode;
         requestData.vendor = 'VTPASS';
@@ -703,6 +804,9 @@ export async function POST(request: NextRequest) {
               vendor: vendorEnum,
               token: result.data?.token,
               deliveredAt: new Date(),
+              // ✅ Ensure data amount is stored
+              dataAmountMB: dataAmountMB,
+              dataDisplay: dataDisplay,
               metadata: {
                 ...transaction.metadata,
                 vendorName: result.vendor,
@@ -713,6 +817,8 @@ export async function POST(request: NextRequest) {
                 pinVerified: true,
                 completedAt: new Date().toISOString(),
                 wasDebited: true,
+                dataAmountMB: dataAmountMB,
+                dataDisplay: dataDisplay,
               },
             },
           }),
@@ -736,6 +842,8 @@ export async function POST(request: NextRequest) {
                 switchedFrom: result.switchedFrom || [],
                 pinVerified: true,
                 completedAt: new Date().toISOString(),
+                dataAmountMB: dataAmountMB,
+                dataDisplay: dataDisplay,
               },
             },
           }),
@@ -769,6 +877,9 @@ export async function POST(request: NextRequest) {
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
             channel: CHANNEL_DISPLAY,
+            // ✅ Include data amount in response
+            dataAmountMB: dataAmountMB,
+            dataDisplay: dataDisplay,
             ...result.data,
           },
         });

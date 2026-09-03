@@ -1,5 +1,5 @@
 // src/app/api/mobile/vendors/data/purchase/route.ts
-// UPDATED: channelDisplay = "MOBILE_APP" - Matches web version structure
+// COMPLETE UPDATED WITH DATA AMOUNT STORAGE
 
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "jsonwebtoken";
@@ -104,6 +104,65 @@ async function authenticateMobile(request: NextRequest) {
   } catch (error) {
     return null;
   }
+}
+
+// ============================================================
+// HELPER: Get data amount from plan
+// ============================================================
+
+async function getDataAmountFromPlan(planId: string | undefined, planCode: string, amount: number): Promise<{ amountMB: number; display: string }> {
+  let amountMB = 0;
+  let display = planCode || 'Unknown';
+
+  // 1. Try to get from database if planId provided
+  if (planId) {
+    try {
+      const dataPlan = await prisma.dataPlan.findUnique({
+        where: { id: planId },
+        select: { amountMB: true, data: true, name: true },
+      });
+      
+      if (dataPlan) {
+        amountMB = dataPlan.amountMB || 0;
+        display = dataPlan.data || dataPlan.name || `${amountMB}MB`;
+        log('info', `📊 Data amount from plan: ${display} (${amountMB}MB)`);
+        return { amountMB, display };
+      }
+    } catch (error) {
+      log('warn', 'Failed to fetch data plan from database', error);
+    }
+  }
+
+  // 2. Try to extract from planCode
+  if (planCode) {
+    const match = planCode.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
+    if (match) {
+      const num = parseFloat(match[1]);
+      const unit = match[2].toUpperCase();
+      amountMB = unit === 'GB' ? num * 1024 : num;
+      display = `${num}${unit}`;
+      log('info', `📊 Data amount extracted from planCode: ${display} (${amountMB}MB)`);
+      return { amountMB, display };
+    }
+  }
+
+  // 3. Estimate from amount
+  const amt = Number(amount);
+  if (amt <= 50) { amountMB = 25; display = '25MB'; }
+  else if (amt <= 100) { amountMB = 50; display = '50MB'; }
+  else if (amt <= 200) { amountMB = 100; display = '100MB'; }
+  else if (amt <= 300) { amountMB = 200; display = '200MB'; }
+  else if (amt <= 500) { amountMB = 350; display = '350MB'; }
+  else if (amt <= 1000) { amountMB = 750; display = '750MB'; }
+  else if (amt <= 1500) { amountMB = 1024; display = '1GB'; }
+  else if (amt <= 2000) { amountMB = 2048; display = '2GB'; }
+  else if (amt <= 3000) { amountMB = 3072; display = '3GB'; }
+  else if (amt <= 5000) { amountMB = 5120; display = '5GB'; }
+  else if (amt <= 10000) { amountMB = 10240; display = '10GB'; }
+  else { amountMB = Math.floor(amt / 2); display = `${amountMB}MB`; }
+  
+  log('info', `📊 Data amount estimated from amount: ${display} (${amountMB}MB)`);
+  return { amountMB, display };
 }
 
 // ============================================================
@@ -294,7 +353,7 @@ async function processRefund(
 }
 
 // ============================================================
-// MAIN API ROUTE - OPTIMIZED
+// MAIN API ROUTE - COMPLETE UPDATED
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -361,6 +420,13 @@ export async function POST(request: NextRequest) {
     const CHANNEL_DISPLAY = "MOBILE_APP";
 
     // ============================================================
+    // GET DATA AMOUNT
+    // ============================================================
+    
+    const { amountMB: dataAmountMB, display: dataDisplay } = await getDataAmountFromPlan(planId, planCode, amount);
+    log('info', `📊 Mobile data purchase: ${dataDisplay} (${dataAmountMB}MB)`);
+
+    // ============================================================
     // OPTIMIZATION: PARALLEL FETCH user + customer + balance
     // ============================================================
 
@@ -374,7 +440,6 @@ export async function POST(request: NextRequest) {
     let customer = cachedCustomer;
     let walletBalance = cachedBalance?.balance;
 
-    // If user not in cache, fetch from DB with selective fields
     if (!user) {
       log('debug', `Cache miss for user ${userId}, fetching from DB`);
       const dbUser = await prisma.user.findUnique({
@@ -417,7 +482,6 @@ export async function POST(request: NextRequest) {
       CacheService.setUser(userId, user).catch(() => {});
     }
 
-    // If customer not in cache, fetch from DB
     if (!customer) {
       log('debug', `Cache miss for customer ${phoneNumber}, fetching from DB`);
       customer = await prisma.customer.findUnique({
@@ -447,7 +511,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // If balance not in cache, get from wallet
     if (walletBalance === undefined || walletBalance === null) {
       const wallet = user.wallet;
       walletBalance = wallet ? Number(wallet.walletBalance) : 0;
@@ -461,22 +524,23 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // CREATE TRANSACTION RECORD USING RAW SQL (ensures channelDisplay is inserted)
+    // CREATE TRANSACTION RECORD WITH DATA AMOUNT
     // ============================================================
 
     const transactionId = `txn_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     
-    // Use raw SQL to insert the transaction with channelDisplay
     await prisma.$executeRaw`
       INSERT INTO vtu_transactions (
         id, userId, transactionType, product, amount, totalDebited, 
         phoneNumber, network, networkPlan, status, channel, channelDisplay, 
-        dataPlanId, metadata, createdAt, updatedAt
+        dataPlanId, dataAmountMB, dataDisplay, metadata, createdAt, updatedAt
       ) VALUES (
         ${transactionId}, ${user.id}, ${VtuType.DATA}, ${provider + ' - ' + planCode}, 
         ${amount}, 0, ${phoneNumber}, ${networkEnum}, ${planCode}, ${TransactionStatus.PENDING}, 
         ${CHANNEL_ENUM}, ${CHANNEL_DISPLAY}, 
         ${planId || null},
+        ${dataAmountMB},
+        ${dataDisplay},
         ${JSON.stringify({
           source: "MobileDataAPI",
           service: "DATA",
@@ -491,12 +555,13 @@ export async function POST(request: NextRequest) {
           refundProcessed: false,
           channel: "MOBILE_APP",
           channelDisplay: CHANNEL_DISPLAY,
+          dataAmountMB: dataAmountMB,
+          dataDisplay: dataDisplay,
         })}, 
         ${new Date()}, ${new Date()}
       )
     `;
 
-    // Fetch the created transaction
     const transaction = await prisma.vtuTransaction.findUnique({
       where: { id: transactionId },
     });
@@ -505,11 +570,12 @@ export async function POST(request: NextRequest) {
       throw new Error("Failed to create transaction");
     }
 
+    log('info', `📊 Mobile transaction created with data amount: ${dataDisplay} (${dataAmountMB}MB)`);
+
     // ============================================================
     // PIN VERIFICATION
     // ============================================================
 
-    // Check PIN lock
     if (user.pinLockedUntil && user.pinLockedUntil > new Date()) {
       const remainingMinutes = Math.ceil((user.pinLockedUntil.getTime() - Date.now()) / 60000);
       
@@ -559,7 +625,6 @@ export async function POST(request: NextRequest) {
       }, { status: 403 });
     }
 
-    // Check if PIN is set
     if (!user.pinHash) {
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
@@ -606,7 +671,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Verify PIN
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
       const updatedUser = await prisma.user.update({
@@ -685,7 +749,7 @@ export async function POST(request: NextRequest) {
       }, { status: statusCode });
     }
 
-    // PIN verified - update transaction
+    // PIN verified
     await prisma.vtuTransaction.update({
       where: { id: transaction.id },
       data: {
@@ -697,7 +761,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Reset PIN attempts
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -799,7 +862,6 @@ export async function POST(request: NextRequest) {
 
       const result = await Promise.race([vendorPromise, timeoutPromise]) as any;
 
-      // Extract commission data
       if (result.data) {
         vendorCommission = result.data.commission || null;
         vendorTotalAmount = result.data.totalAmount || null;
@@ -817,13 +879,8 @@ export async function POST(request: NextRequest) {
         platformCommission = grossProfit;
       }
 
-      // Map vendor to enum
-      vendorEnum = mapVendorToEnum(result.vendor);
-      if (!vendorEnum) {
-        vendorEnum = VtuVendor.VTPASS;
-      }
+      vendorEnum = mapVendorToEnum(result.vendor) || VtuVendor.VTPASS;
 
-      // Get vendor ID
       if (result.vendor) {
         const vendorRecord = await prisma.vendor.findFirst({
           where: { code: result.vendor as string },
@@ -837,7 +894,6 @@ export async function POST(request: NextRequest) {
       if (result.success) {
         wasDebited = true;
 
-        // Update customer stats
         await prisma.customer.update({
           where: { id: customer.id },
           data: {
@@ -848,7 +904,6 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // Complete transaction - all in one transaction
         await prisma.$transaction([
           prisma.wallet.update({
             where: { id: user.wallet!.id },
@@ -882,6 +937,9 @@ export async function POST(request: NextRequest) {
               vendor: vendorEnum,
               token: result.data?.token,
               deliveredAt: new Date(),
+              // ✅ Store data amount
+              dataAmountMB: dataAmountMB,
+              dataDisplay: dataDisplay,
               vendorCommission: vendorCommission,
               vendorTotalAmount: vendorTotalAmount,
               commissionRate: commissionRate,
@@ -897,7 +955,6 @@ export async function POST(request: NextRequest) {
               netProfit: grossProfit,
               totalCommission: (vendorCommission || 0) + (platformCommission || 0),
               effectiveRate: amount > 0 ? ((vendorCommission || 0) / amount) * 100 : 0,
-              // channelDisplay already set from initial creation
               metadata: {
                 ...transaction.metadata,
                 vendorResponse: result.data,
@@ -923,6 +980,8 @@ export async function POST(request: NextRequest) {
                 pinVerified: true,
                 completedAt: new Date().toISOString(),
                 wasDebited: true,
+                dataAmountMB: dataAmountMB,
+                dataDisplay: dataDisplay,
               },
             },
           }),
@@ -959,12 +1018,13 @@ export async function POST(request: NextRequest) {
                   grossProfit: grossProfit,
                   profitMargin: profitMargin,
                 },
+                dataAmountMB: dataAmountMB,
+                dataDisplay: dataDisplay,
               },
             },
           }),
         ]);
 
-        // Invalidate cache
         await Promise.all([
           CacheService.invalidateWallet(user.id),
           CacheService.invalidateUser(user.id),
@@ -972,7 +1032,7 @@ export async function POST(request: NextRequest) {
         ]);
 
         const totalTime = Date.now() - startTime;
-        log('info', `Mobile data transaction ${transaction.id} completed in ${totalTime}ms`);
+        log('info', `✅ Mobile data transaction ${transaction.id} completed in ${totalTime}ms`);
 
         return NextResponse.json({
           success: true,
@@ -992,6 +1052,8 @@ export async function POST(request: NextRequest) {
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
             channel: CHANNEL_DISPLAY,
+            dataAmountMB: dataAmountMB,
+            dataDisplay: dataDisplay,
             commission: {
               vendorCommission: vendorCommission,
               vendorTotalAmount: vendorTotalAmount,

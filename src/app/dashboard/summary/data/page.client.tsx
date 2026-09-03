@@ -1,4 +1,4 @@
-// app/dashboard/summary/data/page.client.tsx - UPDATED with full details
+// app/dashboard/summary/data/page.client.tsx - COMPLETE UPDATED
 
 "use client";
 
@@ -22,6 +22,9 @@ import {
   ExternalLink,
   Calendar,
   Smartphone,
+  Gauge,
+  Database,
+  ShoppingBag,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,7 +41,6 @@ interface Transaction {
   deliveredAt: string | null;
   vendor: string | null;
   vendorReference: string | null;
-  // ✅ Additional fields
   vendorCommission: number | null;
   vendorTotalAmount: number | null;
   commissionRate: number | null;
@@ -49,6 +51,8 @@ interface Transaction {
   balanceAfter: number | null;
   walletReference: string | null;
   walletDescription: string | null;
+  dataAmountMB: number;
+  dataDisplay: string | null;
 }
 
 interface DataSummaryClientProps {
@@ -60,6 +64,12 @@ interface DataSummaryClientProps {
     count: number;
     amount: number;
   }[];
+  todaySpent: number;
+  todayCount: number;
+  todayData: string;
+  totalData: string;
+  todayDataMB: number;
+  totalDataMB: number;
 }
 
 // Brand Colors
@@ -76,6 +86,9 @@ const BRAND_COLORS = {
   warning: '#d97706',
   error: '#dc2626',
   info: '#0D3B8E',
+  purple: '#7c3aed',
+  orange: '#f59e0b',
+  cyan: '#06b6d4',
 };
 
 const formatCurrency = (amount: number | null | undefined) => {
@@ -146,7 +159,7 @@ const getNetworkColor = (network: string | null) => {
   return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 };
 
-// Stats Card Component with Brand Colors
+// Stats Card Component
 const StatsCard = ({
   title,
   value,
@@ -187,7 +200,7 @@ const StatsCard = ({
   );
 };
 
-// Transaction Row Component
+// ✅ Transaction Row Component - Updated with data amount display
 const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -205,6 +218,14 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
   const hasBalanceAfter = transaction.balanceAfter !== null && 
                          transaction.balanceAfter !== undefined && 
                          !isNaN(transaction.balanceAfter);
+
+  // ✅ Use the stored dataDisplay or format from dataAmountMB
+  const dataAmount = transaction.dataDisplay || 
+    (transaction.dataAmountMB > 0 ? 
+      (transaction.dataAmountMB >= 1024 ? 
+        `${(transaction.dataAmountMB / 1024).toFixed(1)}GB` : 
+        `${Math.round(transaction.dataAmountMB)}MB`) : 
+      null);
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-800 last:border-0">
@@ -228,8 +249,15 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
         </div>
 
         {/* Plan */}
-        <div className="col-span-2 flex items-center text-sm text-gray-600 dark:text-gray-400">
-          <span className="truncate">{transaction.networkPlan || transaction.product || "—"}</span>
+        <div className="col-span-2 flex flex-col">
+          <span className="text-sm text-gray-600 dark:text-gray-400 truncate">
+            {transaction.networkPlan || transaction.product || "—"}
+          </span>
+          {dataAmount && (
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">
+              {dataAmount}
+            </span>
+          )}
         </div>
 
         {/* Amount */}
@@ -298,6 +326,12 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               <span className="text-gray-500 dark:text-gray-400">Plan</span>
               <span className="text-gray-900 dark:text-white">{transaction.networkPlan || transaction.product || "—"}</span>
             </div>
+            {dataAmount && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Data Purchased</span>
+                <span className="text-gray-900 dark:text-white font-medium">{dataAmount}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400">Amount</span>
               <span className="font-medium text-gray-900 dark:text-white">
@@ -321,13 +355,11 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </span>
             </div>
             
-            {/* ✅ Vendor - Hardcoded to BILSCORE for end users */}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500 dark:text-gray-400">Vendor</span>
               <span className="text-gray-900 dark:text-white font-medium">BILSCORE</span>
             </div>
             
-            {/* ✅ Vendor Reference - Show if available */}
             {transaction.vendorReference && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Reference</span>
@@ -337,7 +369,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </div>
             )}
             
-            {/* ✅ Commission - Show only if applicable */}
             {transaction.vendorCommission !== null && transaction.vendorCommission > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Commission</span>
@@ -347,7 +378,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </div>
             )}
             
-            {/* ✅ Commission Rate - Show only if applicable */}
             {transaction.commissionRate !== null && transaction.commissionRate > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Commission Rate</span>
@@ -355,7 +385,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </div>
             )}
             
-            {/* ✅ Channel - Show if available */}
             {transaction.channel && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Channel</span>
@@ -363,7 +392,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </div>
             )}
             
-            {/* ✅ Balance Before/After - Show if available */}
             {hasBalanceBefore && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -387,7 +415,6 @@ const TransactionRow = ({ transaction }: { transaction: Transaction }) => {
               </div>
             )}
             
-            {/* ✅ Delivery */}
             {transaction.deliveredAt && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">Delivered</span>
@@ -411,6 +438,12 @@ export function DataSummaryClient({
   totalSpent,
   totalCount,
   networkBreakdown,
+  todaySpent,
+  todayCount,
+  todayData,
+  totalData,
+  todayDataMB,
+  totalDataMB,
 }: DataSummaryClientProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -462,7 +495,34 @@ export function DataSummaryClient({
           </div>
         </div>
 
-        {/* ✅ Stats Cards with Brand Colors */}
+        {/* ✅ Today's Data Purchased Card */}
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 rounded-xl border border-green-200 dark:border-green-800/30 p-4 mb-6">
+          <div className="flex items-center gap-4">
+            <div className="rounded-full bg-green-100 dark:bg-green-900/30 p-3">
+              <ShoppingBag className="h-6 w-6 text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Today's Data Purchases</p>
+              <p className="text-2xl font-bold text-green-700 dark:text-green-300">
+                {todayData || "0MB"}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {todayCount} purchases • {formatCurrency(todaySpent)} spent today
+              </p>
+            </div>
+            <div className="ml-auto text-right">
+              <p className="text-xs text-gray-500 dark:text-gray-400">All Time</p>
+              <p className="text-lg font-semibold text-gray-700 dark:text-gray-300">
+                {totalData || "0MB"}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {totalCount} total purchases
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatsCard
             title="Total Spent"
@@ -480,18 +540,19 @@ export function DataSummaryClient({
             iconBg={BRAND_COLORS.info + '15'}
           />
           <StatsCard
-            title="Successful"
-            value={transactions.filter(t => t.status === "SUCCESS").length}
-            icon={CheckCircle}
-            color={BRAND_COLORS.success}
-            iconBg={BRAND_COLORS.success + '15'}
+            title="Today's Spend"
+            value={formatCurrency(todaySpent)}
+            icon={Calendar}
+            color={BRAND_COLORS.purple}
+            iconBg={BRAND_COLORS.purple + '15'}
+            subtitle={`${todayCount} purchases today`}
           />
           <StatsCard
-            title="Failed"
-            value={transactions.filter(t => t.status === "FAILED").length}
-            icon={XCircle}
-            color={BRAND_COLORS.error}
-            iconBg={BRAND_COLORS.error + '15'}
+            title="Today's Data Purchased"
+            value={todayData || "0MB"}
+            icon={ShoppingBag}
+            color={BRAND_COLORS.success}
+            iconBg={BRAND_COLORS.success + '15'}
           />
         </div>
 
