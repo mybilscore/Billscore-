@@ -2187,10 +2187,6 @@ export async function POST(request: NextRequest) {
 // USER REGISTRATION HANDLER
 // ============================================================
 
-// ============================================================
-// USER REGISTRATION HANDLER - FULLY FIXED
-// ============================================================
-
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
   try {
     console.log(`[WhatsApp] Starting registration for: ${phone}`);
@@ -2256,12 +2252,10 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         username = `${username}_${Math.floor(100 + Math.random() * 900)}`;
       }
 
-      // ✅ Generate a random password
       const randomPassword = Math.random().toString(36).slice(-8);
       const hashedPassword = await hash(randomPassword, 10);
 
-      // ✅ Create user with correct fields (matching web registration)
-      const user = await prisma.user.create({
+   const user = await prisma.user.create({
         data: {
           fullName: fullName,
           email: email,
@@ -2269,19 +2263,21 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           phone: phone,
           passwordHash: hashedPassword,
           referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-          role: "END_USER",                         // ✅ Correct enum
-          isActive: true,                           // ✅ Exists in schema
-          isVerified: true,                         // ✅ Exists in schema
+          role: "END_USER",
+          isVerified: true,
           hasWallet: false,
           walletBalance: 0,
           preferredLanguage: "EN",
           pinAttempts: 0,
           pinLockedUntil: null,
-          kycStatus: "PENDING",                     // ✅ Correct enum
-          // ❌ REMOVED: emailVerified (not in schema)
-          // ❌ REMOVED: phoneVerified (not in schema)
+          kycStatus: "PENDING",
+         
         },
       });
+
+
+
+      
 
       let wallet = null;
       try {
@@ -2307,7 +2303,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
             phone: phone,
             fullName: fullName,
             email: email,
-            customerType: "REGULAR",                 // ✅ Correct enum
+            customerType: "INDIVIDUAL",
             isActive: true,
           },
         });
@@ -2321,7 +2317,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           data: {
             referrerId: user.id,
             referralCode: refCode,
-            status: "PENDING",                       // ✅ Correct value
+            status: "ACTIVE",
           },
         });
       } catch (referralError) {
@@ -2333,7 +2329,6 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
 Wallet Number: ${wallet?.accountNumber || 'N/A'}
 Username: ${username}
 Email: ${email}
-Password: ${randomPassword} (Please change this after first login)
 
 Type HELP to see available commands.`;
     }
@@ -2341,7 +2336,7 @@ Type HELP to see available commands.`;
     return `Welcome to Bilscore!\n\nTo register, please provide your details:\nREG [Full Name] [Email] [Username]\n\nExample: REG John Doe john@email.com johndoe`;
   } catch (error: any) {
     console.error("[WhatsApp] Registration error:", error);
-    return `Registration failed: ${error.message || 'Please try again'}`;
+    return formatErrorMessage(error);
   }
 }
 
