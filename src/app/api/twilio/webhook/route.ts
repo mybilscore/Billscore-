@@ -8,16 +8,9 @@ import {
   VtuType, 
   ChannelType,
   NetworkProvider,
-  CustomerType,
-  WalletCategory,
-  WalletTransactionType,
   VtuVendor,
   MeterType,
-  TokenStatus,
-  PreOrderStatus,
   DisCo,
-  TokenType,
-  DeliveryChannel,
   JobType,
   JobStatus,
   RefundStatus,
@@ -1117,7 +1110,7 @@ async function processDataPurchaseWithPin(
 
   const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-  return `📱 Data Purchase Initiated!
+  return `Data Purchase Initiated!
 
 Phone: ${normalizedTarget}
 Plan: ${dataDisplay} (${provider})
@@ -1125,8 +1118,8 @@ Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 Reference: ${transaction.id.substring(0, 10)}
 
-🔹 **Complete Purchase:** ${purchaseLink}
-🔹 **PIN Required:** Enter your transaction PIN
+ **Complete Purchase:** ${purchaseLink}
+ **PIN Required:** Enter your transaction PIN
 
 This link expires in 5 minutes.
 
@@ -1314,8 +1307,8 @@ Quick Buy QR Code:
 ${qrLink}
 
 
-🔹 Print this QR code and paste it on your meter
-🔹 Scan to quickly buy electricity anytime
+ Print this QR code and paste it on your meter
+ Scan to quickly buy electricity anytime
 
 Type POWER to see all your meters and buy power!`;
     }
@@ -1353,8 +1346,8 @@ ${customerEmail ? `Email: ${customerEmail}` : ''}
 Quick Buy QR Code:
 ${qrLink}
 
-🔹 Print this QR code and paste it on your meter
-🔹 Scan to quickly buy electricity anytime
+ Print this QR code and paste it on your meter
+ Scan to quickly buy electricity anytime
 
 Type POWER to see all your meters and buy power!`;
   } catch (error) {
@@ -1472,9 +1465,6 @@ Type CABLE to see all your decoders and subscribe!`;
   }
 }
 
-// ============================================================
-// LIST METERS
-// ============================================================
 
 // ============================================================
 // LIST METERS - WITH QR DISPLAY LINK
@@ -1518,7 +1508,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
     try {
       const qrLink = await generateMeterQRCode(userId, meter.meterNumber, meter.disco);
       if (qrLink) {
-        message += `   📱 QR: ${qrLink}\n`;
+        message += `    QR: ${qrLink}\n`;
       }
     } catch (error) {
       console.error(`Failed to generate QR for meter ${meter.meterNumber}:`, error);
@@ -1529,11 +1519,11 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
   }
 
   message += `\n--- Commands ---
-🔹 POWER [amount] - Buy for default meter (no PIN)
-🔹 POWER [index] [amount] - Buy for saved meter (no PIN)
-🔹 ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
-🔹 QR [meter_number] - Get QR code for a specific meter
-🔹 METERS - Show this list again`;
+   POWER [amount] - Buy for default meter (no PIN)
+   POWER [index] [amount] - Buy for saved meter (no PIN)
+   POWER [meter] [disco] [amount] - Buy for any meter (PIN required)
+   QR [meter_number] - Get QR code for a specific meter
+   METERS - Show this list again`;
 
   return message;
 }
@@ -2052,10 +2042,10 @@ DATA [phone] [index] - For others (PIN required)
 DATA ALL - View all pricing at https://bilscore.com/pricing
 
 Electricity:
-ELECTRIC - Show saved meters
-ELECTRIC [amount] - Buy for saved meter (no PIN)
-ELECTRIC [index] [amount] - Buy for saved meter (no PIN)
-ELECTRIC [meter] [disco] [amount] - Buy for any meter (PIN required)
+POWER - Show saved meters
+POWER [amount] - Buy for saved meter (no PIN)
+POWER [index] [amount] - Buy for saved meter (no PIN)
+POWER [meter] [disco] [amount] - Buy for any meter (PIN required)
 ADDMETER [meter] [disco] [name] - Add meter
 METERS - List saved meters
 
@@ -2838,7 +2828,6 @@ ${plans}`;
 
 
 
-  // In processWhatsAppCommand function, add this after the METERS command:
 
 // ============================================================
 // QR COMMAND - Get QR code for a specific meter
@@ -2848,25 +2837,50 @@ if (command === "QR" || command.startsWith("QR ")) {
   
   const qrParts = body.split(" ").filter(p => p.length > 0);
   
-  // If just "QR", show instructions
+  // If just "QR", show all meters with QR links
   if (qrParts.length === 1) {
     const meters = await prisma.savedMeter.findMany({
       where: { userId: user.id },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      take: 5,
     });
     
     if (meters.length === 0) {
       return `No saved meters found.\n\nAdd a meter first with:\nADDMETER [meter_number] [disco_code] [name]`;
     }
     
-    let msg = "📱 *Get QR Code*\n\nReply with:\nQR [meter_number] or QR [index]\n\nExample: QR 1234567890\n\nYour saved meters:\n";
-    meters.forEach((meter, index) => {
-      msg += `   ${index + 1}. ${meter.meterNumber} - ${meter.name || meter.disco}\n`;
-    });
-    if (meters.length > 5) {
-      msg += `\n... and ${meters.length - 5} more. Use METERS to see all.`;
+    let msg = "📱 *QR Codes for Your Meters*\n\n";
+    
+    for (const meter of meters) {
+      const defaultTag = meter.isDefault ? " 🔹 (Default)" : "";
+      msg += `*${meter.name || meter.meterNumber}*${defaultTag}\n`;
+      msg += `   🏢 ${meter.disco}\n`;
+      msg += `   📟 ${meter.meterNumber}\n`;
+      
+      if (meter.customerName) {
+        msg += `   👤 ${meter.customerName}\n`;
+      }
+      
+      // ✅ Generate QR display link for each meter
+      try {
+        const qrLink = await generateMeterQRCode(user.id, meter.meterNumber, meter.disco);
+        if (qrLink) {
+          msg += `   📱 QR: ${qrLink}\n`;
+        }
+      } catch (error) {
+        console.error(`Failed to generate QR for meter ${meter.meterNumber}:`, error);
+        // Continue without QR link
+      }
+      
+      msg += `\n`;
     }
+    
+    msg += `\n--- Commands ---\n`;
+    msg += `🔹 QR [meter_number] - Get QR for specific meter\n`;
+    msg += `🔹 QR [index] - Get QR by meter index\n`;
+    msg += `🔹 METERS - List all meters with QR\n`;
+    msg += `🔹 POWER [amount] - Buy for default meter\n`;
+    msg += `🔹 POWER [index] [amount] - Buy for saved meter`;
+    
     return msg;
   }
   
@@ -2903,8 +2917,8 @@ if (command === "QR" || command.startsWith("QR ")) {
     return `Meter ${meterNumber} not found.\n\nUse METERS to see your saved meters.`;
   }
   
-  // Generate QR code
-  const qrLink = await generateMeterQRCode(userId, foundMeter.meterNumber, foundMeter.disco);
+  // Generate QR code for specific meter
+  const qrLink = await generateMeterQRCode(user.id, foundMeter.meterNumber, foundMeter.disco);
   
   if (!qrLink) {
     return `Failed to generate QR code for meter ${foundMeter.meterNumber}. Please try again.`;
@@ -4032,12 +4046,15 @@ Type HELP to see all available commands.
 
 Or try:
 BALANCE - Check your wallet
+
 AIRTIME [amount] - Buy airtime for YOUR number (no PIN)
 AIRTIME [phone] [amount] - Buy airtime for others (PIN required)
+
 DATA - Show available plans
 DATA [index] - Buy data for YOUR number (no PIN)
-ELECTRIC - See saved meters
-ELECTRIC [amount] - Buy electricity for saved meter (no PIN)
+
+POWER - See saved meters
+POWER [amount] - Buy electricity for saved meter (no PIN)
 TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN`;
