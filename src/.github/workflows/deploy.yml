@@ -1,0 +1,73 @@
+name:  Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy Bilscore to DigitalOcean
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name:  Deploy to Droplet
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: 104.248.165.128  # Your droplet IP
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # ─── Variables ───
+            APP_DIR="/var/www/bilscore"
+            REPO_URL="https://github.com/mybilscore/Billscore-.git"
+            
+            # ─── Clone or Pull ───
+            if [ -d "$APP_DIR" ]; then
+              echo " Pulling latest code..."
+              cd $APP_DIR
+              git pull
+            else
+              echo " Cloning repository..."
+              git clone $REPO_URL $APP_DIR
+              cd $APP_DIR
+            fi
+            
+            # ─── Setup Environment Variables ───
+            echo " Setting up environment..."
+            cat > .env << 'EOF'
+            NODE_ENV=production
+            DATABASE_URL=mysql://bilscore_user:2338%40Hajara@localhost:3306/bilscore_db
+            NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+            NEXTAUTH_URL=https://app.bilscore.com
+            EOF
+            
+            # ─── Install Dependencies ───
+            echo " Installing dependencies..."
+            npm install
+            
+            # ─── Generate Prisma Client ───
+            echo " Generating Prisma client..."
+            npx prisma generate
+            
+            # ─── Run Database Migrations ───
+            echo " Running database migrations..."
+            npx prisma migrate deploy
+            
+            # ─── Build App ───
+            echo " Building app..."
+            npm run build
+            
+            # ─── Restart App with PM2 ───
+            echo " Restarting app..."
+            if pm2 list | grep -q "bilscore"; then
+              pm2 restart bilscore
+            else
+              pm2 start npm --name "bilscore" -- start
+            fi
+            
+            # ─── Save PM2 Configuration ───
+            pm2 save
+            
+            echo "✅ Deployment complete!"
+            echo "🌐 App running at: https://app.bilscore.com"
