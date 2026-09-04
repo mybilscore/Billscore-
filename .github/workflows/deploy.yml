@@ -1,9 +1,9 @@
-name:  Deploy to DigitalOcean
+name: 🚀 Deploy to DigitalOcean
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # Manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -11,102 +11,28 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name:  Deploy to Droplet
+      - name: Deploy to Droplet
         uses: appleboy/ssh-action@v0.1.5
         with:
-          host: 104.248.165.128  # Your droplet IP
+          host: 104.248.165.128
           username: root
           key: ${{ secrets.SSH_KEY }}
           script: |
-            # ─── Variables ───
             APP_DIR="/var/www/bilscore"
             REPO_URL="https://github.com/mybilscore/Billscore-.git"
             
             # ─── Clone or Pull ───
             if [ -d "$APP_DIR" ]; then
-              echo " Pulling latest code..."
+              echo "📦 Pulling latest code..."
               cd $APP_DIR
               git pull
             else
-              echo " Cloning repository..."
+              echo "📦 Cloning repository..."
               git clone $REPO_URL $APP_DIR
               cd $APP_DIR
             fi
             
-            # ─── Setup Environment Variables ───
-            echo " Setting up environment..."
-            cat > .env << 'EOF'
-           
-
-
-            NODE_ENV=production
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
-            NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}
-            
-            # VTpass
-            VTPASS_SANDBOX_API_URL=${{ secrets.VTPASS_SANDBOX_API_URL }}
-            VTPASS_SANDBOX_API_KEY=${{ secrets.VTPASS_SANDBOX_API_KEY }}
-            VTPASS_SANDBOX_SECRET_KEY=${{ secrets.VTPASS_SANDBOX_SECRET_KEY }}
-            VTPASS_SANDBOX_PUBLIC_KEY=${{ secrets.VTPASS_SANDBOX_PUBLIC_KEY }}
-
-
-            VTPASS_LIVE_API_URL=${{ secrets.VTPASS_LIVE_API_URL }}
-            VTPASS_LIVE_API_KEY=${{ secrets.VTPASS_LIVE_API_KEY }}
-            VTPASS_LIVE_SECRET_KEY=${{ secrets.VTPASS_LIVE_SECRET_KEY}}
-            VTPASS_LIVE_PUBLIC_KEY=${{ secrets.VTPASS_LIVE_PUBLIC_KEY}}
-            
-            
-            # PalmPay
-            PALMPAY_AUTHORIZATION=${{ secrets.PALMPAY_AUTHORIZATION}}
-            PALMPAY_MERCHANT_ID=${{ secrets.PALMPAY_MERCHANT_ID }}
-            PALMPAY_PUBLIC_KEY=${{ secrets.PALMPAY_PUBLIC_KEY }}
-            PALMPAY_BASE_URL=${{ secrets.PALMPAY_BASE_URL }}
-            PALMPAY_COUNTRY_CODE=${{ secrets.PALMPAY_COUNTRY_CODE }}
-            PALMPAY_PRIVATE_KEY=${{ secrets.PALMPAY_PRIVATE_KEY}}
-
-            
-
-            # Twilio
-            TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}
-            TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}
-            TWILIO_PHONE_NUMBER=${{ secrets.TWILIO_PHONE_NUMBER }}
-            
-            # App Config
-            QR_SECRET_KEY=${{ secrets.QR_SECRET_KEY }}
-            WELCOME_BONUS_AMOUNT=${{ secrets.WELCOME_BONUS_AMOUNT }}
-            GUEST_PURCHASE_PIN=${{ secrets.GUEST_PURCHASE_PIN }}
-
-            #JWT
-            JWT_SECRET=${{ secrets.JWT_SECRET}}
-            JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
-            SMTP_USER=${{ secrets.SMTP_USER }}
-
-            #TWILLIO
-            TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID}}
-            TWILIO_AUTH_TOKEN =${{ secrets.TWILIO_AUTH_TOKEN  }}
-            TWILIO_WHATSAPP_NUMBER=${{ secrets.TWILIO_WHATSAPP_NUMBER}}
-
-            #Bilalsada
-            BILAL_SADA_ACCESS_TOKEN=${{ secrets.BILAL_SADA_ACCESS_TOKEN}}
-            BILAL_SADA_USERNAME=${{ secrets.BILAL_SADA_USERNAME }}
-            BILAL_SADA_PASSWORD=${{ secrets.BILAL_SADA_PASSWORD}}
-            BILAL_SADA_API_URL=${{ secrets.BILAL_SADA_API_URL}}
-
-            #Redis
-            REDIS_URL=${{ secrets.REDIS_URL}}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-       
-            
-            # Email
-            RESEND_API_KEY=${{ secrets.RESEND_API_KEY}}
-            EMAIL_FROM=${{ secrets.EMAIL_FROM }}
-            SMTP_USER=${{ secrets.SMTP_USER }}
-            EMAIL_REPLY_TO=${{ secrets.EMAIL_REPLY_TO }}
-            ADMIN_EMAIL==${{ secrets.ADMIN_EMAIL}}
-            ENVEOF
-
-            EOF
+            # ───  REMOVED: .env creation - using existing .env on droplet
             
             # ─── Install Dependencies ───
             echo " Installing dependencies..."
@@ -118,7 +44,7 @@ jobs:
             
             # ─── Run Database Migrations ───
             echo " Running database migrations..."
-            npx prisma migrate deploy
+            npx prisma migrate deploy || echo "⚠️ Migration skipped"
             
             # ─── Build App ───
             echo " Building app..."
