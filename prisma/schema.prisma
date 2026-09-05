@@ -1867,7 +1867,7 @@ model VtuTransaction {
   amount                Decimal
   serviceFee            Decimal               @default(0)
   totalDebited          Decimal               @default(0)
-  
+
   dataAmountMB          Int?                  // Data amount in MB (for DATA transactions)
   dataDisplay           String?               // Display string like "1GB", "500MB"
   
@@ -3682,8 +3682,9 @@ model DataPlan {
   description           String?
   
   // Pricing
-  ourPrice              Decimal         @default(0)
-  vendorPrice           Decimal         @default(0)
+  ourPrice              Decimal         @default(0)      // Retail price (end user)
+  vendorPrice           Decimal         @default(0)      // Cost price from vendor
+  agentPrice            Decimal         @default(0)      // Price for agents/retailers
   
   // Validity
   validity              Int

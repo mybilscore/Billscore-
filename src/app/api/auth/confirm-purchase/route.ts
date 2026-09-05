@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { compare } from "bcrypt";
 import { prisma } from "~/lib/db";
 import { getVendorService } from "~/lib/vendors/vendor.service";
+import { sendWhatsAppMessage } from "~/lib/twilio"; 
 import { 
   TransactionStatus, 
   VtuType, 
@@ -30,7 +31,7 @@ function getAppUrl(): string {
 }
 
 // ============================================================
-// HELPER: Send Token to WhatsApp
+// HELPER: Send Token to WhatsApp - DIRECT IMPLEMENTATION
 // ============================================================
 
 async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<boolean> {
@@ -50,10 +51,11 @@ Thank you for using Bilscore!`;
         break;
 
       case "DATA":
+        const dataDisplay = data.metadata?.planData?.data || data.networkPlan || 'N/A';
         message = `✅ Data Purchase Confirmed!
 
 Phone: ${data.phoneNumber || 'N/A'}
-Plan: ${data.networkPlan || 'N/A'}
+Plan: ${dataDisplay}
 Amount: NGN ${Number(data.amount).toFixed(2)}
 Network: ${data.network || 'N/A'}
 Reference: ${data.transactionId?.substring(0, 10) || 'N/A'}
@@ -126,24 +128,12 @@ Thank you for using Bilscore!`;
     }
 
     console.log(`📤 [WhatsApp] Sending confirmation to ${phoneNumber}`);
+    console.log(`📝 [WhatsApp] Message:`, message);
 
-    const response = await fetch(`${getAppUrl()}/api/twilio/send-message`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        to: phoneNumber,
-        message: message,
-      }),
-    });
+    // ✅ DIRECT CALL - NO INTERNAL FETCH
+    await sendWhatsAppMessage(phoneNumber, message);
 
-    if (!response.ok) {
-      console.error("❌ [WhatsApp] Failed to send message");
-      return false;
-    }
-
-    console.log(`✅ [WhatsApp] Message sent successfully`);
+    console.log(`✅ [WhatsApp] Message sent successfully to ${phoneNumber}`);
     return true;
 
   } catch (error) {
@@ -186,15 +176,27 @@ async function processServicePurchase(
         break;
 
       case "DATA":
+        // Get plan details from metadata
+        const planData = transaction.metadata?.planData || {};
+        const planId = transaction.metadata?.planId || planData?.planCode || planData?.data || transaction.networkPlan;
+        
         result = await vendorService.buyData(
           {
             phoneNumber: transaction.phoneNumber || user.phone,
-            planCode: transaction.networkPlan || "",
+            planCode: planId,
             network: transaction.product || "MTN",
             amount: amount,
           },
           user.id
         );
+        
+        // Add plan data to result for WhatsApp
+        if (result.success) {
+          result.data = {
+            ...result.data,
+            planData: planData,
+          };
+        }
         break;
 
       case "ELECTRICITY_INSTANT":
@@ -430,6 +432,21 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // ✅ Send WhatsApp failure message for insufficient balance
+      try {
+        await sendWhatsAppMessage(
+          user.phone,
+          `❌ ${transaction.transactionType} Purchase Failed!
+
+Amount: NGN ${amount.toFixed(2)}
+Error: Insufficient balance. You have NGN ${currentBalance.toFixed(2)}.
+
+Please fund your wallet and try again.`
+        );
+      } catch (whatsappError) {
+        console.error("❌ [WhatsApp] Failed to send failure message:", whatsappError);
+      }
+
       return NextResponse.json({
         success: false,
         error: `Insufficient balance. You have NGN ${currentBalance.toFixed(2)}.`,
@@ -453,6 +470,21 @@ export async function POST(request: NextRequest) {
           },
         },
       });
+
+      // ✅ Send WhatsApp failure message
+      try {
+        await sendWhatsAppMessage(
+          user.phone,
+          `❌ ${transaction.transactionType} Purchase Failed!
+
+Amount: NGN ${amount.toFixed(2)}
+Error: ${purchaseResult.error || "Purchase failed"}
+
+Please try again or contact support.`
+        );
+      } catch (whatsappError) {
+        console.error("❌ [WhatsApp] Failed to send failure message:", whatsappError);
+      }
 
       return NextResponse.json({
         success: false,
@@ -536,10 +568,14 @@ export async function POST(request: NextRequest) {
       vendorReference: vendorData.vendorReference,
       quantity: transaction.bulkQuantity || 1,
       product: transaction.product,
+      metadata: transaction.metadata,
     };
 
-    // Send confirmation via WhatsApp
+    // ✅ Send confirmation via WhatsApp - DIRECT CALL
     const messageSent = await sendTokenToWhatsApp(user.phone, serviceData);
+
+    console.log(`✅ [Confirm Purchase] Transaction ${transaction.id} completed successfully`);
+    console.log(`📤 [Confirm Purchase] WhatsApp message sent: ${messageSent}`);
 
     return NextResponse.json({
       success: true,
@@ -555,6 +591,37 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error("❌ [Confirm Purchase] Error:", error);
+    
+    // ✅ Try to send error message via WhatsApp if possible
+    try {
+      const body = await request.json().catch(() => null);
+      const token = body?.token;
+      if (token) {
+        const transaction = await prisma.vtuTransaction.findFirst({
+          where: {
+            metadata: {
+              path: "$.validationToken",
+              equals: token,
+            },
+          },
+          include: { user: true },
+        });
+        
+        if (transaction?.user?.phone) {
+          await sendWhatsAppMessage(
+            transaction.user.phone,
+            `❌ Purchase Failed!
+
+Error: ${error.message || "Unknown error"}
+
+Please try again or contact support.`
+          );
+        }
+      }
+    } catch (whatsappError) {
+      console.error("❌ Failed to send error WhatsApp:", whatsappError);
+    }
+
     return NextResponse.json({
       success: false,
       error: error.message || "Failed to confirm purchase",

@@ -1,6 +1,8 @@
-// app/api/webhooks/wallet-funding/route.ts
+// app/api/webhooks/wallet-funding/route.ts - IMPROVED
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
+import { ReferralStatus } from "@prisma/client";
 
 // Helper function for currency formatting
 function formatCurrency(amount: number) {
@@ -14,10 +16,18 @@ function formatCurrency(amount: number) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, amount, reference, status } = body;
+    const { userId, amount, reference, status, source, transactionId, payerName } = body;
 
-    console.log(`📊 [Wallet Funding] Webhook received:`, { userId, amount, reference, status });
+    console.log(`📊 [Wallet Funding] Webhook received:`, { 
+      userId, 
+      amount, 
+      reference, 
+      status,
+      source,
+      transactionId 
+    });
 
+    // ✅ Validate required fields
     if (!userId || !amount || !reference) {
       return NextResponse.json({
         success: false,
@@ -25,15 +35,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Only process successful deposits
+    // ✅ Only process successful deposits
     if (status !== "SUCCESS" && status !== "COMPLETED") {
+      console.log(`ℹ️ [Wallet Funding] Deposit not successful, skipping referral bonus`);
       return NextResponse.json({
-        success: false,
+        success: true,
         message: "Deposit not successful, skipping referral bonus",
       });
     }
 
-    // Get user with referral info and full name
+    // ✅ Get user with referral info
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -41,17 +52,22 @@ export async function POST(request: NextRequest) {
         referredBy: true,
         fullName: true,
         referralCode: true,
+        email: true,
+        phone: true,
       },
     });
 
     if (!user) {
+      console.error(`❌ [Wallet Funding] User not found: ${userId}`);
       return NextResponse.json({
         success: false,
         error: "User not found",
       }, { status: 404 });
     }
 
-    // Check if this is the user's first deposit (and they have a referrer)
+    console.log(`📊 [Wallet Funding] User: ${user.fullName} (${user.id})`);
+
+    // ✅ Check if user has a referrer
     if (!user.referredBy) {
       console.log(`ℹ️ [Wallet Funding] User ${userId} has no referrer, skipping bonus`);
       return NextResponse.json({
@@ -60,8 +76,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Check if user already has any successful wallet transactions (excluding welcome bonus)
-    const existingWalletTx = await prisma.walletTransaction.findFirst({
+    // ✅ Check if this is the user's first successful funding
+    const existingFunding = await prisma.walletTransaction.findFirst({
       where: {
         userId: userId,
         type: "CREDIT",
@@ -70,7 +86,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if (existingWalletTx) {
+    if (existingFunding) {
       console.log(`ℹ️ [Wallet Funding] User ${userId} already has previous deposits, skipping bonus`);
       return NextResponse.json({
         success: true,
@@ -78,10 +94,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Check if a referral bonus has already been given for this user
+    // ✅ Check if referral bonus has already been given
     const existingReferralBonus = await prisma.walletTransaction.findFirst({
       where: {
         userId: user.referredBy,
+        type: "CREDIT",
+        category: "SYSTEM",
         description: { contains: "Referral bonus" },
         metadata: {
           path: "$.refereeId",
@@ -98,16 +116,26 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Calculate 1% bonus
-    const bonusAmount = amount * 0.01; // 1% of deposit
+    // ✅ Calculate 1% bonus (rounded to 2 decimal places)
+    const bonusAmount = Number((amount * 0.01).toFixed(2)); // 1% of deposit
     const referrerId = user.referredBy;
+
+    if (bonusAmount <= 0) {
+      console.log(`ℹ️ [Wallet Funding] Bonus amount too small: ₦${bonusAmount}, skipping`);
+      return NextResponse.json({
+        success: true,
+        message: "Bonus amount too small, skipping",
+      });
+    }
 
     console.log(`💰 [Wallet Funding] Calculating referral bonus: ₦${bonusAmount} (1% of ₦${amount})`);
 
-    // Get referrer's wallet
+    // ✅ Get referrer's wallet
     const referrer = await prisma.user.findUnique({
       where: { id: referrerId },
-      include: { wallet: true },
+      include: { 
+        wallet: true,
+      },
     });
 
     if (!referrer || !referrer.wallet) {
@@ -118,58 +146,129 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
-    // Credit 1% bonus to referrer
-    await prisma.$transaction([
-      prisma.wallet.update({
+    const referrerBalance = Number(referrer.wallet.walletBalance) || 0;
+
+    // ✅ Credit 1% bonus to referrer with proper transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update referrer's wallet
+      const updatedWallet = await tx.wallet.update({
         where: { id: referrer.wallet.id },
         data: {
           walletBalance: {
             increment: bonusAmount,
           },
+          ledgerBalance: {
+            increment: bonusAmount,
+          },
         },
-      }),
-      prisma.walletTransaction.create({
+      });
+
+      // Create wallet transaction for bonus
+      const bonusTransaction = await tx.walletTransaction.create({
         data: {
           walletId: referrer.wallet.id,
           userId: referrerId,
           type: "CREDIT",
           amount: bonusAmount,
-          balanceBefore: Number(referrer.wallet.walletBalance),
-          balanceAfter: Number(referrer.wallet.walletBalance) + bonusAmount,
-          reference: `REFERRAL_BONUS_${userId}`,
+          balanceBefore: referrerBalance,
+          balanceAfter: referrerBalance + bonusAmount,
+          reference: `REFERRAL_BONUS_${userId}_${Date.now()}`,
           description: `Referral bonus (1% of ${formatCurrency(amount)}) for ${user.fullName || 'new user'}`,
           status: "SUCCESS",
           category: "SYSTEM",
           metadata: {
             refereeId: userId,
+            refereeName: user.fullName,
             depositAmount: amount,
             bonusPercentage: 1,
             source: "wallet_funding_webhook",
+            fundingReference: reference,
+            fundingSource: source || "PALMPAY",
           },
         },
-      }),
-      // Update referral record
-      prisma.referral.updateMany({
+      });
+
+      // ✅ Update or create referral record
+      const existingReferral = await tx.referral.findFirst({
         where: {
           referrerId: referrerId,
           refereeId: userId,
         },
-        data: {
-          status: "COMPLETED",
-          rewardAmount: bonusAmount,
-          rewardPaid: true,
-          rewardPaidAt: new Date(),
-        },
-      }),
-    ]);
+      });
 
-    console.log(`✅ [Wallet Funding] Referral bonus of ₦${bonusAmount} credited to ${referrerId}`);
+      if (existingReferral) {
+        await tx.referral.update({
+          where: { id: existingReferral.id },
+          data: {
+            status: ReferralStatus.COMPLETED,
+            rewardAmount: bonusAmount,
+            rewardPaid: true,
+            rewardPaidAt: new Date(),
+            completedAt: new Date(),
+          },
+        });
+      } else {
+        // ✅ Create referral record if it doesn't exist
+        await tx.referral.create({
+          data: {
+            referrerId: referrerId,
+            refereeId: userId,
+            status: ReferralStatus.COMPLETED,
+            rewardAmount: bonusAmount,
+            rewardPaid: true,
+            rewardPaidAt: new Date(),
+            completedAt: new Date(),
+            metadata: {
+              depositAmount: amount,
+              bonusPercentage: 1,
+              source: "wallet_funding_webhook",
+            },
+          },
+        });
+      }
+
+      // ✅ Update referrer's referral stats
+      await tx.user.update({
+        where: { id: referrerId },
+        data: {
+          referralEarnings: {
+            increment: bonusAmount,
+          },
+          referralCount: {
+            increment: 1,
+          },
+        },
+      });
+
+      return { updatedWallet, bonusTransaction };
+    });
+
+    console.log(`✅ [Wallet Funding] Referral bonus of ₦${bonusAmount} credited to ${referrer.fullName || referrerId}`);
+    console.log(`✅ [Wallet Funding] Referrer's new balance: ₦${result.updatedWallet.walletBalance}`);
+
+    // ✅ Optional: Send notification to referrer
+    try {
+      // You can add email/push notification here
+      // await sendNotification(referrerId, {
+      //   type: "REFERRAL_BONUS",
+      //   title: "Referral Bonus Earned! 🎉",
+      //   message: `You earned ₦${bonusAmount} from ${user.fullName || 'your referral'}'s first deposit!`,
+      // });
+    } catch (error) {
+      console.error("Notification error:", error);
+      // Don't fail the transaction
+    }
 
     return NextResponse.json({
       success: true,
       message: "Referral bonus credited",
-      bonusAmount,
-      referrerId,
+      data: {
+        referrerId,
+        bonusAmount,
+        refereeId: userId,
+        refereeName: user.fullName,
+        newBalance: result.updatedWallet.walletBalance,
+      },
     });
 
   } catch (error: any) {

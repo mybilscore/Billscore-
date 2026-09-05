@@ -22,25 +22,98 @@ function validateApiKey(request: NextRequest): { valid: boolean; error?: string 
   return { valid: true };
 }
 
-// ✅ FIXED: Add async and await for params (Next.js 15)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ vendorId: string }> | { vendorId: string } }
 ) {
   try {
+    console.log("=".repeat(80));
+    console.log("🔍 [VENDOR PLANS API] Request received");
+    console.log("=".repeat(80));
+
     const auth = validateApiKey(request);
     if (!auth.valid) {
+      console.log("❌ Authentication failed:", auth.error);
       return NextResponse.json({ error: auth.error }, { status: 401 });
     }
+    console.log("✅ Authentication successful");
 
-    // ✅ Await params for Next.js 15 compatibility
     const resolvedParams = await params;
     const { vendorId } = resolvedParams;
-    
+    console.log(`📋 Vendor ID: ${vendorId}`);
+
     const searchParams = new URL(request.url).searchParams;
     const network = searchParams.get("network");
     const isActiveParam = searchParams.get("isActive");
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "1000"); // Default to 1000 to get all
     
+    console.log(`📊 Query Parameters:`);
+    console.log(`   - Network: ${network || "ALL"}`);
+    console.log(`   - isActive: ${isActiveParam || "ALL"}`);
+    console.log(`   - Page: ${page}`);
+    console.log(`   - Limit: ${limit}`);
+    console.log("-".repeat(80));
+
+    // 🔍 DEBUG: Get ALL plans count first
+    const totalAllPlans = await prisma.dataPlan.count({
+      where: { vendorId },
+    });
+    console.log(`📊 TOTAL PLANS IN DATABASE FOR VENDOR: ${totalAllPlans}`);
+
+    // 🔍 DEBUG: Get counts by status
+    const activeCount = await prisma.dataPlan.count({
+      where: { 
+        vendorId,
+        isActive: true,
+      },
+    });
+    const inactiveCount = await prisma.dataPlan.count({
+      where: { 
+        vendorId,
+        isActive: false,
+      },
+    });
+    console.log(`   - Active: ${activeCount}`);
+    console.log(`   - Inactive: ${inactiveCount}`);
+    console.log(`   - Total: ${activeCount + inactiveCount}`);
+
+    // 🔍 DEBUG: Get counts by network
+    const networkCounts = await prisma.dataPlan.groupBy({
+      by: ['network'],
+      where: { vendorId },
+      _count: true,
+    });
+    console.log(`📊 Plans by network:`);
+    networkCounts.forEach(n => {
+      console.log(`   - ${n.network}: ${n._count}`);
+    });
+
+    // 🔍 DEBUG: Check for duplicate vendorPlanIds
+    const allVendorIds = await prisma.dataPlan.findMany({
+      where: { vendorId },
+      select: { vendorPlanId: true, name: true, network: true, isActive: true },
+      orderBy: { vendorPlanId: 'asc' },
+    });
+    
+    const uniqueVendorIds = new Set(allVendorIds.map(p => p.vendorPlanId));
+    console.log(`📊 Vendor Plan IDs:`);
+    console.log(`   - Total records: ${allVendorIds.length}`);
+    console.log(`   - Unique vendorPlanIds: ${uniqueVendorIds.size}`);
+    
+    if (allVendorIds.length !== uniqueVendorIds.size) {
+      console.log(`⚠️ DUPLICATES FOUND! ${allVendorIds.length - uniqueVendorIds.size} duplicates detected`);
+      
+      // Find duplicates
+      const seen = new Set();
+      const duplicates = allVendorIds.filter(p => {
+        if (seen.has(p.vendorPlanId)) return true;
+        seen.add(p.vendorPlanId);
+        return false;
+      });
+      console.log(`   - Duplicate entries:`, duplicates.map(d => d.vendorPlanId).join(', '));
+    }
+
     // Build where clause
     const where: any = {
       vendorId,
@@ -48,11 +121,23 @@ export async function GET(
 
     if (isActiveParam !== null) {
       where.isActive = isActiveParam !== "false";
+      console.log(`🔍 Filtering by isActive: ${where.isActive}`);
+    } else {
+      console.log(`🔍 No isActive filter - showing ALL plans`);
     }
 
     if (network) {
       where.network = network;
+      console.log(`🔍 Filtering by network: ${network}`);
     }
+
+    // Get total with filters
+    const total = await prisma.dataPlan.count({ where });
+    console.log(`📊 Total after filters: ${total}`);
+
+    // Get plans with pagination
+    const skip = (page - 1) * limit;
+    console.log(`📄 Pagination: skip=${skip}, take=${limit}`);
 
     const plans = await prisma.dataPlan.findMany({
       where,
@@ -63,6 +148,8 @@ export async function GET(
         { planType: 'asc' },
         { amountMB: 'asc' },
       ],
+      skip,
+      take: limit,
       include: {
         networkConfig: true,
         vendor: {
@@ -79,15 +166,27 @@ export async function GET(
       },
     });
 
-    // Calculate margin and include WhatsApp fields
+    console.log(`✅ Returned ${plans.length} plans in this page`);
+    console.log("=".repeat(80));
+
+    // Calculate margins
     const plansWithMargin = plans.map(plan => ({
       ...plan,
       margin: Number(plan.ourPrice) - Number(plan.vendorPrice),
       marginPercentage: Number(plan.vendorPrice) > 0 
         ? ((Number(plan.ourPrice) - Number(plan.vendorPrice)) / Number(plan.vendorPrice)) * 100 
         : 0,
+      agentMargin: Number(plan.ourPrice) - Number(plan.agentPrice),
+      agentMarginPercentage: Number(plan.agentPrice) > 0 
+        ? ((Number(plan.ourPrice) - Number(plan.agentPrice)) / Number(plan.agentPrice)) * 100 
+        : 0,
+      vendorToAgentMargin: Number(plan.agentPrice) - Number(plan.vendorPrice),
+      vendorToAgentMarginPercentage: Number(plan.vendorPrice) > 0 
+        ? ((Number(plan.agentPrice) - Number(plan.vendorPrice)) / Number(plan.vendorPrice)) * 100 
+        : 0,
       ourPrice: Number(plan.ourPrice),
       vendorPrice: Number(plan.vendorPrice),
+      agentPrice: Number(plan.agentPrice),
       isActiveForWhatsApp: plan.isActiveForWhatsApp ?? false,
       whatsappPriority: plan.whatsappPriority ?? 0,
     }));
@@ -102,6 +201,8 @@ export async function GET(
       _count: true,
       _sum: {
         ourPrice: true,
+        vendorPrice: true,
+        agentPrice: true,
       },
     });
 
@@ -113,8 +214,28 @@ export async function GET(
           network: s.network,
           count: s._count,
           totalValue: s._sum.ourPrice || 0,
+          totalVendorValue: s._sum.vendorPrice || 0,
+          totalAgentValue: s._sum.agentPrice || 0,
         })),
-        total: plans.length,
+        total,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+        // ✅ Add debug info to response
+        debug: {
+          totalAllPlans,
+          activeCount,
+          inactiveCount,
+          networkCounts: networkCounts.map(n => ({
+            network: n.network,
+            count: n._count,
+          })),
+          uniqueVendorIds: uniqueVendorIds.size,
+          duplicateCount: allVendorIds.length - uniqueVendorIds.size,
+        },
       },
     });
 
@@ -127,22 +248,11 @@ export async function GET(
 
   } catch (error: any) {
     console.error("💥 [ADMIN VENDOR PLANS API] Error:", error);
+    console.error("Stack trace:", error.stack);
     return NextResponse.json({
       success: false,
       error: error.message || "Failed to fetch vendor plans",
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     }, { status: 500 });
   }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': 'http://localhost:3001',
-      'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
-      'Access-Control-Max-Age': '86400',
-    },
-  });
 }

@@ -1,4 +1,4 @@
-// app/api/vendors/data/purchase/route.ts - COMPLETE UPDATED WITH DATA AMOUNT STORAGE
+// app/api/vendors/data/purchase/route.ts - COMPLETE FIXED WITH PROPER PLAN MAPPING
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "~/lib/auth";
@@ -93,23 +93,43 @@ function mapVendorToEnum(vendorCode: string | undefined): VtuVendor | null {
 // HELPER: Get data amount from plan
 // ============================================================
 
-async function getDataAmountFromPlan(planId: string | undefined, planCode: string, provider: string): Promise<{ amountMB: number; display: string }> {
-  // Default values
+async function getDataAmountFromPlan(planId: string | undefined, planCode: string, provider: string): Promise<{ amountMB: number; display: string; dataPlan: any }> {
   let amountMB = 0;
   let display = planCode || 'Unknown';
+  let dataPlan = null;
 
-  // If planId is provided, try to get from database
+  // ✅ If planId is provided, get the full plan from database
   if (planId) {
     try {
-      const dataPlan = await prisma.dataPlan.findUnique({
+      // ✅ Only select fields that exist in the model
+      dataPlan = await prisma.dataPlan.findUnique({
         where: { id: planId },
-        select: { amountMB: true, data: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          network: true,
+          planType: true,
+          amountMB: true,
+          ourPrice: true,
+          vendorPrice: true,
+          validity: true,
+          validityUnit: true,
+          vendorPlanId: true,
+          vendorNetworkCode: true,
+          vendorPlanType: true,
+          vendorMetadata: true,
+          vendorId: true,
+          isActive: true,
+          status: true,
+          description: true,
+        },
       });
       
       if (dataPlan) {
         amountMB = dataPlan.amountMB || 0;
-        display = dataPlan.data || dataPlan.name || `${amountMB}MB`;
-        return { amountMB, display };
+        display = `${dataPlan.amountMB || 0}MB`;
+        log('info', `📊 Found data plan: ${dataPlan.name} (${amountMB}MB)`, { vendorPlanId: dataPlan.vendorPlanId });
+        return { amountMB, display, dataPlan };
       }
     } catch (error) {
       log('warn', 'Failed to fetch data plan from database', error);
@@ -124,17 +144,31 @@ async function getDataAmountFromPlan(planId: string | undefined, planCode: strin
       const unit = match[2].toUpperCase();
       amountMB = unit === 'GB' ? num * 1024 : num;
       display = `${num}${unit}`;
-      return { amountMB, display };
+      return { amountMB, display, dataPlan };
     }
   }
 
   // Estimate from amount
-  const amount = 0; // We'll use the transaction amount
-  return { amountMB, display };
+  const amt = Number(amount) || 0;
+  if (amt <= 50) { amountMB = 25; display = '25MB'; }
+  else if (amt <= 100) { amountMB = 50; display = '50MB'; }
+  else if (amt <= 200) { amountMB = 100; display = '100MB'; }
+  else if (amt <= 300) { amountMB = 200; display = '200MB'; }
+  else if (amt <= 500) { amountMB = 350; display = '350MB'; }
+  else if (amt <= 1000) { amountMB = 750; display = '750MB'; }
+  else if (amt <= 1500) { amountMB = 1024; display = '1GB'; }
+  else if (amt <= 2000) { amountMB = 2048; display = '2GB'; }
+  else if (amt <= 3000) { amountMB = 3072; display = '3GB'; }
+  else if (amt <= 5000) { amountMB = 5120; display = '5GB'; }
+  else if (amt <= 10000) { amountMB = 10240; display = '10GB'; }
+  else { amountMB = Math.floor(amt / 2); display = `${amountMB}MB`; }
+  
+  log('info', `📊 Data amount estimated: ${display} (${amountMB}MB)`);
+  return { amountMB, display, dataPlan };
 }
 
 // ============================================================
-// REFUND HELPER
+// REFUND HELPER - FULL IMPLEMENTATION
 // ============================================================
 
 async function processRefund(
@@ -361,58 +395,49 @@ export async function POST(request: NextRequest) {
     const CHANNEL_DISPLAY = "WEB_APP";
 
     // ============================================================
-    // GET DATA AMOUNT FROM PLAN
+    // GET DATA AMOUNT FROM PLAN (with vendorPlanId)
     // ============================================================
     
-    let dataAmountMB = 0;
-    let dataDisplay = planCode || 'Unknown';
+    const { amountMB: dataAmountMB, display: dataDisplay, dataPlan } = await getDataAmountFromPlan(planId, planCode, provider);
     
-    // ✅ Try to get from database if planId provided
-    if (planId) {
-      try {
-        const dataPlan = await prisma.dataPlan.findUnique({
-          where: { id: planId },
-          select: { amountMB: true, data: true, name: true },
-        });
-        
-        if (dataPlan) {
-          dataAmountMB = dataPlan.amountMB || 0;
-          dataDisplay = dataPlan.data || dataPlan.name || `${dataAmountMB}MB`;
-          log('info', `📊 Data amount from plan: ${dataDisplay} (${dataAmountMB}MB)`);
-        }
-      } catch (error) {
-        log('warn', 'Failed to fetch data plan from database', error);
+    log('info', `📊 Data amount: ${dataDisplay} (${dataAmountMB}MB)`);
+    
+    // ✅ For BilalSada, we need the vendorPlanId from the data plan
+    let finalPlanCode = planCode;
+    let isBilalSada = vendor === 'BILAL_SADA' || vendor === 'BILALSADA';
+    
+    // ✅ If vendor is not specified, try to detect from plan
+    if (!vendor && dataPlan && dataPlan.vendorId) {
+      const vendorRecord = await prisma.vendor.findUnique({
+        where: { id: dataPlan.vendorId },
+        select: { code: true },
+      });
+      if (vendorRecord) {
+        vendor = vendorRecord.code;
+        isBilalSada = vendor === 'BILAL_SADA' || vendor === 'BILALSADA';
+        log('info', `📊 Detected vendor from plan: ${vendor}`);
       }
     }
     
-    // ✅ If not found in DB, try to extract from planCode
-    if (dataAmountMB === 0 && planCode) {
-      const match = planCode.match(/(\d+(?:\.\d+)?)\s*(MB|GB|gb|mb)/i);
-      if (match) {
-        const num = parseFloat(match[1]);
-        const unit = match[2].toUpperCase();
-        dataAmountMB = unit === 'GB' ? num * 1024 : num;
-        dataDisplay = `${num}${unit}`;
-        log('info', `📊 Data amount extracted from planCode: ${dataDisplay} (${dataAmountMB}MB)`);
+    // ✅ If BilalSada, use vendorPlanId from database
+    if (isBilalSada || vendor === 'BILAL_SADA' || vendor === 'BILALSADA') {
+      if (dataPlan && dataPlan.vendorPlanId) {
+        finalPlanCode = dataPlan.vendorPlanId;
+        log('info', `📊 BilalSada using vendorPlanId: ${finalPlanCode} (from ${planCode})`);
+      } else {
+        log('warn', `⚠️ BilalSada plan missing vendorPlanId, using: ${planCode}`);
       }
     }
     
-    // ✅ If still not found, estimate from amount
-    if (dataAmountMB === 0) {
-      const amt = Number(amount);
-      if (amt <= 50) { dataAmountMB = 25; dataDisplay = '25MB'; }
-      else if (amt <= 100) { dataAmountMB = 50; dataDisplay = '50MB'; }
-      else if (amt <= 200) { dataAmountMB = 100; dataDisplay = '100MB'; }
-      else if (amt <= 300) { dataAmountMB = 200; dataDisplay = '200MB'; }
-      else if (amt <= 500) { dataAmountMB = 350; dataDisplay = '350MB'; }
-      else if (amt <= 1000) { dataAmountMB = 750; dataDisplay = '750MB'; }
-      else if (amt <= 1500) { dataAmountMB = 1024; dataDisplay = '1GB'; }
-      else if (amt <= 2000) { dataAmountMB = 2048; dataDisplay = '2GB'; }
-      else if (amt <= 3000) { dataAmountMB = 3072; dataDisplay = '3GB'; }
-      else if (amt <= 5000) { dataAmountMB = 5120; dataDisplay = '5GB'; }
-      else if (amt <= 10000) { dataAmountMB = 10240; dataDisplay = '10GB'; }
-      else { dataAmountMB = Math.floor(amt / 2); dataDisplay = `${dataAmountMB}MB`; }
-      log('info', `📊 Data amount estimated from amount: ${dataDisplay} (${dataAmountMB}MB)`);
+    // ✅ If VTpass, use variationCode if provided
+    if (vendor === 'VTPASS' || vendor === 'VT_PASS') {
+      if (variationCode) {
+        finalPlanCode = variationCode;
+        log('info', `📊 VTpass using variationCode: ${finalPlanCode}`);
+      } else if (dataPlan && dataPlan.vendorPlanId) {
+        finalPlanCode = dataPlan.vendorPlanId;
+        log('info', `📊 VTpass using vendorPlanId: ${finalPlanCode}`);
+      }
     }
 
     // ============================================================
@@ -514,12 +539,12 @@ export async function POST(request: NextRequest) {
     let dataPlanId: string | undefined = undefined;
     
     if (planId) {
-      const dataPlan = await prisma.dataPlan.findUnique({
+      const existingPlan = await prisma.dataPlan.findUnique({
         where: { id: planId },
         select: { id: true },
       });
-      if (dataPlan) {
-        dataPlanId = dataPlan.id;
+      if (existingPlan) {
+        dataPlanId = existingPlan.id;
       } else {
         log('warn', `DataPlan with id ${planId} not found in database - likely VTpass plan`);
       }
@@ -538,12 +563,11 @@ export async function POST(request: NextRequest) {
         totalDebited: 0,
         phoneNumber: phoneNumber,
         network: networkEnum,
-        networkPlan: planCode,
+        networkPlan: finalPlanCode,
         status: TransactionStatus.PENDING,
         channel: ChannelType.WEB_APP,
         channelDisplay: CHANNEL_DISPLAY,
-        dataPlanId: dataPlanId,
-        // ✅ STORE DATA AMOUNT
+        dataPlanId: dataPlanId || dataPlan?.id || null,
         dataAmountMB: dataAmountMB,
         dataDisplay: dataDisplay,
         metadata: {
@@ -551,6 +575,7 @@ export async function POST(request: NextRequest) {
           timestamp: new Date().toISOString(),
           provider: provider,
           planCode: planCode,
+          finalPlanCode: finalPlanCode,
           customerId: customer.id,
           pinVerified: false,
           channel: "WEB_APP",
@@ -558,8 +583,12 @@ export async function POST(request: NextRequest) {
           vendor: vendor || 'UNKNOWN',
           variationCode: variationCode || planCode,
           isVTpass: vendor === 'VTPASS' || vendor === 'VT_PASS',
+          isBilalSada: isBilalSada,
           dataAmountMB: dataAmountMB,
           dataDisplay: dataDisplay,
+          vendorPlanId: dataPlan?.vendorPlanId || null,
+          vendorNetworkCode: dataPlan?.vendorNetworkCode || null,
+          vendorPlanType: dataPlan?.vendorPlanType || null,
         },
       },
     });
@@ -722,7 +751,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // VENDOR PURCHASE
+    // VENDOR PURCHASE - WITH CORRECT PLAN CODE
     // ============================================================
 
     let vendorId: string | null = null;
@@ -731,18 +760,47 @@ export async function POST(request: NextRequest) {
     try {
       const vendorService = getVendorService();
 
+      // ✅ Build request with the correct plan code
       const requestData: any = {
         phoneNumber: phoneNumber,
-        planCode: planCode,
+        planCode: finalPlanCode,
         network: provider,
         amount: amount,
+        vendor: vendor || 'BILAL_SADA',
       };
 
-      if (vendor === 'VTPASS' || vendor === 'VT_PASS') {
-        requestData.variationCode = variationCode || planCode;
-        requestData.vendor = 'VTPASS';
-        log('info', 'Using VTpass vendor for data purchase', { variationCode: requestData.variationCode });
+      // ✅ Add additional data for vendors
+      if (dataPlan) {
+        requestData.dataPlan = {
+          id: dataPlan.id,
+          name: dataPlan.name,
+          network: dataPlan.network,
+          amountMB: dataPlan.amountMB,
+          vendorPlanId: dataPlan.vendorPlanId,
+          vendorNetworkCode: dataPlan.vendorNetworkCode,
+          vendorPlanType: dataPlan.vendorPlanType,
+          vendorMetadata: dataPlan.vendorMetadata,
+        };
       }
+
+      if (vendor === 'VTPASS' || vendor === 'VT_PASS') {
+        requestData.variationCode = variationCode || finalPlanCode;
+        requestData.serviceId = dataPlan?.vendorNetworkCode || 'mtn-data';
+        log('info', 'Using VTpass vendor for data purchase', { 
+          variationCode: requestData.variationCode,
+          serviceId: requestData.serviceId 
+        });
+      }
+
+      if (isBilalSada || vendor === 'BILAL_SADA' || vendor === 'BILALSADA') {
+        requestData.vendor = 'BILAL_SADA';
+        log('info', 'Using BilalSada vendor for data purchase', { 
+          planCode: finalPlanCode,
+          vendorPlanId: dataPlan?.vendorPlanId 
+        });
+      }
+
+      log('info', `📊 Calling vendor service with planCode: ${finalPlanCode}`);
 
       const result = await vendorService.buyData(requestData, user.id);
 
@@ -789,7 +847,7 @@ export async function POST(request: NextRequest) {
               balanceBefore: walletBalance,
               balanceAfter: walletBalance - amount,
               reference: `VTU_${transaction.id}`,
-              description: `Data purchase for ${phoneNumber} (${provider} - ${planCode})`,
+              description: `Data purchase for ${phoneNumber} (${provider} - ${dataPlan?.name || planCode})`,
               status: TransactionStatus.SUCCESS,
               category: "DATA",
             },
@@ -804,7 +862,6 @@ export async function POST(request: NextRequest) {
               vendor: vendorEnum,
               token: result.data?.token,
               deliveredAt: new Date(),
-              // ✅ Ensure data amount is stored
               dataAmountMB: dataAmountMB,
               dataDisplay: dataDisplay,
               metadata: {
@@ -819,6 +876,8 @@ export async function POST(request: NextRequest) {
                 wasDebited: true,
                 dataAmountMB: dataAmountMB,
                 dataDisplay: dataDisplay,
+                finalPlanCode: finalPlanCode,
+                vendorPlanIdUsed: dataPlan?.vendorPlanId || null,
               },
             },
           }),
@@ -830,10 +889,10 @@ export async function POST(request: NextRequest) {
               transactionType: VtuType.DATA,
               amount: amount,
               totalAmount: amount,
-              product: `${provider} - ${planCode}`,
+              product: `${provider} - ${dataPlan?.name || planCode}`,
               phoneNumber: phoneNumber,
               network: networkEnum,
-              planName: planCode,
+              planName: dataPlan?.name || planCode,
               status: TransactionStatus.SUCCESS,
               metadata: {
                 vendorName: result.vendor || 'unknown',
@@ -844,6 +903,7 @@ export async function POST(request: NextRequest) {
                 completedAt: new Date().toISOString(),
                 dataAmountMB: dataAmountMB,
                 dataDisplay: dataDisplay,
+                finalPlanCode: finalPlanCode,
               },
             },
           }),
@@ -857,7 +917,7 @@ export async function POST(request: NextRequest) {
         ]);
 
         const totalTime = Date.now() - startTime;
-        log('info', `Data transaction ${transaction.id} completed in ${totalTime}ms`);
+        log('info', `✅ Data transaction ${transaction.id} completed in ${totalTime}ms`);
 
         return NextResponse.json({
           success: true,
@@ -868,6 +928,7 @@ export async function POST(request: NextRequest) {
             amount: amount,
             provider: provider,
             planCode: planCode,
+            finalPlanCode: finalPlanCode,
             phoneNumber: phoneNumber,
             customerId: customer.id,
             isNewCustomer: customer.totalTransactions === 0,
@@ -877,14 +938,29 @@ export async function POST(request: NextRequest) {
             switchedFrom: result.switchedFrom,
             totalTime: totalTime,
             channel: CHANNEL_DISPLAY,
-            // ✅ Include data amount in response
             dataAmountMB: dataAmountMB,
             dataDisplay: dataDisplay,
             ...result.data,
           },
         });
       } else {
-        // Vendor failed
+        // Vendor failed - process refund
+        let refundResult = null;
+        if (amount > 0) {
+          try {
+            refundResult = await processRefund(
+              transaction,
+              user,
+              amount,
+              result.error || "Vendor transaction failed",
+              "VENDOR_FAILURE",
+              "SYSTEM"
+            );
+          } catch (refundError: any) {
+            log('error', 'Refund failed', refundError.message);
+          }
+        }
+
         await prisma.vtuTransaction.update({
           where: { id: transaction.id },
           data: {
@@ -903,6 +979,9 @@ export async function POST(request: NextRequest) {
               switchedFrom: result.switchedFrom || [],
               failedAt: new Date().toISOString(),
               wasDebited: false,
+              finalPlanCode: finalPlanCode,
+              refundId: refundResult?.id || null,
+              refundProcessed: !!refundResult,
             },
           },
         });
@@ -915,10 +994,10 @@ export async function POST(request: NextRequest) {
             transactionType: VtuType.DATA,
             amount: amount,
             totalAmount: amount,
-            product: `${provider} - ${planCode}`,
+            product: `${provider} - ${dataPlan?.name || planCode}`,
             phoneNumber: phoneNumber,
             network: networkEnum,
-            planName: planCode,
+            planName: dataPlan?.name || planCode,
             status: TransactionStatus.FAILED,
             notes: `Vendor failure: ${result.error || "Unknown error"}`,
             metadata: {
@@ -927,6 +1006,8 @@ export async function POST(request: NextRequest) {
               failureReason: result.error,
               vendorErrors: result.vendorErrors || [],
               failedAt: new Date().toISOString(),
+              finalPlanCode: finalPlanCode,
+              refundId: refundResult?.id || null,
             },
           },
         });
@@ -943,10 +1024,28 @@ export async function POST(request: NextRequest) {
           success: false,
           error: result.error || "Vendor transaction failed",
           transactionId: transaction.id,
+          refundId: refundResult?.id || null,
+          refundProcessed: !!refundResult,
         }, { status: 500 });
       }
     } catch (error: any) {
-      // Unexpected error
+      // Unexpected error - process refund
+      let refundResult = null;
+      if (amount > 0) {
+        try {
+          refundResult = await processRefund(
+            transaction,
+            user,
+            amount,
+            error.message || "System error occurred",
+            "SYSTEM_ERROR",
+            "SYSTEM"
+          );
+        } catch (refundError: any) {
+          log('error', 'Refund failed', refundError.message);
+        }
+      }
+
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -961,6 +1060,9 @@ export async function POST(request: NextRequest) {
             pinVerified: true,
             errorType: error.name || 'UnknownError',
             wasDebited: false,
+            finalPlanCode: finalPlanCode,
+            refundId: refundResult?.id || null,
+            refundProcessed: !!refundResult,
           },
         },
       });
@@ -973,10 +1075,10 @@ export async function POST(request: NextRequest) {
           transactionType: VtuType.DATA,
           amount: amount,
           totalAmount: amount,
-          product: `${provider} - ${planCode}`,
+          product: `${provider} - ${dataPlan?.name || planCode}`,
           phoneNumber: phoneNumber,
           network: networkEnum,
-          planName: planCode,
+          planName: dataPlan?.name || planCode,
           status: TransactionStatus.FAILED,
           notes: `System Error: ${error.message || 'Unknown error'}`,
           metadata: {
@@ -984,6 +1086,8 @@ export async function POST(request: NextRequest) {
             failureReason: error.message,
             errorType: error.name,
             failedAt: new Date().toISOString(),
+            finalPlanCode: finalPlanCode,
+            refundId: refundResult?.id || null,
           },
         },
       });
@@ -1002,6 +1106,8 @@ export async function POST(request: NextRequest) {
         success: false,
         error: error.message || "Purchase failed. Please try again.",
         transactionId: transaction.id,
+        refundId: refundResult?.id || null,
+        refundProcessed: !!refundResult,
       }, { status: 500 });
     }
   } catch (error: any) {

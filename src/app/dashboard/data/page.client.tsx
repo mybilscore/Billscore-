@@ -48,6 +48,8 @@ interface Plan {
   variation_id?: string;
   amount?: number;
   service_id?: string;
+  // ✅ Add database ID for proper mapping
+  dbPlanId?: string;
 }
 
 interface Category {
@@ -117,25 +119,16 @@ const formatCurrency = (amount: number) => {
 };
 
 // ✅ PROVIDER ICON MAPPING - LOCAL FALLBACK SYSTEM
-// This completely ignores API-provided icon paths and uses local mappings
 const PROVIDER_ICON_MAP: Record<string, string> = {
-  // By name (case insensitive)
   'mtn': '/networks/mtn.jpg',
   'airtel': '/networks/airtel.png',
   'glo': '/networks/glo.jpg',
   '9mobile': '/networks/9mobile.jpg',
   'ninemobile': '/networks/9mobile.png',
   'etisalat': '/networks/9mobile.png',
-  
-  // By code (case insensitive)
-  'mtn': '/networks/mtn.jpg',
-  'airtel': '/networks/airtel.png',
-  'glo': '/networks/glo.jpg',
-  '9mobile': '/networks/9mobile.jpg',
-  'ninemobile': '/networks/9mobile.png',
 };
 
-// ✅ LOADING MODAL WITH ANIMATED LOGO
+// ✅ LOADING MODAL
 const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
   if (!isOpen) return null;
 
@@ -172,7 +165,7 @@ const LoadingModal = ({ isOpen }: { isOpen: boolean }) => {
   );
 };
 
-// ✅ SUCCESS MODAL COMPONENT
+// ✅ SUCCESS MODAL
 const SuccessModal = ({
   isOpen,
   onClose,
@@ -281,7 +274,7 @@ const SuccessModal = ({
   );
 };
 
-// ✅ ERROR MODAL COMPONENT
+// ✅ ERROR MODAL
 const ErrorModal = ({
   isOpen,
   onClose,
@@ -452,7 +445,7 @@ const CategoryButton = ({
   );
 };
 
-// ✅ Provider Icon - Uses LOCAL mapping, ignores API path
+// ✅ Provider Icon
 const ProviderIcon = ({ 
   provider, 
   isSelected 
@@ -462,35 +455,22 @@ const ProviderIcon = ({
 }) => {
   const [imageError, setImageError] = useState(false);
   
-  // Get icon path from LOCAL mapping, completely ignoring API-provided path
   const getLocalIconPath = (provider: Provider): string | null => {
     const name = provider.name?.toLowerCase() || '';
     const code = provider.code?.toLowerCase() || '';
     
-    // Try exact match by name
-    if (PROVIDER_ICON_MAP[name]) {
-      return PROVIDER_ICON_MAP[name];
-    }
+    if (PROVIDER_ICON_MAP[name]) return PROVIDER_ICON_MAP[name];
+    if (PROVIDER_ICON_MAP[code]) return PROVIDER_ICON_MAP[code];
     
-    // Try match by code
-    if (PROVIDER_ICON_MAP[code]) {
-      return PROVIDER_ICON_MAP[code];
-    }
-    
-    // Try partial match in name
     for (const [key, path] of Object.entries(PROVIDER_ICON_MAP)) {
-      if (name.includes(key) || key.includes(name)) {
-        return path;
-      }
+      if (name.includes(key) || key.includes(name)) return path;
     }
     
-    // Return null if no match found
     return null;
   };
 
   const iconPath = getLocalIconPath(provider);
 
-  // If no icon path found or image failed to load, show fallback
   if (!iconPath || imageError) {
     return (
       <div className={`h-10 w-10 rounded-full flex items-center justify-center text-base font-bold ${
@@ -507,17 +487,14 @@ const ProviderIcon = ({
         src={iconPath}
         alt={provider.name}
         className="h-10 w-10 object-contain"
-        onError={() => {
-          console.log(`[ProviderIcon] Failed to load: ${iconPath}`);
-          setImageError(true);
-        }}
+        onError={() => setImageError(true)}
         loading="lazy"
       />
     </div>
   );
 };
 
-// ✅ Provider Button - Uses local icon system
+// ✅ Provider Button
 const ProviderButton = ({
   provider,
   isSelected,
@@ -844,7 +821,7 @@ export function DataClient({
     setPinError("");
   };
 
-  // ✅ Handle purchase with both vendors
+  // ✅ FIXED: Handle purchase with proper planId mapping
   const handlePurchase = async () => {
     // Validate PIN
     if (!pin || pin.length < 4) {
@@ -885,24 +862,52 @@ export function DataClient({
     setPinError("");
 
     try {
+      // ✅ Determine the correct plan ID to use
+      // For VTpass: use variation_code as planCode
+      // For BilalSada: use dbPlanId if available, otherwise use id
+      let planIdToUse = selectedPlan.id;
+      let planCodeToUse = selectedPlan.planCode || selectedPlan.variation_code || selectedPlan.id;
+
+      // ✅ For VTpass, variation_code is the primary identifier
+      if (isVTpass && selectedPlan.variation_code) {
+        planCodeToUse = selectedPlan.variation_code;
+        planIdToUse = selectedPlan.variation_code;
+      }
+
+      // ✅ For BilalSada, use dbPlanId if available (database ID)
+      if (isBilalSada && selectedPlan.dbPlanId) {
+        planIdToUse = selectedPlan.dbPlanId;
+      }
+
+      console.log('📊 [Purchase] Plan info:', {
+        id: selectedPlan.id,
+        dbPlanId: selectedPlan.dbPlanId,
+        planCode: selectedPlan.planCode,
+        variation_code: selectedPlan.variation_code,
+        planIdToUse,
+        planCodeToUse,
+        isVTpass,
+        isBilalSada
+      });
+
       // ✅ Build request based on vendor type
       const requestBody: any = {
         phoneNumber: phoneNumber || "",
-        planCode: selectedPlan.planCode,
+        planCode: planCodeToUse,
         provider: currentProvider?.code || "MTN",
         amount: selectedPlan.price,
         pin: pin,
-        planId: selectedPlan.id,
+        planId: planIdToUse, // Use the correct plan ID
         vendorCode: vendorInfo?.code || 'UNKNOWN',
       };
 
       // ✅ For VTpass, add extra fields
       if (isVTpass) {
-        requestBody.variationCode = selectedPlan.variation_code || selectedPlan.planCode;
-        requestBody.serviceId = selectedPlan.service_id || currentProvider?.network || currentProvider?.code;
+        requestBody.variationCode = selectedPlan.variation_code || planCodeToUse;
+        requestBody.serviceId = selectedPlan.service_id || currentProvider?.network || currentProvider?.code || 'data';
         requestBody.vendor = 'VTPASS';
         requestBody.variationName = selectedPlan.variation_name || selectedPlan.name;
-        requestBody.serviceType = selectedPlan.service_type || 'data';
+        requestBody.serviceType = selectedPlan.service_id || 'data';
         console.log('📊 [Purchase] VTpass request:', requestBody);
       }
 
@@ -997,7 +1002,7 @@ export function DataClient({
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-6">
       <div className="max-w-5xl mx-auto">
-        {/* Header with Vendor Badge */}
+        {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-[#1e293b] dark:text-white">Buy Data</h1>

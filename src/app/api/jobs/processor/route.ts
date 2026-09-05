@@ -416,20 +416,9 @@ Thank you for using Bilscore!`
 // DATA PURCHASE PROCESSOR
 // ============================================================
 
-// app/api/jobs/processor/route.ts - Updated processDataPurchase with dataAmountMB and dataDisplay
-
 async function processDataPurchase(job: any) {
   const payload = job.payload;
-  const { 
-    transactionId, 
-    userId, 
-    phoneNumber, 
-    planData, 
-    provider, 
-    detectedNetwork,
-    dataAmountMB,
-    dataDisplay,
-  } = payload;
+  const { transactionId, userId, phoneNumber, planData, provider, detectedNetwork } = payload;
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -441,36 +430,6 @@ async function processDataPurchase(job: any) {
   const amount = Number(planData.price);
   const wallet = user.wallet;
   const walletBalance = Number(wallet?.walletBalance || 0);
-
-  // ✅ Check balance first
-  if (walletBalance < amount) {
-    const errorMsg = `Insufficient balance. You have NGN ${walletBalance.toFixed(2)}`;
-    
-    await prisma.vtuTransaction.update({
-      where: { id: transactionId },
-      data: {
-        status: TransactionStatus.FAILED,
-        metadata: {
-          error: errorMsg,
-          failedAt: new Date().toISOString(),
-        },
-      },
-    });
-    
-    await sendWhatsAppMessage(
-      user.phone,
-      `❌ Data Purchase Failed!
-
-Phone: ${phoneNumber}
-Plan: ${planData.data || 'N/A'}
-Amount: NGN ${amount.toFixed(2)}
-Error: ${errorMsg}
-
-Please fund your wallet and try again.`
-    );
-    
-    throw new Error(errorMsg);
-  }
 
   const vendorService = getVendorService();
   const result = await vendorService.buyData(
@@ -486,10 +445,6 @@ Please fund your wallet and try again.`
   if (result.success) {
     const token = result.data?.token || result.data?.purchased_code || null;
     const vendorReference = result.vendorReference || null;
-
-    // ✅ Get data amount from payload or planData
-    const finalDataAmountMB = dataAmountMB || planData.amountMB || 0;
-    const finalDataDisplay = dataDisplay || planData.data || `${finalDataAmountMB}MB`;
 
     await prisma.$transaction(async (tx) => {
       const currentTx = await tx.vtuTransaction.findUnique({
@@ -530,27 +485,23 @@ Please fund your wallet and try again.`
           vendorReference: vendorReference,
           vendor: mapVendorToEnum(result.vendor),
           deliveredAt: new Date(),
-          // ✅ Store data amount
-          dataAmountMB: finalDataAmountMB,
-          dataDisplay: finalDataDisplay,
           metadata: {
             ...currentTx?.metadata,
             processed: true,
             completedAt: new Date().toISOString(),
-            dataAmountMB: finalDataAmountMB,
-            dataDisplay: finalDataDisplay,
           },
         },
       });
     });
 
-    // ✅ Send success message
+    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
     await sendWhatsAppMessage(
       user.phone,
-      `✅ Data Purchase Successful!
+      `Data Purchase Successful!
 
 Phone: ${phoneNumber}
-Plan: ${finalDataDisplay} (${provider})
+Plan: ${dataDisplay} (${provider})
 Amount: NGN ${amount.toFixed(2)}
 Network: ${detectedNetwork}
 ${token ? `Token: ${token}` : ''}
@@ -559,33 +510,7 @@ Reference: ${transactionId.substring(0, 10)}
 Thank you for using Bilscore!`
     );
   } else {
-    // ✅ Send failure message
-    const errorMsg = result.error || "Vendor transaction failed";
-    
-    await prisma.vtuTransaction.update({
-      where: { id: transactionId },
-      data: {
-        status: TransactionStatus.FAILED,
-        metadata: {
-          error: errorMsg,
-          failedAt: new Date().toISOString(),
-        },
-      },
-    });
-    
-    await sendWhatsAppMessage(
-      user.phone,
-      `❌ Data Purchase Failed!
-
-Phone: ${phoneNumber}
-Plan: ${planData.data || 'N/A'}
-Amount: NGN ${amount.toFixed(2)}
-Error: ${errorMsg}
-
-Please try again or contact support.`
-    );
-    
-    throw new Error(errorMsg);
+    throw new Error(result.error || "Vendor transaction failed");
   }
 }
 
