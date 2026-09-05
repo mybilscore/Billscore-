@@ -21,7 +21,6 @@ jobs:
             APP_DIR="/var/www/bilscore"
             REPO_URL="https://github.com/mybilscore/Billscore-.git"
             
-            # ─── Clone or Pull ───
             if [ -d "$APP_DIR" ]; then
               echo "📦 Pulling latest code..."
               cd $APP_DIR
@@ -32,33 +31,36 @@ jobs:
               cd $APP_DIR
             fi
             
-            # ───  REMOVED: .env creation - using existing .env on droplet
-            
-            # ─── Install Dependencies ───
-            echo " Installing dependencies..."
+            echo "📦 Installing dependencies..."
             npm install
             
-            # ─── Generate Prisma Client ───
-            echo " Generating Prisma client..."
+            echo "🔧 Generating Prisma client..."
             npx prisma generate
             
-            # ─── Run Database Migrations ───
-            echo " Running database migrations..."
+            echo "🗄️ Running database migrations..."
             npx prisma migrate deploy || echo "⚠️ Migration skipped"
             
-            # ─── Build App ───
-            echo " Building app..."
+            echo "🏗️ Building app..."
+            
+            # ✅ FIX 1: Load env vars before build
+            export NEXTAUTH_URL="https://app.bilscore.com"
+            export NEXT_PUBLIC_APP_URL="https://app.bilscore.com"
+            
             npm run build
             
-            # ─── Restart App with PM2 ───
-            echo " Restarting app..."
+            # ✅ FIX 2: Stop deployment if build failed
+            if [ ! -d ".next" ] || [ ! -f ".next/BUILD_ID" ]; then
+              echo "❌ Build failed! Stopping deployment."
+              exit 1
+            fi
+            
+            echo "🔄 Restarting app..."
             if pm2 list | grep -q "bilscore"; then
               pm2 restart bilscore
             else
               pm2 start npm --name "bilscore" -- start
             fi
             
-            # ─── Save PM2 Configuration ───
             pm2 save
             
             echo "✅ Deployment complete!"
