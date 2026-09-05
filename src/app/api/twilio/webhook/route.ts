@@ -25,7 +25,7 @@ import { generateQRUrl } from "~/lib/qr-hash";
 import { sendWhatsAppMessage } from "~/lib/twilio";
 
 // ============================================================
-// WHATSAPP SETTINGS HELPERS
+// WHATSAPP SETTINGS HELPERS (NEW)
 // ============================================================
 
 async function getWhatsAppSettings(userId: string) {
@@ -66,26 +66,13 @@ async function toggleWhatsAppPin(userId: string, enabled: boolean) {
 }
 
 // ============================================================
-// WHATSAPP SETTINGS COMMAND HANDLER
+// WHATSAPP SETTINGS COMMAND HANDLER (NEW)
 // ============================================================
 
 async function handleWhatsAppSettingsCommand(user: any, parts: string[]): Promise<string> {
   const settings = await getWhatsAppSettings(user.id);
   
-  if (parts.length === 1 || parts[0].toUpperCase() === 'WA') {
-    return `⚙️ *WhatsApp Settings*
-
-🔐 *PIN Requirement:*
-   ${settings.requirePin ? '🔒 PIN Required for WhatsApp purchases' : '🔓 PIN NOT Required for WhatsApp purchases'}
-
-📝 *Commands:*
-   WA PIN ON - Require PIN for WhatsApp purchases
-   WA PIN OFF - Disable PIN for WhatsApp purchases
-
-⚠️ *Note:* PIN is always required for purchases to new/unsaved meters and decoders for security.
-PIN is never required for purchases to your own phone number.`;
-  }
-  
+  // ✅ FIRST: Check for PIN toggle commands (WA PIN ON / WA PIN OFF)
   if (parts.length >= 3 && parts[1].toUpperCase() === 'PIN') {
     const action = parts[2].toUpperCase();
     
@@ -94,20 +81,20 @@ PIN is never required for purchases to your own phone number.`;
       return `✅ WhatsApp PIN requirement ENABLED
 
 All WhatsApp purchases will now require your transaction PIN.
-Type WA PIN OFF to disable.`;
+Type WA PIN OFF to disable.
+
+Quick check: MYWA to see current status.`;
     } 
     
     if (action === 'OFF') {
       await toggleWhatsAppPin(user.id, false);
       return `✅ WhatsApp PIN requirement DISABLED
 
-WhatsApp purchases will now be processed without a PIN.
-⚠️ For security, PIN is still required for:
-   • New/unsaved meters and decoders
-   • Purchases to other phone numbers
-   • High-value transactions
+All WhatsApp purchases will now be processed without a PIN.
+⚠️ For security, we recommend enabling PIN when not actively using WhatsApp.
+Type WA PIN ON to re-enable.
 
-Type WA PIN ON to re-enable.`;
+Quick check: MYWA to see current status.`;
     }
     
     return `❌ Invalid action. Use:
@@ -115,14 +102,34 @@ Type WA PIN ON to re-enable.`;
   WA PIN OFF - Disable PIN`;
   }
   
+  // ✅ SECOND: Show full settings (WA or WHAT)
+  if (parts.length === 1) {
+    return `⚙️ *WhatsApp Settings*
+
+🔐 *PIN Requirement:*
+   ${settings.requirePin ? '🔒 ON - PIN Required for all purchases' : '🔓 OFF - No PIN Required for purchases'}
+
+📝 *Commands:*
+   MYWA        - Quick status check
+   WA PIN ON   - Require PIN for all purchases
+   WA PIN OFF  - Disable PIN for all purchases
+
+⚠️ *Notes:*
+   • PIN is never required for your own phone number
+   • ${settings.requirePin ? 'All external purchases require PIN' : 'No external purchases require PIN'}
+
+💡 *Quick Tip:* Use MYWA anytime to check your current PIN status.`;
+  }
+  
   return `❌ Invalid command. Usage:
-  WA - View WhatsApp settings
-  WA PIN ON - Require PIN for WhatsApp purchases
-  WA PIN OFF - Disable PIN for WhatsApp purchases`;
+  WA          - View full settings
+  MYWA        - Quick status check
+  WA PIN ON   - Require PIN for all purchases
+  WA PIN OFF  - Disable PIN for all purchases`;
 }
 
 // ============================================================
-// CREATE JOB HELPER (unchanged)
+// CREATE JOB HELPER (UNCHANGED)
 // ============================================================
 
 async function createJob(
@@ -145,7 +152,7 @@ async function createJob(
 }
 
 // ============================================================
-// SESSION STORAGE (unchanged)
+// SESSION STORAGE (UNCHANGED)
 // ============================================================
 
 const userSessions: Map<string, { 
@@ -159,7 +166,7 @@ const userSessions: Map<string, {
 const SESSION_TIMEOUT = 300000;
 
 // ============================================================
-// CACHE FOR NETWORK-SPECIFIC DATA PLANS (unchanged)
+// CACHE FOR NETWORK-SPECIFIC DATA PLANS (UNCHANGED)
 // ============================================================
 
 let cachedNetworkPlans: Map<string, Map<number, { 
@@ -174,7 +181,7 @@ let networkPlanCacheTime: Map<string, number> = new Map();
 const CACHE_TTL = 300000;
 
 // ============================================================
-// DISCO MAPPING (unchanged)
+// DISCO MAPPING (UNCHANGED)
 // ============================================================
 
 const DISCO_MAPPING: Record<string, { code: string, fullName: string, serviceID: string }> = {
@@ -230,7 +237,7 @@ function getValidDiscosList(): string {
 }
 
 // ============================================================
-// QR CODE GENERATION (unchanged)
+// QR CODE GENERATION (UNCHANGED)
 // ============================================================
 
 function generateMeterQRCode(userId: string, meterNumber: string, disco: string): Promise<string> {
@@ -269,7 +276,7 @@ function generateValidationToken(): string {
 }
 
 // ============================================================
-// XML RESPONSE BUILDER (unchanged)
+// XML RESPONSE BUILDER (UNCHANGED)
 // ============================================================
 
 function buildTwilioResponse(message: string): string {
@@ -286,7 +293,7 @@ function buildTwilioResponse(message: string): string {
 }
 
 // ============================================================
-// HELPER FUNCTIONS (unchanged)
+// HELPER FUNCTIONS (UNCHANGED)
 // ============================================================
 
 function getAppUrl(): string {
@@ -442,7 +449,7 @@ function mapDiscoCode(discoCode: string | null | undefined): DisCo | null {
 }
 
 // ============================================================
-// SAVE METER WITH CUSTOMER INFO HELPER (unchanged)
+// SAVE METER WITH CUSTOMER INFO HELPER (UNCHANGED)
 // ============================================================
 
 async function saveMeterWithCustomerInfo(
@@ -498,7 +505,7 @@ async function saveMeterWithCustomerInfo(
 }
 
 // ============================================================
-// METER VERIFICATION (unchanged)
+// METER VERIFICATION (UNCHANGED)
 // ============================================================
 
 async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, meterType: string = "prepaid") {
@@ -524,7 +531,7 @@ async function verifyMeterWithVTpass(serviceID: string, meterNumber: string, met
 }
 
 // ============================================================
-// VERIFY DECODER WITH VTPASS (unchanged)
+// VERIFY DECODER WITH VTPASS (UNCHANGED)
 // ============================================================
 
 async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: string) {
@@ -639,7 +646,7 @@ async function verifyDecoderWithVTpass(serviceID: string, smartCardNumber: strin
 }
 
 // ============================================================
-// HELPER: Get active vendor for DATA service (unchanged)
+// HELPER: Get active vendor for DATA service (UNCHANGED)
 // ============================================================
 
 async function getActiveDataVendor() {
@@ -659,7 +666,7 @@ async function getActiveDataVendor() {
 }
 
 // ============================================================
-// HELPER: Build where clause for WhatsApp plans (unchanged)
+// HELPER: Build where clause for WhatsApp plans (UNCHANGED)
 // ============================================================
 
 function buildWhatsAppPlanWhereClause(vendorId: string, network: string): any {
@@ -680,7 +687,7 @@ function buildWhatsAppPlanWhereClause(vendorId: string, network: string): any {
 }
 
 // ============================================================
-// HELPER: Format validity display (unchanged)
+// HELPER: Format validity display (UNCHANGED)
 // ============================================================
 
 function formatValidityDisplay(validity: number, validityUnit: string): string {
@@ -722,7 +729,7 @@ function formatValidityDisplay(validity: number, validityUnit: string): string {
 }
 
 // ============================================================
-// HELPER: Format data display (unchanged)
+// HELPER: Format data display (UNCHANGED)
 // ============================================================
 
 function formatDataDisplay(amountMB: number, existingData?: string): string {
@@ -738,7 +745,7 @@ function formatDataDisplay(amountMB: number, existingData?: string): string {
 }
 
 // ============================================================
-// HELPER: Get display price from plan (unchanged)
+// HELPER: Get display price from plan (UNCHANGED)
 // ============================================================
 
 function getDisplayPrice(plan: any): number {
@@ -749,7 +756,7 @@ function getDisplayPrice(plan: any): number {
 }
 
 // ============================================================
-// HELPER: Process plans and build message (unchanged)
+// HELPER: Process plans and build message (UNCHANGED)
 // ============================================================
 
 function processPlansForWhatsApp(dbPlans: any[], network: string): {
@@ -800,7 +807,7 @@ function processPlansForWhatsApp(dbPlans: any[], network: string): {
 }
 
 // ============================================================
-// HELPER: Check if there are any active plans (unchanged)
+// HELPER: Check if there are any active plans (UNCHANGED)
 // ============================================================
 
 async function countActivePlansForNetwork(vendorId: string, network: string): Promise<number> {
@@ -820,7 +827,7 @@ async function countActivePlansForNetwork(vendorId: string, network: string): Pr
 }
 
 // ============================================================
-// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (unchanged)
+// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (UNCHANGED)
 // ============================================================
 
 async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
@@ -952,7 +959,7 @@ function getFallbackPlansForNetwork(network: string): string {
 }
 
 // ============================================================
-// GET PLAN BY INDEX FOR NETWORK (unchanged)
+// GET PLAN BY INDEX FOR NETWORK (UNCHANGED)
 // ============================================================
 
 async function getPlanByIndexForNetwork(network: string, indexNumber: number): Promise<{ 
@@ -985,7 +992,7 @@ async function getPlanByIndexForNetwork(network: string, indexNumber: number): P
 }
 
 // ============================================================
-// HELPER: Check user balance (unchanged)
+// HELPER: Check user balance (UNCHANGED)
 // ============================================================
 
 async function checkUserBalance(userId: string, amount: number): Promise<{ 
@@ -1024,7 +1031,7 @@ Please fund your wallet and try again.`
 }
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH QUEUE (unchanged - NO PIN)
+// PROCESS DATA PURCHASE WITH QUEUE (UNCHANGED)
 // ============================================================
 
 async function processDataPurchaseWithQueue(
@@ -1122,7 +1129,7 @@ You'll receive a confirmation shortly.`;
 }
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH PIN (PIN required - no job)
+// PROCESS DATA PURCHASE WITH PIN (UNCHANGED)
 // ============================================================
 
 async function processDataPurchaseWithPin(
@@ -1223,7 +1230,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
 }
 
 // ============================================================
-// GET AVAILABLE DISCOS, PACKAGES, EDUCATION (unchanged)
+// GET AVAILABLE DISCOS, PACKAGES, EDUCATION (UNCHANGED)
 // ============================================================
 
 async function getAvailableDiscosForWhatsApp(): Promise<string> {
@@ -1316,7 +1323,7 @@ async function getAvailableEducationProducts(): Promise<string> {
 }
 
 // ============================================================
-// ADD METER WITH VERIFICATION AND QR CODE (unchanged)
+// ADD METER WITH VERIFICATION AND QR CODE (UNCHANGED)
 // ============================================================
 
 async function addMeterWithVerificationAndQR(userId: string, meterNumber: string, discoInput: string, name: string): Promise<string> {
@@ -1453,7 +1460,7 @@ Type POWER to see all your meters and buy power!`;
 }
 
 // ============================================================
-// ADD DECODER WITH VERIFICATION (unchanged)
+// ADD DECODER WITH VERIFICATION (UNCHANGED)
 // ============================================================
 
 async function addDecoderWithVerification(userId: string, decoderNumber: string, provider: string, name: string): Promise<string> {
@@ -1562,7 +1569,7 @@ Type CABLE to see all your decoders and subscribe!`;
 }
 
 // ============================================================
-// LIST METERS (unchanged)
+// LIST METERS (UNCHANGED)
 // ============================================================
 
 async function listMeters(userId: string): Promise<string> {
@@ -1622,7 +1629,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
 }
 
 // ============================================================
-// LIST DECODERS (unchanged)
+// LIST DECODERS (UNCHANGED)
 // ============================================================
 
 async function listDecoders(userId: string): Promise<string> {
@@ -1666,7 +1673,7 @@ To see packages: PACKAGES [provider]`;
 }
 
 // ============================================================
-// DELETE METER (unchanged)
+// DELETE METER (UNCHANGED)
 // ============================================================
 
 async function deleteMeter(userId: string, meterNumber: string): Promise<string> {
@@ -1690,7 +1697,7 @@ async function deleteMeter(userId: string, meterNumber: string): Promise<string>
 }
 
 // ============================================================
-// DELETE DECODER (unchanged)
+// DELETE DECODER (UNCHANGED)
 // ============================================================
 
 async function deleteDecoder(userId: string, decoderNumber: string): Promise<string> {
@@ -1714,7 +1721,7 @@ async function deleteDecoder(userId: string, decoderNumber: string): Promise<str
 }
 
 // ============================================================
-// SET DEFAULT METER (unchanged)
+// SET DEFAULT METER (UNCHANGED)
 // ============================================================
 
 async function setDefaultMeter(userId: string, meterId: string): Promise<string> {
@@ -1764,7 +1771,7 @@ async function setDefaultMeter(userId: string, meterId: string): Promise<string>
 }
 
 // ============================================================
-// SET DEFAULT DECODER (unchanged)
+// SET DEFAULT DECODER (UNCHANGED)
 // ============================================================
 
 async function setDefaultDecoder(userId: string, decoderId: string): Promise<string> {
@@ -1814,7 +1821,7 @@ async function setDefaultDecoder(userId: string, decoderId: string): Promise<str
 }
 
 // ============================================================
-// GET SAVED METERS LIST (unchanged)
+// GET SAVED METERS LIST (UNCHANGED)
 // ============================================================
 
 async function getSavedMetersList(userId: string): Promise<string> {
@@ -1842,7 +1849,7 @@ Example: ADDMETER 1234567890 ABUJA HOME`;
 }
 
 // ============================================================
-// ACTIVE SUBSCRIPTIONS (unchanged)
+// ACTIVE SUBSCRIPTIONS (UNCHANGED)
 // ============================================================
 
 async function getActiveSubscriptions(userId: string): Promise<string> {
@@ -1889,7 +1896,7 @@ To see your saved meters: METERS`;
 }
 
 // ============================================================
-// CANCEL SUBSCRIPTION (unchanged)
+// CANCEL SUBSCRIPTION (UNCHANGED)
 // ============================================================
 
 async function cancelSubscription(userId: string, subscriptionId: string): Promise<string> {
@@ -1968,7 +1975,7 @@ To create a new subscription: SCHEDULE [meter_index] [amount] [days]`;
 }
 
 // ============================================================
-// PROCESS EDUCATION PURCHASE (unchanged)
+// PROCESS EDUCATION PURCHASE (UPDATED - follows WA setting)
 // ============================================================
 
 async function processEducationPurchaseWhatsApp(user: any, product: string, quantity: number): Promise<string> {
@@ -1991,6 +1998,9 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
     return balanceCheck.message!;
   }
 
+  // ✅ Check WhatsApp PIN setting
+  const pinRequired = await isWhatsAppPinRequired(user.id, false);
+
   const transaction = await prisma.vtuTransaction.create({
     data: {
       userId: user.id,
@@ -2000,7 +2010,7 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
       totalDebited: 0,
       phoneNumber: user.phone,
       networkPlan: productInfo.variationCode,
-      status: TransactionStatus.PENDING,
+      status: pinRequired ? TransactionStatus.PENDING : TransactionStatus.PROCESSING,
       channel: ChannelType.WHATSAPP,
       isBulkPurchase: quantity > 1,
       bulkQuantity: quantity > 1 ? quantity : undefined,
@@ -2011,13 +2021,40 @@ async function processEducationPurchaseWhatsApp(user: any, product: string, quan
         productType: product,
         productName: productInfo.name,
         quantity: quantity,
-        queued: false,
-        requiresPin: true,
+        queued: !pinRequired,
+        requiresPin: pinRequired,
         balanceAtPurchase: balanceCheck.balance,
       },
     },
   });
 
+  if (!pinRequired) {
+    // ✅ NO PIN - use job
+    await createJob(
+      JobType.VTU_TRANSACTION,
+      {
+        transactionId: transaction.id,
+        userId: user.id,
+        product: product,
+        quantity: quantity,
+        serviceType: "EDUCATION",
+      },
+      5,
+      3,
+      new Date()
+    );
+
+    return `🎓 Education Purchase Processing!
+
+Product: ${productInfo.name}
+Quantity: ${quantity}
+Amount: NGN ${amount.toFixed(2)}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+  }
+
+  // ✅ PIN REQUIRED
   const validationToken = generateValidationToken();
   const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -2051,7 +2088,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
 }
 
 // ============================================================
-// TRANSACTION HISTORY (unchanged)
+// TRANSACTION HISTORY (UNCHANGED)
 // ============================================================
 
 async function getTransactionHistory(userId: string): Promise<string> {
@@ -2080,7 +2117,7 @@ async function getTransactionHistory(userId: string): Promise<string> {
 }
 
 // ============================================================
-// PIN HANDLER (unchanged)
+// PIN HANDLER (UNCHANGED)
 // ============================================================
 
 async function handlePinCommand(user: any, parts: string[]): Promise<string> {
@@ -2112,7 +2149,7 @@ async function handlePinCommand(user: any, parts: string[]): Promise<string> {
 }
 
 // ============================================================
-// HELP MESSAGE (UPDATED with WA commands)
+// HELP MESSAGE (UPDATED with WA and MYWA commands)
 // ============================================================
 
 function getHelpMessage(user: any): string {
@@ -2124,9 +2161,10 @@ TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
 ⚙️ *WhatsApp Settings:*
-WA - View WhatsApp settings
-WA PIN ON - Require PIN for WhatsApp purchases
-WA PIN OFF - Disable PIN for WhatsApp purchases
+WA - View full WhatsApp settings
+MYWA - Quick view of your WhatsApp PIN status
+WA PIN ON - Require PIN for all WhatsApp purchases
+WA PIN OFF - Disable PIN for all WhatsApp purchases
 
 📱 *Airtime & Data:*
 AIRTIME [amount] - For YOUR number (no PIN)
@@ -2164,7 +2202,7 @@ Need help? Visit: ${getAppUrl()}/support`;
 }
 
 // ============================================================
-// MAIN WEBHOOK HANDLER
+// MAIN WEBHOOK HANDLER (UNCHANGED except added WA/MYWA commands)
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -2279,7 +2317,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================================
-// USER REGISTRATION HANDLER (unchanged)
+// USER REGISTRATION HANDLER (UNCHANGED)
 // ============================================================
 
 async function handleUserRegistration(phone: string, body: string): Promise<string> {
@@ -2548,7 +2586,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
 }
 
 // ============================================================
-// MAIN COMMAND PROCESSOR (UPDATED with WA settings)
+// MAIN COMMAND PROCESSOR (UPDATED with WA and MYWA commands)
 // ============================================================
 
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
@@ -2556,7 +2594,27 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   const parts = body.split(" ").filter(p => p.length > 0);
 
   // ============================================================
-  // WHATSAPP SETTINGS - NEW
+  // WHATSAPP SETTINGS - MYWA (NEW - User Friendly)
+  // ============================================================
+  if (command === "MYWA" || command === "MY WHATSAPP" || command === "MY SETTINGS" || command === "MY WA") {
+    userSessions.delete(user.id);
+    const settings = await getWhatsAppSettings(user.id);
+    return `⚙️ *Your WhatsApp Settings*
+
+🔐 *PIN Requirement:* ${settings.requirePin ? '🔒 ON (PIN Required)' : '🔓 OFF (No PIN Required)'}
+
+📝 *Quick Commands:*
+   WA PIN ON  - Enable PIN for all purchases
+   WA PIN OFF - Disable PIN for all purchases
+   WA         - View full settings
+
+💡 *Current Status:* ${settings.requirePin ? 'Your transactions require PIN verification.' : 'Your transactions do NOT require PIN verification.'}
+
+${settings.requirePin ? '⚠️ Remember: PIN is never required for your own number.' : '⚠️ For security, enable PIN when not actively using WhatsApp.'}`;
+  }
+
+  // ============================================================
+  // WHATSAPP SETTINGS - WA (NEW)
   // ============================================================
   if (command === "WA" || command === "WHAT" || command.startsWith("WA ")) {
     userSessions.delete(user.id);
@@ -2564,7 +2622,7 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
   }
 
   // ============================================================
-  // SPECIAL CASE: Just an index number (e.g., "1", "2", "3")
+  // SPECIAL CASE: Just an index number (e.g., "1", "2", "3") (UNCHANGED)
   // ============================================================
   if (/^\d+$/.test(command) && !command.startsWith("0")) {
     const session = userSessions.get(user.id);
@@ -2595,7 +2653,7 @@ async function processWhatsAppCommand(user: any, body: string, phone: string): P
         return balanceCheck.message!;
       }
       
-      // Check if PIN is required based on WhatsApp settings
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
       
       if (!pinRequired) {
@@ -2750,7 +2808,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // HELP
+  // HELP (UNCHANGED)
   // ============================================================
   if (command === "HELP" || command === "?") {
     userSessions.delete(user.id);
@@ -2758,7 +2816,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // REGISTER
+  // REGISTER (UNCHANGED)
   // ============================================================
   if (command.startsWith("REG") || command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
     userSessions.delete(user.id);
@@ -2766,7 +2824,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // BALANCE
+  // BALANCE (UNCHANGED)
   // ============================================================
   if (command === "BALANCE" || command === "BAL" || command === "WALLET") {
     userSessions.delete(user.id);
@@ -2794,7 +2852,7 @@ Type HELP for available commands.`;
   }
 
   // ============================================================
-  // DATA ALL
+  // DATA ALL (UNCHANGED)
   // ============================================================
   if (command === "DATA ALL") {
     userSessions.delete(user.id);
@@ -2803,7 +2861,7 @@ Type HELP for available commands.`;
   }
 
   // ============================================================
-  // DATA COMMAND - UPDATED with WhatsApp PIN check
+  // DATA COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -2879,7 +2937,7 @@ ${plans}`;
         return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
       }
       
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
       
       if (!pinRequired) {
@@ -2900,7 +2958,7 @@ ${plans}`;
         return `Could Not Detect Network\n\nWe couldn't detect the network for ${targetPhone}.`;
       }
       
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
       
       if (!pinRequired) {
@@ -2924,7 +2982,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // QR COMMAND - unchanged
+  // QR COMMAND (UNCHANGED)
   // ============================================================
   if (command === "QR" || command.startsWith("QR ")) {
     userSessions.delete(user.id);
@@ -3025,7 +3083,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // METER MANAGEMENT - unchanged
+  // METER MANAGEMENT (UNCHANGED)
   // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
@@ -3067,7 +3125,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // DECODER MANAGEMENT - unchanged
+  // DECODER MANAGEMENT (UNCHANGED)
   // ============================================================
 
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
@@ -3116,7 +3174,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // DISCOS - unchanged
+  // DISCOS (UNCHANGED)
   // ============================================================
   if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
     userSessions.delete(user.id);
@@ -3125,7 +3183,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // PACKAGES - unchanged
+  // PACKAGES (UNCHANGED)
   // ============================================================
   if (command.startsWith("PACKAGES") || command === "PACKAGE") {
     userSessions.delete(user.id);
@@ -3136,7 +3194,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // SUBSCRIPTIONS - unchanged
+  // SUBSCRIPTIONS (UNCHANGED)
   // ============================================================
   if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
     userSessions.delete(user.id);
@@ -3199,7 +3257,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // EDUCATION - unchanged
+  // EDUCATION (UNCHANGED - uses updated processEducationPurchaseWhatsApp)
   // ============================================================
   if (command.startsWith("EDU") || command === "EDUCATION" || 
       command.startsWith("WAEC") || command.startsWith("JAMB") || 
@@ -3236,7 +3294,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // TRANSACTIONS - unchanged
+  // TRANSACTIONS (UNCHANGED)
   // ============================================================
   if (command === "TRANSACTIONS" || command === "TXNS" || command === "HISTORY") {
     userSessions.delete(user.id);
@@ -3244,7 +3302,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // REFERRAL - unchanged
+  // REFERRAL (UNCHANGED)
   // ============================================================
   if (command === "REFERRAL" || command === "REF") {
     userSessions.delete(user.id);
@@ -3258,7 +3316,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // PIN - unchanged
+  // PIN (UNCHANGED)
   // ============================================================
   if (command === "PIN" || command.startsWith("PIN ")) {
     userSessions.delete(user.id);
@@ -3266,7 +3324,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // AIRTIME COMMAND - UPDATED with WhatsApp PIN check
+  // AIRTIME COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
   // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     userSessions.delete(user.id);
@@ -3289,7 +3347,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
         return `Could not detect your network. Please ensure your phone number is correct.`;
       }
 
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, true);
       
       if (!pinRequired) {
@@ -3420,7 +3478,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
       const normalizedUserPhone = normalizePhoneNumber(user.phone);
       const isOwnNumber = normalizedPhone === normalizedUserPhone;
 
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
 
       if (!pinRequired) {
@@ -3534,7 +3592,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
   }
 
   // ============================================================
-  // CABLE COMMAND - UPDATED with WhatsApp PIN check
+  // CABLE COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
   // ============================================================
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
     userSessions.delete(user.id);
@@ -3589,7 +3647,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
 
       await getAvailablePackagesForWhatsApp(selectedDecoder.provider);
       
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, false);
       
       const transaction = await prisma.vtuTransaction.create({
@@ -3681,7 +3739,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
   }
 
   // ============================================================
-  // ELECTRICITY COMMAND - UPDATED with WhatsApp PIN check
+  // ELECTRICITY COMMAND (UPDATED - uses isWhatsAppPinRequired for ALL including new meters)
   // ============================================================
   if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
       command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
@@ -3758,7 +3816,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
         return message;
       }
 
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, false);
 
       if (!pinRequired) {
@@ -3920,7 +3978,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
       
       const selectedMeter = meters[index];
 
-      // Check WhatsApp PIN setting
+      // ✅ Check WhatsApp PIN setting
       const pinRequired = await isWhatsAppPinRequired(user.id, false);
 
       if (!pinRequired) {
@@ -4052,7 +4110,7 @@ This link expires in 5 minutes.
 You'll receive a confirmation via WhatsApp after completion.`;
     }
 
-    // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter
+    // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter (UPDATED - follows WA setting)
     if (parts.length >= 4) {
       const [, meterNumber, discoInput, amountStr] = parts;
       const amount = parseFloat(amountStr);
@@ -4076,7 +4134,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
       
       // If meter is already saved, use saved data
       if (existingMeter) {
-        // Check WhatsApp PIN setting
+        // ✅ Check WhatsApp PIN setting
         const pinRequired = await isWhatsAppPinRequired(user.id, false);
 
         if (!pinRequired) {
@@ -4208,7 +4266,7 @@ This link expires in 5 minutes.
 You'll receive a confirmation via WhatsApp after completion.`;
       }
       
-      // New meter - need verification (ALWAYS requires PIN for security)
+      // ✅ NEW METER - Check WhatsApp PIN setting (NO security override)
       const discoInfo = normalizeDisco(discoInput);
       if (!discoInfo) {
         const discosList = getValidDiscosList();
@@ -4231,7 +4289,81 @@ You'll receive a confirmation via WhatsApp after completion.`;
         return `Could Not Verify Meter\n\n${verificationResult.error || "Unknown error"}\n\nYou can still proceed with the purchase.\n\nTo continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}\nTo cancel: Type HELP for other options.`;
       }
       
-      // New meter - ALWAYS requires PIN (security)
+      // ✅ Check WhatsApp PIN setting (NO security override)
+      const pinRequired = await isWhatsAppPinRequired(user.id, false);
+
+      if (!pinRequired) {
+        // ✅ NO PIN - use job
+        // Save the meter first
+        await saveMeterWithCustomerInfo(
+          user.id,
+          meterNumber,
+          discoUpper,
+          "Prepaid",
+          customerName,
+          verificationResult.data?.customerAddress || null,
+          verificationResult.data?.customerPhone || null,
+          verificationResult.data?.customerEmail || null,
+          verificationResult.data?.status || null
+        );
+        
+        const transaction = await prisma.vtuTransaction.create({
+          data: {
+            userId: user.id,
+            transactionType: VtuType.ELECTRICITY_INSTANT,
+            product: discoUpper,
+            amount: amount,
+            totalDebited: 0,
+            meterNumber: meterNumber,
+            meterType: MeterType.HOME,
+            status: TransactionStatus.PROCESSING,
+            channel: ChannelType.WHATSAPP,
+            metadata: {
+              source: "WhatsApp",
+              service: "ELECTRICITY",
+              timestamp: new Date().toISOString(),
+              discoCode: discoUpper,
+              meterType: "Prepaid",
+              customerName: customerName,
+              queued: true,
+              skipVerification: false,
+              requiresPin: false,
+              balanceAtPurchase: balanceCheck.balance,
+            },
+          },
+        });
+
+        await createJob(
+          JobType.VTU_TRANSACTION,
+          {
+            transactionId: transaction.id,
+            userId: user.id,
+            meterNumber: meterNumber,
+            amount: amount,
+            discoCode: discoUpper,
+            meterType: "Prepaid",
+            phone: user.phone,
+            customerName: customerName,
+            serviceType: "ELECTRICITY",
+            skipVerification: false,
+          },
+          5,
+          3,
+          new Date()
+        );
+
+        return `Processing your electricity purchase...
+
+Meter: ${meterNumber}
+DisCo: ${discoUpper} (${discoInfo.fullName})
+Amount: NGN ${amount.toFixed(2)}
+Customer: ${customerName}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+      }
+
+      // ✅ PIN REQUIRED
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -4322,7 +4454,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
   }
 
   // ============================================================
-  // SUBSCRIPTION PROCESSOR (unchanged)
+  // SUBSCRIPTION PROCESSOR (UNCHANGED)
   // ============================================================
   async function processSubscriptionWhatsApp(
     user: any,
@@ -4390,7 +4522,7 @@ To cancel: CANCEL ${preOrder.id}`;
   }
 
   // ============================================================
-  // UNKNOWN COMMAND
+  // UNKNOWN COMMAND (UNCHANGED)
   // ============================================================
   return `Unknown Command
 
@@ -4412,5 +4544,6 @@ POWER [amount] - Buy electricity for saved meter
 TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN
-WA - View WhatsApp PIN settings`;
+WA - View WhatsApp PIN settings
+MYWA - Quick WhatsApp PIN status`;
 }
