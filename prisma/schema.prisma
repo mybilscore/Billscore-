@@ -828,6 +828,10 @@ model User {
   pinLockedUntil        DateTime?
   lastLoginAt           DateTime?
 
+
+  whatsappSettings      WhatsAppSettings? 
+  whatsappSettingsId    String?           @unique
+
   // Security fields
   isLocked              Boolean         @default(false)
   lockedAt              DateTime?
@@ -3787,9 +3791,26 @@ model PlanImportLog {
   @@map("plan_import_logs")
 }
 
+
 // ============================================================
-// REFUND SYSTEM TABLES
+// WHATSAPP SETTINGS
 // ============================================================
+
+model WhatsAppSettings {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  
+  // Master toggle for WhatsApp PIN requirement
+  requirePin            Boolean   @default(true)  // true = PIN required, false = PIN not required
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations - define relation HERE (this side has the foreign key)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_settings")
+}
 
 model Refund {
   id                    String            @id @default(uuid())
