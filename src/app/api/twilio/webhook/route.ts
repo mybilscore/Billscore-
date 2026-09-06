@@ -728,6 +728,84 @@ function formatValidityDisplay(validity: number, validityUnit: string): string {
   return `${validity} days`;
 }
 
+
+// ============================================================
+// AGENT HELPERS (NEW)
+// ============================================================
+
+async function activateAgent(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return { success: false, message: 'User not found.' };
+    }
+
+    if (user.role === 'AGENT' || user.role === 'RETAILER') {
+      return { success: false, message: 'You are already an agent.' };
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        role: 'AGENT',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: userId,
+        action: 'AGENT_ACTIVATION',
+        newValues: { role: 'AGENT' },
+        channel: 'WHATSAPP',
+        metadata: {
+          activatedAt: new Date().toISOString(),
+          method: 'SELF',
+        },
+      },
+    });
+
+    return { 
+      success: true, 
+      message: `✅ You are now an Agent!
+
+You now have access to:
+• Agent pricing on all data plans
+• Higher transaction limits
+• Commission on sales
+
+To see your agent prices, type DATA
+
+Need help? Contact support.` 
+    };
+  } catch (error) {
+    console.error('Agent activation error:', error);
+    return { success: false, message: 'Failed to activate agent. Please try again.' };
+  }
+}
+
+// ============================================================
+// AGENT ACTIVATION COMMAND HANDLER (NEW)
+// ============================================================
+
+async function handleAgentActivation(user: any): Promise<string> {
+  if (user.role === 'AGENT' || user.role === 'RETAILER') {
+    return `🤝 You are already an Agent!
+
+Your benefits:
+• Special agent pricing on all data plans
+• Higher transaction limits
+• Commission on sales
+
+Type DATA to see your agent prices.`;
+  }
+
+  const result = await activateAgent(user.id);
+  return result.message;
+}
+
 // ============================================================
 // HELPER: Format data display (UNCHANGED)
 // ============================================================
@@ -745,37 +823,56 @@ function formatDataDisplay(amountMB: number, existingData?: string): string {
 }
 
 // ============================================================
-// HELPER: Get display price from plan (UNCHANGED)
+// HELPER: Get display price from plan (UPDATED - Role-based)
 // ============================================================
 
-function getDisplayPrice(plan: any): number {
-  if (plan.ourPrice !== undefined && plan.ourPrice !== null && Number(plan.ourPrice) > 0) {
-    return Number(plan.ourPrice);
+function getDisplayPrice(plan: any, userRole: string = 'END_USER'): number {
+  if (userRole === 'AGENT' || userRole === 'RETAILER') {
+    if (plan.agentPrice !== undefined && plan.agentPrice !== null && Number(plan.agentPrice) > 0) {
+      return Number(plan.agentPrice);
+    }
+    return Number(plan.ourPrice) || 0;
   }
-  return 0;
+  
+  return Number(plan.ourPrice) || 0;
 }
 
 // ============================================================
-// HELPER: Process plans and build message (UNCHANGED)
+// HELPER: Process plans and build message (UPDATED - Role-based)
 // ============================================================
 
-function processPlansForWhatsApp(dbPlans: any[], network: string): {
+function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: string = 'END_USER'): {
   planMap: Map<number, { planData: any, provider: string, network: string, planId: string }>;
   message: string;
   count: number;
 } {
   const planMap = new Map<number, { planData: any, provider: string, network: string, planId: string }>();
-  let message = `📱 *${network} Data Plans*\n\n`;
+  
+  const isAgent = (userRole === 'AGENT' || userRole === 'RETAILER');
+  const emoji = isAgent ? '🤝' : '📱';
+  
+  let message = `${emoji} *${network} Data Plans*`;
+  
+  if (isAgent) {
+    message += ` (Agent Pricing)`;
+  }
+  message += `\n\n`;
+  
   let index = 1;
   let count = 0;
 
   for (const plan of dbPlans) {
-    const displayPrice = getDisplayPrice(plan);
+    const displayPrice = getDisplayPrice(plan, userRole);
     if (displayPrice <= 0) continue;
 
     const dataDisplay = formatDataDisplay(plan.amountMB, plan.data || plan.dataDisplay);
     const validityDisplay = formatValidityDisplay(plan.validity, plan.validityUnit);
     const priceDisplay = `₦${displayPrice.toFixed(0)}`;
+    
+    let priceNote = '';
+    if (isAgent && plan.ourPrice && Number(plan.ourPrice) > displayPrice) {
+      priceNote = ` (Retail: ₦${Number(plan.ourPrice).toFixed(0)})`;
+    }
     
     const planId = plan.vendorPlanId || plan.id || plan.planCode || plan.dataDisplay;
     
@@ -792,7 +889,7 @@ function processPlansForWhatsApp(dbPlans: any[], network: string): {
       planId: planId,
     });
     
-    message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})\n`;
+    message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})${priceNote}\n`;
     index++;
     count++;
   }
@@ -801,6 +898,10 @@ function processPlansForWhatsApp(dbPlans: any[], network: string): {
     message += `\n_Reply with DATA [index] to buy_\n`;
     message += `_Example: DATA 1_\n`;
     message += `_For another number: DATA [phone] [index]_`;
+    
+    if (isAgent) {
+      message += `\n\n🤝 *Agent Benefits:* You get these special prices!`;
+    }
   }
 
   return { planMap, message, count };
@@ -907,41 +1008,53 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
   }
 }
 
-function getFallbackPlansForNetwork(network: string): string {
+function getFallbackPlansForNetwork(network: string, userRole: string = 'END_USER'): string {
   const fallbackPlans: Record<string, any[]> = {
     'MTN': [
-      { data: "1GB", price: 300, validity: "30 days" },
-      { data: "2GB", price: 500, validity: "30 days" },
-      { data: "5GB", price: 1200, validity: "30 days" },
-      { data: "10GB", price: 2000, validity: "30 days" },
+      { data: "1GB", retailPrice: 300, agentPrice: 270, validity: "30 days" },
+      { data: "2GB", retailPrice: 500, agentPrice: 450, validity: "30 days" },
+      { data: "5GB", retailPrice: 1200, agentPrice: 1080, validity: "30 days" },
+      { data: "10GB", retailPrice: 2000, agentPrice: 1800, validity: "30 days" },
     ],
     'GLO': [
-      { data: "1GB", price: 250, validity: "30 days" },
-      { data: "2GB", price: 450, validity: "30 days" },
-      { data: "5GB", price: 900, validity: "30 days" },
+      { data: "1GB", retailPrice: 250, agentPrice: 225, validity: "30 days" },
+      { data: "2GB", retailPrice: 450, agentPrice: 405, validity: "30 days" },
+      { data: "5GB", retailPrice: 900, agentPrice: 810, validity: "30 days" },
     ],
     'AIRTEL': [
-      { data: "1GB", price: 300, validity: "30 days" },
-      { data: "2GB", price: 500, validity: "30 days" },
-      { data: "5GB", price: 1100, validity: "30 days" },
+      { data: "1GB", retailPrice: 300, agentPrice: 270, validity: "30 days" },
+      { data: "2GB", retailPrice: 500, agentPrice: 450, validity: "30 days" },
+      { data: "5GB", retailPrice: 1100, agentPrice: 990, validity: "30 days" },
     ],
     '9MOBILE': [
-      { data: "1GB", price: 280, validity: "30 days" },
-      { data: "2GB", price: 480, validity: "30 days" },
-      { data: "5GB", price: 1000, validity: "30 days" },
+      { data: "1GB", retailPrice: 280, agentPrice: 252, validity: "30 days" },
+      { data: "2GB", retailPrice: 480, agentPrice: 432, validity: "30 days" },
+      { data: "5GB", retailPrice: 1000, agentPrice: 900, validity: "30 days" },
     ],
   };
 
   const plans = fallbackPlans[network.toUpperCase()] || fallbackPlans['MTN'];
-  const cacheKey = network.toUpperCase();
+  const cacheKey = `${network.toUpperCase()}_${userRole}`;
   const planMap = new Map<number, { planData: any, provider: string, network: string, planId: string }>();
-  let message = `Available Data Plans for ${network}:\n\n`;
+  
+  const isAgent = (userRole === 'AGENT' || userRole === 'RETAILER');
+  const emoji = isAgent ? '🤝' : '📱';
+  
+  let message = `${emoji} Available Data Plans for ${network}`;
+  if (isAgent) {
+    message += ` (Agent Pricing)`;
+  }
+  message += `:\n\n`;
+  
   plans.forEach((plan, index) => {
     const idx = index + 1;
+    const price = isAgent ? (plan.agentPrice || plan.retailPrice) : plan.retailPrice;
+    const retailNote = isAgent && plan.retailPrice > price ? ` (Retail: NGN ${plan.retailPrice})` : '';
+    
     planMap.set(idx, {
       planData: {
         data: plan.data,
-        price: plan.price,
+        price: price,
         validity: plan.validity,
         planCode: plan.data,
         amountMB: plan.data.includes('GB') ? parseInt(plan.data) * 1024 : parseInt(plan.data),
@@ -950,8 +1063,9 @@ function getFallbackPlansForNetwork(network: string): string {
       network: network,
       planId: plan.data,
     });
-    message += `  ${idx}. ${plan.data} - NGN ${plan.price} (${plan.validity})\n`;
+    message += `  ${idx}. ${plan.data} - NGN ${price} (${plan.validity})${retailNote}\n`;
   });
+  
   cachedNetworkPlans.set(cacheKey, planMap);
   cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1`);
   networkPlanCacheTime.set(cacheKey, Date.now());
@@ -959,26 +1073,30 @@ function getFallbackPlansForNetwork(network: string): string {
 }
 
 // ============================================================
-// GET PLAN BY INDEX FOR NETWORK (UNCHANGED)
+// GET PLAN BY INDEX FOR NETWORK (UPDATED)
 // ============================================================
 
-async function getPlanByIndexForNetwork(network: string, indexNumber: number): Promise<{ 
+async function getPlanByIndexForNetwork(
+  network: string, 
+  indexNumber: number,
+  userRole: string = 'END_USER'
+): Promise<{ 
   planData: any, 
   provider: string, 
   network: string, 
   planId: string 
 } | null> {
-  const cacheKey = network.toUpperCase();
+  const cacheKey = `${network.toUpperCase()}_${userRole}`;
   
   if (!cachedNetworkPlans.has(cacheKey) || 
       Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) >= CACHE_TTL) {
-    console.log(`[Data Plans] Cache empty for ${network}, refreshing...`);
-    await getAvailablePlansForNetwork(network);
+    console.log(`[Data Plans] Cache empty for ${network} (${userRole}), refreshing...`);
+    await getAvailablePlansForNetwork(network, undefined, userRole);
   }
   
   const planMap = cachedNetworkPlans.get(cacheKey);
   if (!planMap) {
-    console.log(`[Data Plans] No plan map for ${network}`);
+    console.log(`[Data Plans] No plan map for ${network} (${userRole})`);
     return null;
   }
   
@@ -1031,7 +1149,7 @@ Please fund your wallet and try again.`
 }
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH QUEUE (UNCHANGED)
+// PROCESS DATA PURCHASE WITH QUEUE (UPDATED - passes user role)
 // ============================================================
 
 async function processDataPurchaseWithQueue(
@@ -1044,15 +1162,15 @@ async function processDataPurchaseWithQueue(
   const isIndex = /^\d+$/.test(planQuery);
   
   if (!isIndex) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
     return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
   
   const indexNum = parseInt(planQuery);
-  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum);
+  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum, user.role);
   
   if (!planInfo) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
     return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
   }
 
@@ -1093,6 +1211,8 @@ async function processDataPurchaseWithQueue(
         requiresPin: false,
         planId: planId,
         balanceAtPurchase: balanceCheck.balance,
+        userRole: user.role,
+        priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
       },
     },
   });
@@ -1129,7 +1249,7 @@ You'll receive a confirmation shortly.`;
 }
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH PIN (UNCHANGED)
+// PROCESS DATA PURCHASE WITH PIN (UPDATED - passes user role)
 // ============================================================
 
 async function processDataPurchaseWithPin(
@@ -1141,15 +1261,15 @@ async function processDataPurchaseWithPin(
   const isIndex = /^\d+$/.test(planQuery);
   
   if (!isIndex) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
     return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
   
   const indexNum = parseInt(planQuery);
-  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum);
+  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum, user.role);
   
   if (!planInfo) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber);
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
     return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
   }
 
@@ -1190,6 +1310,8 @@ async function processDataPurchaseWithPin(
         requiresPin: true,
         planId: planId,
         balanceAtPurchase: balanceCheck.balance,
+        userRole: user.role,
+        priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
       },
     },
   });
@@ -2152,7 +2274,14 @@ async function handlePinCommand(user: any, parts: string[]): Promise<string> {
 // HELP MESSAGE (UPDATED with WA and MYWA commands)
 // ============================================================
 
+// ============================================================
+// HELP MESSAGE (UPDATED with ACTIVATE AGENT)
+// ============================================================
+
 function getHelpMessage(user: any): string {
+  const isAgent = (user.role === 'AGENT' || user.role === 'RETAILER');
+  const agentCommands = isAgent ? '' : `ACTIVATE AGENT - Upgrade to Agent for special pricing\n`;
+  
   return `*Bilscore WhatsApp Commands*
 
 💰 *Financial:*
@@ -2166,11 +2295,14 @@ MYWA - Quick view of your WhatsApp PIN status
 WA PIN ON - Require PIN for all WhatsApp purchases
 WA PIN OFF - Disable PIN for all WhatsApp purchases
 
+👤 *Account:*
+${agentCommands}${isAgent ? '🤝 You are an Agent! Enjoy special pricing on data plans.\n' : ''}
+
 📱 *Airtime & Data:*
 AIRTIME [amount] - For YOUR number (no PIN)
 AIRTIME [phone] [amount] - For others (PIN may be required)
 
-DATA - Show available plans for your network
+DATA - Show available plans for your network${isAgent ? ' (Agent Pricing)' : ''}
 DATA [index] - Buy for YOUR number (no PIN)
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy for another number
@@ -2621,6 +2753,12 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
     return await handleWhatsAppSettingsCommand(user, parts);
   }
 
+  if (command === "ACTIVATE AGENT" || command === "ACTIVATE" || command === "BECOME AGENT") {
+  userSessions.delete(user.id);
+  return await handleAgentActivation(user);
+}
+
+
   // ============================================================
   // SPECIAL CASE: Just an index number (e.g., "1", "2", "3") (UNCHANGED)
   // ============================================================
@@ -2633,12 +2771,12 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
       const network = session.network;
       const indexNum = parseInt(command);
       
-      const planInfo = await getPlanByIndexForNetwork(network, indexNum);
-      
-      if (!planInfo) {
-        const plans = await getAvailablePlansForNetwork(network, targetPhone);
-        return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
-      }
+  const planInfo = await getPlanByIndexForNetwork(network, indexNum, user.role);
+
+    if (!planInfo) {
+      const plans = await getAvailablePlansForNetwork(network, targetPhone, user.role);
+      return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
+    }
       
       const planData = planInfo.planData;
       const provider = planInfo.provider;
@@ -2670,7 +2808,7 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
             networkPlan: planData.planCode || planData.data,
             status: TransactionStatus.PROCESSING,
             channel: ChannelType.WHATSAPP,
-            metadata: {
+          metadata: {
               source: "WhatsApp",
               service: "DATA",
               timestamp: new Date().toISOString(),
@@ -2682,6 +2820,8 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
               requiresPin: false,
               planId: planId,
               balanceAtPurchase: balanceCheck.balance,
+              userRole: user.role,
+              priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
             },
           },
         });
@@ -2884,7 +3024,7 @@ Type HELP for available commands.`;
         timestamp: Date.now()
       });
       
-      const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
+     const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
       return `📱 Buy Data for YOUR number (${normalizedUserPhone})
 
 DATA [index] - Buy data
@@ -2918,7 +3058,7 @@ ${plans}`;
           timestamp: Date.now()
         });
         
-        const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone);
+        const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone, user.role);
         return `📱 Buy Data for ${targetPhone}
 
 Just type the index number to buy
@@ -2969,7 +3109,7 @@ ${plans}`;
     
     const normalizedUserPhone = normalizePhoneNumber(user.phone);
     const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-    const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone);
+  const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone, user.role);
     
     return `📱 Buy Data
 
@@ -4521,10 +4661,10 @@ To cancel: CANCEL ${preOrder.id}`;
     }
   }
 
-  // ============================================================
-  // UNKNOWN COMMAND (UNCHANGED)
-  // ============================================================
-  return `Unknown Command
+// ============================================================
+// UNKNOWN COMMAND (UNCHANGED)
+// ============================================================
+return `Unknown Command
 
 I didn't understand that command.
 
@@ -4545,5 +4685,6 @@ TRANSACTIONS - View your history
 REFERRAL - Get your referral link
 PIN - Set up transaction PIN
 WA - View WhatsApp PIN settings
-MYWA - Quick WhatsApp PIN status`;
+MYWA - Quick WhatsApp PIN status
+ACTIVATE AGENT - Become an agent for special pricing`;
 }
