@@ -927,27 +927,32 @@ async function countActivePlansForNetwork(vendorId: string, network: string): Pr
   return await prisma.dataPlan.count({ where });
 }
 
+
 // ============================================================
-// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (UNCHANGED)
+// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (UPDATED)
 // ============================================================
 
-async function getAvailablePlansForNetwork(network: string, phoneNumber?: string): Promise<string> {
+async function getAvailablePlansForNetwork(
+  network: string, 
+  phoneNumber?: string, 
+  userRole: string = 'END_USER'
+): Promise<string> {
   try {
-    const cacheKey = network.toUpperCase();
+    const cacheKey = `${network.toUpperCase()}_${userRole}`;
     
     if (networkPlanCacheTime.get(cacheKey) && 
         Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) < CACHE_TTL && 
         cachedNetworkMessages.has(cacheKey)) {
-      console.log(`[Data Plans] Returning cached WhatsApp plans for ${network}`);
+      console.log(`[Data Plans] Returning cached WhatsApp plans for ${network} (${userRole})`);
       return cachedNetworkMessages.get(cacheKey)!;
     }
     
-    console.log(`[Data Plans] Fetching WhatsApp plans for ${network} from database...`);
+    console.log(`[Data Plans] Fetching WhatsApp plans for ${network} (${userRole}) from database...`);
 
     const vendorService = await getActiveDataVendor();
     if (!vendorService) {
       console.log('[Data Plans] No active vendor found for DATA');
-      return getFallbackPlansForNetwork(network);
+      return getFallbackPlansForNetwork(network, userRole);
     }
 
     console.log(`[Data Plans] Active vendor: ${vendorService.vendor.name} (${vendorService.vendor.code})`);
@@ -969,7 +974,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
     if (dbPlans.length === 0) {
       const totalPlans = await countActivePlansForNetwork(vendorService.vendorId, network);
       console.log(`[Data Plans] Found ${totalPlans} total active plans, 0 are WhatsApp-enabled`);
-      return getFallbackPlansForNetwork(network);
+      return getFallbackPlansForNetwork(network, userRole);
     }
 
     if (dbPlans.length > 0) {
@@ -977,6 +982,7 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
         id: dbPlans[0].id,
         name: dbPlans[0].name,
         ourPrice: dbPlans[0].ourPrice?.toString(),
+        agentPrice: dbPlans[0].agentPrice?.toString(),
         amountMB: dbPlans[0].amountMB,
         validity: dbPlans[0].validity,
         validityUnit: dbPlans[0].validityUnit,
@@ -985,26 +991,27 @@ async function getAvailablePlansForNetwork(network: string, phoneNumber?: string
       }));
     }
 
-    const { planMap, message, count } = processPlansForWhatsApp(dbPlans, network);
-    console.log(`[Data Plans] Added ${count} WhatsApp plans to message using ourPrice`);
+    // ✅ Pass userRole to processPlansForWhatsApp
+    const { planMap, message, count } = processPlansForWhatsApp(dbPlans, network, userRole);
+    console.log(`[Data Plans] Added ${count} WhatsApp plans to message using ${userRole} pricing`);
 
     if (count === 0) {
-      console.log('[Data Plans] No valid WhatsApp plans with ourPrice > 0, using fallback');
-      return getFallbackPlansForNetwork(network);
+      console.log('[Data Plans] No valid WhatsApp plans with price > 0, using fallback');
+      return getFallbackPlansForNetwork(network, userRole);
     }
 
     cachedNetworkPlans.set(cacheKey, planMap);
     cachedNetworkMessages.set(cacheKey, message);
     networkPlanCacheTime.set(cacheKey, Date.now());
     
-    console.log(`[Data Plans] Cached ${planMap.size} WhatsApp plans for ${network}`);
+    console.log(`[Data Plans] Cached ${planMap.size} WhatsApp plans for ${network} (${userRole})`);
     console.log(`[Data Plans] Message preview:`, message.substring(0, 100) + '...');
     
     return message;
     
   } catch (error) {
     console.error('[Data Plans] Error fetching plans:', error);
-    return getFallbackPlansForNetwork(network);
+    return getFallbackPlansForNetwork(network, userRole);
   }
 }
 
