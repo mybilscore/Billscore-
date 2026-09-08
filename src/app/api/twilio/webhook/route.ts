@@ -1444,16 +1444,18 @@ Example: PACKAGES DSTV`;
           const MAX_PACKAGES = 8;
           const displayPackages = packages.slice(0, MAX_PACKAGES);
           
-          // ✅ Build concise message
+          // ✅ Build concise message with INDEX NUMBERS
           let message = `📺 *${providerDisplayName} Packages*\n\n`;
           
-          displayPackages.forEach((pkg: any) => {
+          displayPackages.forEach((pkg: any, index: number) => {
+            const displayIndex = index + 1; // 1-based indexing for users
             // ✅ Clean up name - remove price and duration from name
             const cleanName = pkg.name
               .replace(/\s*-\s*[0-9,]+ Naira\s*-\s*[0-9]+\s*(Month|Week|month|week)s?/g, '')
+              .replace(/\s*-\s*[0-9,]+ Naira\s*-\s*[0-9]+(Month|Week|month|week)?/g, '')
               .trim();
             
-            message += `📦 *${pkg.code}* - ${cleanName}\n`;
+            message += `${displayIndex}. 📦 *${pkg.code}* - ${cleanName}\n`;
             message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
           });
           
@@ -1464,8 +1466,10 @@ Example: PACKAGES DSTV`;
             message += `_💡 Visit app for full list_\n\n`;
           }
           
-          message += `\n_To subscribe: CABLE [index] [code]_\n`;
-          message += `_Example: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_`;
+          // ✅ Show correct command format with index
+          message += `\n_To subscribe: CABLE [decoder_index] [package_number]_\n`;
+          message += `_Example: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_\n\n`;
+          message += `_Or: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_`;
           
           console.log(`[Packages] Response message length: ${message.length}`);
           console.log(`[Packages] Showing ${displayPackages.length} of ${packages.length} packages`);
@@ -1482,28 +1486,28 @@ Example: PACKAGES DSTV`;
     console.error("[Packages] Error fetching from API:", error.message);
   }
 
-  // ⭐ FALLBACK: Use hardcoded packages
+  // ⭐ FALLBACK: Use hardcoded packages with index numbers
   console.log(`[Packages] Using fallback packages for ${provider}`);
   
   const fallbackPackages: Record<string, any[]> = {
     'DSTV': [
-      { code: 'PREMIUM', name: 'Premium', price: 15000 },
+      { code: 'PREMIUM', name: 'Premium Bouquet', price: 15000 },
       { code: 'COMPACT+', name: 'Compact Plus', price: 12000 },
-      { code: 'COMPACT', name: 'Compact', price: 10000 },
-      { code: 'FAMILY', name: 'Family', price: 5000 },
-      { code: 'YANGA', name: 'Yanga', price: 3000 },
+      { code: 'COMPACT', name: 'Compact Bouquet', price: 10000 },
+      { code: 'FAMILY', name: 'Family Bouquet', price: 5000 },
+      { code: 'YANGA', name: 'Yanga Bouquet', price: 3000 },
     ],
     'GOTV': [
-      { code: 'GOTV MAX', name: 'Max', price: 8000 },
-      { code: 'GOTV PLUS', name: 'Plus', price: 5000 },
-      { code: 'GOTV LITE', name: 'Lite', price: 3000 },
+      { code: 'GOTV MAX', name: 'Gotv Max', price: 8000 },
+      { code: 'GOTV PLUS', name: 'Gotv Plus', price: 5000 },
+      { code: 'GOTV LITE', name: 'Gotv Lite', price: 3000 },
     ],
     'STARTIMES': [
-      { code: 'nova', name: 'Nova (Dish)', price: 2100 },
-      { code: 'basic', name: 'Basic (Antenna)', price: 4000 },
-      { code: 'smart', name: 'Basic (Dish)', price: 5100 },
-      { code: 'classic', name: 'Classic (Antenna)', price: 6000 },
-      { code: 'super', name: 'Super (Dish)', price: 9800 },
+      { code: 'nova', name: 'Nova (Dish) - 1 Month', price: 2100 },
+      { code: 'basic', name: 'Basic (Antenna) - 1 Month', price: 4000 },
+      { code: 'smart', name: 'Basic (Dish) - 1 Month', price: 5100 },
+      { code: 'classic', name: 'Classic (Antenna) - 1 Month', price: 6000 },
+      { code: 'super', name: 'Super (Dish) - 1 Month', price: 9800 },
     ],
   };
 
@@ -1511,12 +1515,13 @@ Example: PACKAGES DSTV`;
   
   let message = `📺 *${normalizedProvider} Packages* (Cached)\n\n`;
   
-  providerPackages.forEach((pkg: any) => {
-    message += `📦 *${pkg.code}* - ${pkg.name}\n`;
+  providerPackages.forEach((pkg: any, index: number) => {
+    const displayIndex = index + 1;
+    message += `${displayIndex}. 📦 *${pkg.code}* - ${pkg.name}\n`;
     message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
   });
   
-  message += `\n_To subscribe: CABLE [index] [code]_\n`;
+  message += `\n_To subscribe: CABLE [decoder_index] [package_number]_\n`;
   message += `_Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}_`;
   
   console.log(`[Packages] Fallback response length: ${message.length}`);
