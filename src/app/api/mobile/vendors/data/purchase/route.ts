@@ -1,5 +1,3 @@
-// src/app/api/mobile/vendors/data/purchase/route.ts
-// COMPLETE UPDATED WITH DATA AMOUNT STORAGE
 
 import { NextRequest, NextResponse } from "next/server";
 import { verify } from "jsonwebtoken";

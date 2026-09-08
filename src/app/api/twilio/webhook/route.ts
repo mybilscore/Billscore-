@@ -1366,83 +1366,176 @@ async function getAvailableDiscosForWhatsApp(): Promise<string> {
   return getValidDiscosList();
 }
 
+
+// ============================================================
+// GET AVAILABLE PACKAGES FOR WHATSAPP (FIXED)
+// ============================================================
+
 async function getAvailablePackagesForWhatsApp(provider: string = "DSTV"): Promise<string> {
   try {
+    console.log(`[Packages] Fetching packages for provider: ${provider}`);
+    
+    // ✅ FIX: Normalize provider to uppercase for consistent mapping
+    const normalizedProvider = provider.toUpperCase().trim();
+    
     const serviceMap: Record<string, string> = {
-      'DSTV': 'dstv', 'dstv': 'dstv',
-      'GOTV': 'gotv', 'gotv': 'gotv',
-      'STARTIMES': 'startimes', 'startimes': 'startimes',
+      'DSTV': 'dstv',
+      'GOTV': 'gotv',
+      'STARTIMES': 'startimes',
     };
 
-    const serviceId = serviceMap[provider] || 'dstv';
-    const providerDisplayName = provider.toUpperCase();
+    // ✅ FIX: Check if provider is valid
+    if (!serviceMap[normalizedProvider]) {
+      const validProviders = Object.keys(serviceMap).join(', ');
+      return `❌ Invalid provider: "${provider}"
 
+Available providers:
+   📺 DSTV
+   📺 GOTV
+   📺 STARTIMES
+
+Example: PACKAGES DSTV`;
+    }
+
+    const serviceId = serviceMap[normalizedProvider];
+    const providerDisplayName = normalizedProvider;
+
+    console.log(`[Packages] Service ID: ${serviceId}`);
+
+    // Try to fetch from VTpass API
     const isProduction = process.env.NODE_ENV === "production";
     const baseUrl = isProduction 
       ? "https://vtpass.com/api/service-variations"
       : "https://sandbox.vtpass.com/api/service-variations";
     
+    console.log(`[Packages] Fetching from: ${baseUrl}?serviceID=${serviceId}`);
+
     const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000), // Increased timeout
     });
+
+    console.log(`[Packages] API Response Status: ${response.status}`);
 
     if (response.ok) {
       const data = await response.json();
+      console.log(`[Packages] API Response received`);
+      
+      // ✅ FIX: Check for successful response
       if (data.response_description === "000" && data.content?.variations) {
         const packages = data.content.variations
-          .filter((v: any) => parseFloat(v.variation_amount) > 0)
+          .filter((v: any) => {
+            const price = parseFloat(v.variation_amount);
+            return price > 0 && v.variation_code;
+          })
           .map((v: any) => ({
-            name: v.name || "",
+            name: v.name || v.variation_name || "Package",
             price: parseFloat(v.variation_amount) || 0,
             code: v.variation_code || "",
           }))
           .sort((a: any, b: any) => a.price - b.price);
 
+        console.log(`[Packages] Found ${packages.length} packages from API`);
+
         if (packages.length > 0) {
-          let message = `${providerDisplayName} Packages:\n\n`;
+          let message = `📺 *${providerDisplayName} Packages*\n\n`;
           packages.forEach((pkg: any) => {
-            message += `   ${pkg.code} - ${pkg.name}\n`;
-            message += `   Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+            message += `📦 *${pkg.code}* - ${pkg.name}\n`;
+            message += `   💰 Price: NGN ${pkg.price.toFixed(2)}\n\n`;
           });
-          message += `To subscribe: CABLE [decoder_index] [package_code]\n`;
-          message += `Example: CABLE 1 ${packages[0]?.code || 'PREMIUM'}`;
+          message += `\n_To subscribe: CABLE [decoder_index] [package_code]_\n`;
+          message += `_Example: CABLE 1 ${packages[0]?.code || 'PREMIUM'}_\n\n`;
+          message += `📋 *Your Saved Decoders:*\n`;
+          message += `   Type DECODERS to see your saved decoders`;
           return message;
         }
+      } else {
+        console.log(`[Packages] API returned no packages:`, data);
       }
+    } else {
+      console.log(`[Packages] API returned error: ${response.status}`);
     }
-  } catch (error) {
-    console.error("Error fetching packages:", error);
+  } catch (error: any) {
+    console.error("[Packages] Error fetching from API:", error.message);
   }
 
+  // ⭐ FALLBACK: Use hardcoded packages
+  console.log(`[Packages] Using fallback packages for ${provider}`);
+  
   const fallbackPackages: Record<string, any[]> = {
     'DSTV': [
-      { code: 'PREMIUM', name: 'Premium', price: 15000 },
-      { code: 'COMPACT', name: 'Compact', price: 10000 },
-      { code: 'FAMILY', name: 'Family', price: 5000 },
+      { code: 'PREMIUM', name: 'Premium Bouquet', price: 15000 },
+      { code: 'COMPACT+', name: 'Compact Plus', price: 12000 },
+      { code: 'COMPACT', name: 'Compact Bouquet', price: 10000 },
+      { code: 'FAMILY', name: 'Family Bouquet', price: 5000 },
+      { code: 'YANGA', name: 'Yanga Bouquet', price: 3000 },
     ],
     'GOTV': [
-      { code: 'MAX', name: 'Max', price: 8000 },
-      { code: 'PLUS', name: 'Plus', price: 5000 },
-      { code: 'LITE', name: 'Lite', price: 3000 },
+      { code: 'GOTV MAX', name: 'Gotv Max', price: 8000 },
+      { code: 'GOTV PLUS', name: 'Gotv Plus', price: 5000 },
+      { code: 'GOTV LITE', name: 'Gotv Lite', price: 3000 },
     ],
     'STARTIMES': [
-      { code: 'BASIC', name: 'Basic', price: 2500 },
-      { code: 'STANDARD', name: 'Standard', price: 4500 },
       { code: 'PREMIUM', name: 'Premium', price: 7000 },
+      { code: 'STANDARD', name: 'Standard', price: 4500 },
+      { code: 'BASIC', name: 'Basic', price: 2500 },
     ],
   };
 
-  const providerPackages = fallbackPackages[provider.toUpperCase()] || fallbackPackages['DSTV'];
-  let message = `${provider.toUpperCase()} Packages (Fallback):\n\n`;
+  const providerPackages = fallbackPackages[normalizedProvider] || fallbackPackages['DSTV'];
+  
+  let message = `📺 *${normalizedProvider} Packages* (Fallback)\n\n`;
+  message += `_Note: Using cached package list_\n\n`;
+  
   providerPackages.forEach((pkg: any) => {
-    message += `   ${pkg.code} - ${pkg.name}\n`;
-    message += `   Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+    message += `📦 *${pkg.code}* - ${pkg.name}\n`;
+    message += `   💰 Price: NGN ${pkg.price.toFixed(2)}\n\n`;
   });
-  message += `To subscribe: CABLE [decoder_index] [package_code]\n`;
-  message += `Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}`;
+  
+  message += `\n_To subscribe: CABLE [decoder_index] [package_code]_\n`;
+  message += `_Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}_\n\n`;
+  message += `📋 *Your Saved Decoders:*\n`;
+  message += `   Type DECODERS to see your saved decoders`;
+  
   return message;
 }
+
+
+// ============================================================
+// PACKAGES COMMAND HANDLER (UPDATED)
+// ============================================================
+
+// ============================================================
+// PACKAGES COMMAND HANDLER (FIXED)
+// ============================================================
+
+// if (command === "PACKAGES" || command === "PACKAGE" || command.startsWith("PACKAGES") || command.startsWith("PACKAGE")) {
+//   userSessions.delete(user.id);
+  
+//   const packageParts = body.split(" ").filter(p => p.length > 0);
+//   let provider = "DSTV";
+  
+//   if (packageParts.length > 1) {
+//     const inputProvider = packageParts[1].toUpperCase();
+//     // Validate provider
+//     const validProviders = ["DSTV", "GOTV", "STARTIMES"];
+//     if (validProviders.includes(inputProvider)) {
+//       provider = inputProvider;
+//     } else {
+//       return `❌ Invalid provider: "${packageParts[1]}"
+
+// Available providers:
+//    📺 DSTV
+//    📺 GOTV
+//    📺 STARTIMES
+
+// Example: PACKAGES DSTV`;
+//     }
+//   }
+  
+//   const packagesList = await getAvailablePackagesForWhatsApp(provider);
+//   return packagesList;
+// }
 
 async function getAvailableEducationProducts(): Promise<string> {
   return `   WAEC - WAEC Registration
@@ -2723,8 +2816,9 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
   }
 }
 
+
 // ============================================================
-// MAIN COMMAND PROCESSOR (UPDATED with WA and MYWA commands)
+// MAIN COMMAND PROCESSOR (COMPLETE UPDATED VERSION)
 // ============================================================
 
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
@@ -2759,14 +2853,16 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
     return await handleWhatsAppSettingsCommand(user, parts);
   }
 
+  // ============================================================
+  // ACTIVATE AGENT
+  // ============================================================
   if (command === "ACTIVATE AGENT" || command === "ACTIVATE" || command === "BECOME AGENT") {
-  userSessions.delete(user.id);
-  return await handleAgentActivation(user);
-}
-
+    userSessions.delete(user.id);
+    return await handleAgentActivation(user);
+  }
 
   // ============================================================
-  // SPECIAL CASE: Just an index number (e.g., "1", "2", "3") (UNCHANGED)
+  // SPECIAL CASE: Just an index number (e.g., "1", "2", "3")
   // ============================================================
   if (/^\d+$/.test(command) && !command.startsWith("0")) {
     const session = userSessions.get(user.id);
@@ -2777,12 +2873,12 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
       const network = session.network;
       const indexNum = parseInt(command);
       
-  const planInfo = await getPlanByIndexForNetwork(network, indexNum, user.role);
+      const planInfo = await getPlanByIndexForNetwork(network, indexNum, user.role);
 
-    if (!planInfo) {
-      const plans = await getAvailablePlansForNetwork(network, targetPhone, user.role);
-      return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
-    }
+      if (!planInfo) {
+        const plans = await getAvailablePlansForNetwork(network, targetPhone, user.role);
+        return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
+      }
       
       const planData = planInfo.planData;
       const provider = planInfo.provider;
@@ -2814,7 +2910,7 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
             networkPlan: planData.planCode || planData.data,
             status: TransactionStatus.PROCESSING,
             channel: ChannelType.WHATSAPP,
-          metadata: {
+            metadata: {
               source: "WhatsApp",
               service: "DATA",
               timestamp: new Date().toISOString(),
@@ -2954,7 +3050,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // HELP (UNCHANGED)
+  // HELP
   // ============================================================
   if (command === "HELP" || command === "?") {
     userSessions.delete(user.id);
@@ -2962,7 +3058,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // REGISTER (UNCHANGED)
+  // REGISTER
   // ============================================================
   if (command.startsWith("REG") || command === "REGISTER" || command === "SIGNUP" || command === "JOIN") {
     userSessions.delete(user.id);
@@ -2970,7 +3066,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // BALANCE (UNCHANGED)
+  // BALANCE
   // ============================================================
   if (command === "BALANCE" || command === "BAL" || command === "WALLET") {
     userSessions.delete(user.id);
@@ -2998,7 +3094,7 @@ Type HELP for available commands.`;
   }
 
   // ============================================================
-  // DATA ALL (UNCHANGED)
+  // DATA ALL
   // ============================================================
   if (command === "DATA ALL") {
     userSessions.delete(user.id);
@@ -3007,7 +3103,7 @@ Type HELP for available commands.`;
   }
 
   // ============================================================
-  // DATA COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
+  // DATA COMMAND
   // ============================================================
   if (command.startsWith("DATA") || command.startsWith("DATA ")) {
     let targetPhone: string;
@@ -3030,7 +3126,7 @@ Type HELP for available commands.`;
         timestamp: Date.now()
       });
       
-     const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
+      const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
       return `📱 Buy Data for YOUR number (${normalizedUserPhone})
 
 DATA [index] - Buy data
@@ -3115,7 +3211,7 @@ ${plans}`;
     
     const normalizedUserPhone = normalizePhoneNumber(user.phone);
     const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-  const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone, user.role);
+    const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone, user.role);
     
     return `📱 Buy Data
 
@@ -3128,7 +3224,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // QR COMMAND (UNCHANGED)
+  // QR COMMAND
   // ============================================================
   if (command === "QR" || command.startsWith("QR ")) {
     userSessions.delete(user.id);
@@ -3229,7 +3325,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // METER MANAGEMENT (UNCHANGED)
+  // METER MANAGEMENT
   // ============================================================
   
   if (command.startsWith("ADDMETER") || command.startsWith("ADD METER")) {
@@ -3271,7 +3367,7 @@ ${plans}`;
   }
 
   // ============================================================
-  // DECODER MANAGEMENT (UNCHANGED)
+  // DECODER MANAGEMENT
   // ============================================================
 
   if (command.startsWith("ADDDECODER") || command.startsWith("ADD DECODER")) {
@@ -3320,7 +3416,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // DISCOS (UNCHANGED)
+  // DISCOS
   // ============================================================
   if (command === "DISCOS" || command === "DISCO" || command === "DISCOS?") {
     userSessions.delete(user.id);
@@ -3329,18 +3425,38 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // PACKAGES (UNCHANGED)
+  // PACKAGES (FIXED - MUST COME BEFORE CABLE)
   // ============================================================
-  if (command.startsWith("PACKAGES") || command === "PACKAGE") {
+  if (command.startsWith("PACKAGES") || command.startsWith("PACKAGE")) {
     userSessions.delete(user.id);
+    
     const packageParts = body.split(" ").filter(p => p.length > 0);
-    const provider = packageParts.length > 1 ? packageParts[1] : "DSTV";
+    let provider = "DSTV";
+    
+    if (packageParts.length > 1) {
+      const inputProvider = packageParts[1].toUpperCase();
+      // Validate provider
+      const validProviders = ["DSTV", "GOTV", "STARTIMES"];
+      if (validProviders.includes(inputProvider)) {
+        provider = inputProvider;
+      } else {
+        return `❌ Invalid provider: "${packageParts[1]}"
+
+Available providers:
+   📺 DSTV
+   📺 GOTV
+   📺 STARTIMES
+
+Example: PACKAGES DSTV`;
+      }
+    }
+    
     const packagesList = await getAvailablePackagesForWhatsApp(provider);
     return packagesList;
   }
 
   // ============================================================
-  // SUBSCRIPTIONS (UNCHANGED)
+  // SUBSCRIPTIONS
   // ============================================================
   if (command.startsWith("SCHEDULE") || command.startsWith("SUBSCRIBE")) {
     userSessions.delete(user.id);
@@ -3403,7 +3519,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // EDUCATION (UNCHANGED - uses updated processEducationPurchaseWhatsApp)
+  // EDUCATION
   // ============================================================
   if (command.startsWith("EDU") || command === "EDUCATION" || 
       command.startsWith("WAEC") || command.startsWith("JAMB") || 
@@ -3440,7 +3556,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // TRANSACTIONS (UNCHANGED)
+  // TRANSACTIONS
   // ============================================================
   if (command === "TRANSACTIONS" || command === "TXNS" || command === "HISTORY") {
     userSessions.delete(user.id);
@@ -3448,7 +3564,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // REFERRAL (UNCHANGED)
+  // REFERRAL
   // ============================================================
   if (command === "REFERRAL" || command === "REF") {
     userSessions.delete(user.id);
@@ -3462,7 +3578,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // PIN (UNCHANGED)
+  // PIN
   // ============================================================
   if (command === "PIN" || command.startsWith("PIN ")) {
     userSessions.delete(user.id);
@@ -3470,7 +3586,7 @@ Available providers: DSTV, GOTV, STARTIMES`;
   }
 
   // ============================================================
-  // AIRTIME COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
+  // AIRTIME COMMAND
   // ============================================================
   if (command.startsWith("AIRTIME") || command.startsWith("AIRTIME ")) {
     userSessions.delete(user.id);
@@ -3738,7 +3854,7 @@ You'll receive a confirmation via WhatsApp after completion.`;
   }
 
   // ============================================================
-  // CABLE COMMAND (UNCHANGED - already uses isWhatsAppPinRequired)
+  // CABLE COMMAND (AFTER PACKAGES)
   // ============================================================
   if (command.startsWith("CABLE") || command.startsWith("TV")) {
     userSessions.delete(user.id);
@@ -3884,295 +4000,110 @@ You'll receive a confirmation via WhatsApp after completion.`;
     }
   }
 
-// ============================================================
-// ELECTRICITY COMMAND (UPDATED - Saved meters NEVER require PIN)
-// ============================================================
-if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
-    command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
-  userSessions.delete(user.id);
-  
-  if (parts.length === 1) {
-    const meters = await prisma.savedMeter.findMany({
-      where: { userId: user.id },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-    });
-
-    if (meters.length === 0) {
-      const discosList = await getAvailableDiscosForWhatsApp();
-      return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]\n\nAvailable DisCos:\n${discosList}`;
-    }
-
-    let message = "Your Saved Meters:\n\n";
-    meters.forEach((meter: any, index: number) => {
-      const defaultTag = meter.isDefault ? " (Default)" : "";
-      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-      message += `   ${meter.disco}\n`;
-      message += `   ${meter.meterNumber}\n`;
-      if (meter.customerName) {
-        message += `   Customer: ${meter.customerName}\n`;
-      }
-      if (meter.customerAddress) {
-        message += `   Address: ${meter.customerAddress}\n`;
-      }
-      message += `\n`;
-    });
-
-    message += `To buy for saved meter: POWER [index] [amount]\n`;
-    message += `Example: POWER 1 5000\n\n`;
-    message += `To buy for any meter: POWER [meter_number] [disco] [amount]\n`;
-    message += `Example: POWER 1234567890 ABUJA 5000\n\n`;
-    message += `To add more meters: ADDMETER [meter] [disco] [name]`;
-
-    return message;
-  }
-
-  // CASE 1: ELECTRIC [amount] - Buy using default/saved meter
-  if (parts.length === 2) {
-    const amountStr = parts[1];
-    const amount = parseFloat(amountStr);
+  // ============================================================
+  // ELECTRICITY COMMAND (UPDATED - Saved meters NEVER require PIN)
+  // ============================================================
+  if (command.startsWith("ELECTRIC") || command.startsWith("ELEC") || 
+      command.startsWith("POWER") || command.startsWith("ELECTRICITY")) {
+    userSessions.delete(user.id);
     
-    if (isNaN(amount) || amount < 100) {
-      return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 5000`;
-    }
-    
-    const balanceCheck = await checkUserBalance(user.id, amount);
-    if (!balanceCheck.success) {
-      return balanceCheck.message!;
-    }
-    
-    const meters = await prisma.savedMeter.findMany({
-      where: { userId: user.id },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-    });
-    
-    if (meters.length === 0) {
-      return `No Saved Meters\n\nYou don't have any saved meters.\n\nTo buy for any meter:\nELECTRIC [meter_number] [disco] [amount]\n\nExample: ELECTRIC 1234567890 ABUJA 5000\n\nTo add a meter: ADDMETER [meter_number] [disco] [name]`;
-    }
-    
-    let selectedMeter = meters.find(m => m.isDefault) || meters[0];
-    
-    if (meters.length > 1 && !meters.find(m => m.isDefault)) {
-      let message = "Multiple Meters Found\n\nPlease select one:\n\n";
-      meters.forEach((meter: any, index: number) => {
-        message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
-        message += `   ${meter.disco}\n\n`;
+    if (parts.length === 1) {
+      const meters = await prisma.savedMeter.findMany({
+        where: { userId: user.id },
+        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
       });
-      message += `Reply with: ELECTRIC [index] [amount]\n`;
-      message += `Example: ELECTRIC 1 5000`;
+
+      if (meters.length === 0) {
+        const discosList = await getAvailableDiscosForWhatsApp();
+        return `No saved meters.\n\nAdd one with:\nADDMETER [meter_number] [disco] [name]\n\nAvailable DisCos:\n${discosList}`;
+      }
+
+      let message = "Your Saved Meters:\n\n";
+      meters.forEach((meter: any, index: number) => {
+        const defaultTag = meter.isDefault ? " (Default)" : "";
+        message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+        message += `   ${meter.disco}\n`;
+        message += `   ${meter.meterNumber}\n`;
+        if (meter.customerName) {
+          message += `   Customer: ${meter.customerName}\n`;
+        }
+        if (meter.customerAddress) {
+          message += `   Address: ${meter.customerAddress}\n`;
+        }
+        message += `\n`;
+      });
+
+      message += `To buy for saved meter: POWER [index] [amount]\n`;
+      message += `Example: POWER 1 5000\n\n`;
+      message += `To buy for any meter: POWER [meter_number] [disco] [amount]\n`;
+      message += `Example: POWER 1234567890 ABUJA 5000\n\n`;
+      message += `To add more meters: ADDMETER [meter] [disco] [name]`;
+
       return message;
     }
 
-    // ✅ SAVED METER - NEVER require PIN, regardless of settings
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.ELECTRICITY_INSTANT,
-        product: selectedMeter.disco,
-        amount: amount,
-        totalDebited: 0,
-        meterNumber: selectedMeter.meterNumber,
-        meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-        status: TransactionStatus.PROCESSING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "ELECTRICITY",
-          timestamp: new Date().toISOString(),
-          discoCode: selectedMeter.disco,
-          meterType: selectedMeter.meterType || "Prepaid",
-          customerName: selectedMeter.customerName,
-          customerAddress: selectedMeter.customerAddress,
-          customerPhone: selectedMeter.customerPhone,
-          customerEmail: selectedMeter.customerEmail,
-          meterStatus: selectedMeter.meterStatus,
-          queued: true,
-          skipVerification: true,
-          requiresPin: false, // ✅ SAVED METER - ALWAYS false
-          isSavedMeter: true,
-          balanceAtPurchase: balanceCheck.balance,
-        },
-      },
-    });
+    // CASE 1: ELECTRIC [amount] - Buy using default/saved meter
+    if (parts.length === 2) {
+      const amountStr = parts[1];
+      const amount = parseFloat(amountStr);
+      
+      if (isNaN(amount) || amount < 100) {
+        return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 5000`;
+      }
+      
+      const balanceCheck = await checkUserBalance(user.id, amount);
+      if (!balanceCheck.success) {
+        return balanceCheck.message!;
+      }
+      
+      const meters = await prisma.savedMeter.findMany({
+        where: { userId: user.id },
+        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      });
+      
+      if (meters.length === 0) {
+        return `No Saved Meters\n\nYou don't have any saved meters.\n\nTo buy for any meter:\nELECTRIC [meter_number] [disco] [amount]\n\nExample: ELECTRIC 1234567890 ABUJA 5000\n\nTo add a meter: ADDMETER [meter_number] [disco] [name]`;
+      }
+      
+      let selectedMeter = meters.find(m => m.isDefault) || meters[0];
+      
+      if (meters.length > 1 && !meters.find(m => m.isDefault)) {
+        let message = "Multiple Meters Found\n\nPlease select one:\n\n";
+        meters.forEach((meter: any, index: number) => {
+          message += `${index + 1}. ${meter.name || meter.meterNumber}\n`;
+          message += `   ${meter.disco}\n\n`;
+        });
+        message += `Reply with: ELECTRIC [index] [amount]\n`;
+        message += `Example: ELECTRIC 1 5000`;
+        return message;
+      }
 
-    await createJob(
-      JobType.VTU_TRANSACTION,
-      {
-        transactionId: transaction.id,
-        userId: user.id,
-        meterNumber: selectedMeter.meterNumber,
-        amount: amount,
-        discoCode: selectedMeter.disco,
-        meterType: selectedMeter.meterType || "Prepaid",
-        phone: user.phone,
-        customerName: selectedMeter.customerName,
-        customerAddress: selectedMeter.customerAddress,
-        customerPhone: selectedMeter.customerPhone,
-        customerEmail: selectedMeter.customerEmail,
-        meterStatus: selectedMeter.meterStatus,
-        serviceType: "ELECTRICITY",
-        skipVerification: true,
-      },
-      5,
-      3,
-      new Date()
-    );
-
-    return `Processing your electricity purchase...
-
-Meter: ${selectedMeter.meterNumber}
-DisCo: ${selectedMeter.disco}
-Amount: NGN ${amount.toFixed(2)}
-${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
-Reference: ${transaction.id.substring(0, 10)}
-
-You'll receive a confirmation shortly.`;
-  }
-
-  // CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index
-  if (parts.length === 3) {
-    const [, indexStr, amountStr] = parts;
-    const index = parseInt(indexStr) - 1;
-    const amount = parseFloat(amountStr);
-    
-    if (isNaN(index) || index < 0) {
-      return `Invalid Selection\n\nPlease choose a number from the list.\nExample: ELECTRIC 1 5000`;
-    }
-    
-    if (isNaN(amount) || amount < 100) {
-      return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 1 5000`;
-    }
-    
-    const balanceCheck = await checkUserBalance(user.id, amount);
-    if (!balanceCheck.success) {
-      return balanceCheck.message!;
-    }
-    
-    const meters = await prisma.savedMeter.findMany({
-      where: { userId: user.id },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-    });
-    
-    if (index >= meters.length) {
-      return `Invalid Selection\n\nPlease choose a number from the list.`;
-    }
-    
-    const selectedMeter = meters[index];
-
-    // ✅ SAVED METER - NEVER require PIN, regardless of settings
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.ELECTRICITY_INSTANT,
-        product: selectedMeter.disco,
-        amount: amount,
-        totalDebited: 0,
-        meterNumber: selectedMeter.meterNumber,
-        meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
-        status: TransactionStatus.PROCESSING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "ELECTRICITY",
-          timestamp: new Date().toISOString(),
-          discoCode: selectedMeter.disco,
-          meterType: selectedMeter.meterType || "Prepaid",
-          customerName: selectedMeter.customerName,
-          customerAddress: selectedMeter.customerAddress,
-          customerPhone: selectedMeter.customerPhone,
-          customerEmail: selectedMeter.customerEmail,
-          meterStatus: selectedMeter.meterStatus,
-          queued: true,
-          skipVerification: true,
-          requiresPin: false, // ✅ SAVED METER - ALWAYS false
-          isSavedMeter: true,
-          balanceAtPurchase: balanceCheck.balance,
-        },
-      },
-    });
-
-    await createJob(
-      JobType.VTU_TRANSACTION,
-      {
-        transactionId: transaction.id,
-        userId: user.id,
-        meterNumber: selectedMeter.meterNumber,
-        amount: amount,
-        discoCode: selectedMeter.disco,
-        meterType: selectedMeter.meterType || "Prepaid",
-        phone: user.phone,
-        customerName: selectedMeter.customerName,
-        customerAddress: selectedMeter.customerAddress,
-        customerPhone: selectedMeter.customerPhone,
-        customerEmail: selectedMeter.customerEmail,
-        meterStatus: selectedMeter.meterStatus,
-        serviceType: "ELECTRICITY",
-        skipVerification: true,
-      },
-      5,
-      3,
-      new Date()
-    );
-
-    return `Processing your electricity purchase...
-
-Meter: ${selectedMeter.meterNumber}
-DisCo: ${selectedMeter.disco}
-Amount: NGN ${amount.toFixed(2)}
-${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
-Reference: ${transaction.id.substring(0, 10)}
-
-You'll receive a confirmation shortly.`;
-  }
-
-  // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter (subject to PIN setting)
-  if (parts.length >= 4) {
-    const [, meterNumber, discoInput, amountStr] = parts;
-    const amount = parseFloat(amountStr);
-    
-    if (isNaN(amount) || amount < 100) {
-      return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 1234567890 ABUJA 5000`;
-    }
-    
-    const balanceCheck = await checkUserBalance(user.id, amount);
-    if (!balanceCheck.success) {
-      return balanceCheck.message!;
-    }
-    
-    // Check if meter is already saved
-    const existingMeter = await prisma.savedMeter.findFirst({
-      where: { 
-        userId: user.id, 
-        meterNumber: meterNumber 
-      },
-    });
-    
-    // ✅ If meter is already saved, NEVER require PIN
-    if (existingMeter) {
+      // ✅ SAVED METER - NEVER require PIN, regardless of settings
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
           transactionType: VtuType.ELECTRICITY_INSTANT,
-          product: existingMeter.disco,
+          product: selectedMeter.disco,
           amount: amount,
           totalDebited: 0,
-          meterNumber: existingMeter.meterNumber,
-          meterType: existingMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+          meterNumber: selectedMeter.meterNumber,
+          meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
           status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
             service: "ELECTRICITY",
             timestamp: new Date().toISOString(),
-            discoCode: existingMeter.disco,
-            meterType: existingMeter.meterType || "Prepaid",
-            customerName: existingMeter.customerName,
-            customerAddress: existingMeter.customerAddress,
-            customerPhone: existingMeter.customerPhone,
-            customerEmail: existingMeter.customerEmail,
-            meterStatus: existingMeter.meterStatus,
+            discoCode: selectedMeter.disco,
+            meterType: selectedMeter.meterType || "Prepaid",
+            customerName: selectedMeter.customerName,
+            customerAddress: selectedMeter.customerAddress,
+            customerPhone: selectedMeter.customerPhone,
+            customerEmail: selectedMeter.customerEmail,
+            meterStatus: selectedMeter.meterStatus,
             queued: true,
             skipVerification: true,
-            requiresPin: false, // ✅ SAVED METER - ALWAYS false
+            requiresPin: false,
             isSavedMeter: true,
             balanceAtPurchase: balanceCheck.balance,
           },
@@ -4184,16 +4115,16 @@ You'll receive a confirmation shortly.`;
         {
           transactionId: transaction.id,
           userId: user.id,
-          meterNumber: existingMeter.meterNumber,
+          meterNumber: selectedMeter.meterNumber,
           amount: amount,
-          discoCode: existingMeter.disco,
-          meterType: existingMeter.meterType || "Prepaid",
+          discoCode: selectedMeter.disco,
+          meterType: selectedMeter.meterType || "Prepaid",
           phone: user.phone,
-          customerName: existingMeter.customerName,
-          customerAddress: existingMeter.customerAddress,
-          customerPhone: existingMeter.customerPhone,
-          customerEmail: existingMeter.customerEmail,
-          meterStatus: existingMeter.meterStatus,
+          customerName: selectedMeter.customerName,
+          customerAddress: selectedMeter.customerAddress,
+          customerPhone: selectedMeter.customerPhone,
+          customerEmail: selectedMeter.customerEmail,
+          meterStatus: selectedMeter.meterStatus,
           serviceType: "ELECTRICITY",
           skipVerification: true,
         },
@@ -4204,77 +4135,72 @@ You'll receive a confirmation shortly.`;
 
       return `Processing your electricity purchase...
 
-Meter: ${existingMeter.meterNumber}
-DisCo: ${existingMeter.disco}
+Meter: ${selectedMeter.meterNumber}
+DisCo: ${selectedMeter.disco}
 Amount: NGN ${amount.toFixed(2)}
-${existingMeter.customerName ? `Customer: ${existingMeter.customerName}` : ''}
+${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
     }
-    
-    // ✅ NEW METER - Check WhatsApp PIN setting
-    const discoInfo = normalizeDisco(discoInput);
-    if (!discoInfo) {
-      const discosList = getValidDiscosList();
-      return `Invalid DisCo: "${discoInput}"\n\nAvailable DisCos (use full name or acronym):\n${discosList}\n\nExamples:\nELECTRIC 1234567890 ABUJA 5000\nELECTRIC 1234567890 AEDC 5000\nELECTRIC 1234567890 IKEDC 5000`;
-    }
-    
-    const discoUpper = discoInfo.code;
-    const serviceID = discoInfo.serviceID;
-    
-    const verificationResult = await verifyMeterWithVTpass(
-      serviceID,
-      meterNumber,
-      "prepaid"
-    );
-    
-    let customerName = "Unknown";
-    if (verificationResult.success) {
-      customerName = verificationResult.data?.customerName || "Unknown";
-    } else {
-      return `Could Not Verify Meter\n\n${verificationResult.error || "Unknown error"}\n\nYou can still proceed with the purchase.\n\nTo continue: ELECTRIC ${meterNumber} ${discoInput} ${amount}\nTo cancel: Type HELP for other options.`;
-    }
-    
-    // ✅ Check WhatsApp PIN setting for NEW meters
-    const pinRequired = await isWhatsAppPinRequired(user.id, false);
 
-    if (!pinRequired) {
-      // ✅ PIN NOT REQUIRED - Save meter and process immediately
-      await saveMeterWithCustomerInfo(
-        user.id,
-        meterNumber,
-        discoUpper,
-        "Prepaid",
-        customerName,
-        verificationResult.data?.customerAddress || null,
-        verificationResult.data?.customerPhone || null,
-        verificationResult.data?.customerEmail || null,
-        verificationResult.data?.status || null
-      );
+    // CASE 2: ELECTRIC [index] [amount] - Buy using saved meter by index
+    if (parts.length === 3) {
+      const [, indexStr, amountStr] = parts;
+      const index = parseInt(indexStr) - 1;
+      const amount = parseFloat(amountStr);
       
+      if (isNaN(index) || index < 0) {
+        return `Invalid Selection\n\nPlease choose a number from the list.\nExample: ELECTRIC 1 5000`;
+      }
+      
+      if (isNaN(amount) || amount < 100) {
+        return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 1 5000`;
+      }
+      
+      const balanceCheck = await checkUserBalance(user.id, amount);
+      if (!balanceCheck.success) {
+        return balanceCheck.message!;
+      }
+      
+      const meters = await prisma.savedMeter.findMany({
+        where: { userId: user.id },
+        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      });
+      
+      if (index >= meters.length) {
+        return `Invalid Selection\n\nPlease choose a number from the list.`;
+      }
+      
+      const selectedMeter = meters[index];
+
+      // ✅ SAVED METER - NEVER require PIN, regardless of settings
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
           transactionType: VtuType.ELECTRICITY_INSTANT,
-          product: discoUpper,
+          product: selectedMeter.disco,
           amount: amount,
           totalDebited: 0,
-          meterNumber: meterNumber,
-          meterType: MeterType.HOME,
+          meterNumber: selectedMeter.meterNumber,
+          meterType: selectedMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
           status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
             service: "ELECTRICITY",
             timestamp: new Date().toISOString(),
-            discoCode: discoUpper,
-            meterType: "Prepaid",
-            customerName: customerName,
+            discoCode: selectedMeter.disco,
+            meterType: selectedMeter.meterType || "Prepaid",
+            customerName: selectedMeter.customerName,
+            customerAddress: selectedMeter.customerAddress,
+            customerPhone: selectedMeter.customerPhone,
+            customerEmail: selectedMeter.customerEmail,
+            meterStatus: selectedMeter.meterStatus,
             queued: true,
-            skipVerification: false,
-            requiresPin: false, // ✅ PIN not required (setting is OFF)
-            isSavedMeter: false, // ✅ New meter
+            skipVerification: true,
+            requiresPin: false,
+            isSavedMeter: true,
             balanceAtPurchase: balanceCheck.balance,
           },
         },
@@ -4285,14 +4211,18 @@ You'll receive a confirmation shortly.`;
         {
           transactionId: transaction.id,
           userId: user.id,
-          meterNumber: meterNumber,
+          meterNumber: selectedMeter.meterNumber,
           amount: amount,
-          discoCode: discoUpper,
-          meterType: "Prepaid",
+          discoCode: selectedMeter.disco,
+          meterType: selectedMeter.meterType || "Prepaid",
           phone: user.phone,
-          customerName: customerName,
+          customerName: selectedMeter.customerName,
+          customerAddress: selectedMeter.customerAddress,
+          customerPhone: selectedMeter.customerPhone,
+          customerEmail: selectedMeter.customerEmail,
+          meterStatus: selectedMeter.meterStatus,
           serviceType: "ELECTRICITY",
-          skipVerification: false,
+          skipVerification: true,
         },
         5,
         3,
@@ -4301,66 +4231,288 @@ You'll receive a confirmation shortly.`;
 
       return `Processing your electricity purchase...
 
-Meter: ${meterNumber}
-DisCo: ${discoUpper} (${discoInfo.fullName})
+Meter: ${selectedMeter.meterNumber}
+DisCo: ${selectedMeter.disco}
 Amount: NGN ${amount.toFixed(2)}
-Customer: ${customerName}
+${selectedMeter.customerName ? `Customer: ${selectedMeter.customerName}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
     }
 
-    // ✅ PIN REQUIRED - Only for NEW meters when PIN is ON
-    const transaction = await prisma.vtuTransaction.create({
-      data: {
-        userId: user.id,
-        transactionType: VtuType.ELECTRICITY_INSTANT,
-        product: discoUpper,
-        amount: amount,
-        totalDebited: 0,
-        meterNumber: meterNumber,
-        meterType: MeterType.HOME,
-        status: TransactionStatus.PENDING,
-        channel: ChannelType.WHATSAPP,
-        metadata: {
-          source: "WhatsApp",
-          service: "ELECTRICITY",
-          timestamp: new Date().toISOString(),
-          discoCode: discoUpper,
-          meterType: "Prepaid",
-          customerName: customerName,
-          queued: false,
-          skipVerification: false,
-          requiresPin: true, // ✅ PIN required for new meter (setting is ON)
-          isSavedMeter: false, // ✅ New meter
-          balanceAtPurchase: balanceCheck.balance,
+    // CASE 3: ELECTRIC [meter_number] [disco] [amount] - NEW meter
+    if (parts.length >= 4) {
+      const [, meterNumber, discoInput, amountStr] = parts;
+      const amount = parseFloat(amountStr);
+      
+      if (isNaN(amount) || amount < 100) {
+        return `Invalid Amount\n\nMinimum is NGN 100.\nExample: ELECTRIC 1234567890 ABUJA 5000`;
+      }
+      
+      const balanceCheck = await checkUserBalance(user.id, amount);
+      if (!balanceCheck.success) {
+        return balanceCheck.message!;
+      }
+      
+      // Check if meter is already saved
+      const existingMeter = await prisma.savedMeter.findFirst({
+        where: { 
+          userId: user.id, 
+          meterNumber: meterNumber 
         },
-      },
-    });
+      });
+      
+      // ✅ If meter is already saved, NEVER require PIN
+      if (existingMeter) {
+        const transaction = await prisma.vtuTransaction.create({
+          data: {
+            userId: user.id,
+            transactionType: VtuType.ELECTRICITY_INSTANT,
+            product: existingMeter.disco,
+            amount: amount,
+            totalDebited: 0,
+            meterNumber: existingMeter.meterNumber,
+            meterType: existingMeter.meterType?.toLowerCase() === 'prepaid' ? MeterType.HOME : MeterType.OFFICE,
+            status: TransactionStatus.PROCESSING,
+            channel: ChannelType.WHATSAPP,
+            metadata: {
+              source: "WhatsApp",
+              service: "ELECTRICITY",
+              timestamp: new Date().toISOString(),
+              discoCode: existingMeter.disco,
+              meterType: existingMeter.meterType || "Prepaid",
+              customerName: existingMeter.customerName,
+              customerAddress: existingMeter.customerAddress,
+              customerPhone: existingMeter.customerPhone,
+              customerEmail: existingMeter.customerEmail,
+              meterStatus: existingMeter.meterStatus,
+              queued: true,
+              skipVerification: true,
+              requiresPin: false,
+              isSavedMeter: true,
+              balanceAtPurchase: balanceCheck.balance,
+            },
+          },
+        });
 
-    const validationToken = generateValidationToken();
-    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+        await createJob(
+          JobType.VTU_TRANSACTION,
+          {
+            transactionId: transaction.id,
+            userId: user.id,
+            meterNumber: existingMeter.meterNumber,
+            amount: amount,
+            discoCode: existingMeter.disco,
+            meterType: existingMeter.meterType || "Prepaid",
+            phone: user.phone,
+            customerName: existingMeter.customerName,
+            customerAddress: existingMeter.customerAddress,
+            customerPhone: existingMeter.customerPhone,
+            customerEmail: existingMeter.customerEmail,
+            meterStatus: existingMeter.meterStatus,
+            serviceType: "ELECTRICITY",
+            skipVerification: true,
+          },
+          5,
+          3,
+          new Date()
+        );
 
-    await prisma.vtuTransaction.update({
-      where: { id: transaction.id },
-      data: {
-        metadata: {
-          ...transaction.metadata,
-          validationToken: validationToken,
-          validationExpiry: validationExpiry,
-        },
-      },
-    });
+        return `Processing your electricity purchase...
 
-    const appUrl = getAppUrl();
-    const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+Meter: ${existingMeter.meterNumber}
+DisCo: ${existingMeter.disco}
+Amount: NGN ${amount.toFixed(2)}
+${existingMeter.customerName ? `Customer: ${existingMeter.customerName}` : ''}
+Reference: ${transaction.id.substring(0, 10)}
 
-    return `⚡ Electricity Purchase Initiated!
+You'll receive a confirmation shortly.`;
+      }
+      
+      // ✅ NEW METER - Check WhatsApp PIN setting
+      const discoInfo = normalizeDisco(discoInput);
+      if (!discoInfo) {
+        const discosList = getValidDiscosList();
+        return `Invalid DisCo: "${discoInput}"\n\nAvailable DisCos (use full name or acronym):\n${discosList}\n\nExamples:\nELECTRIC 1234567890 ABUJA 5000\nELECTRIC 1234567890 AEDC 5000\nELECTRIC 1234567890 IKEDC 5000`;
+      }
+      
+      const discoUpper = discoInfo.code;
+      const serviceID = discoInfo.serviceID;
+      
+      // Verify meter - HALT if fails
+      const verificationResult = await verifyMeterWithVTpass(
+        serviceID,
+        meterNumber,
+        "prepaid"
+      );
+      
+      if (!verificationResult.success) {
+        return `❌ Could Not Verify Meter
+
+${verificationResult.error || "Unknown error"}
+
+Please check the meter number and try again.
+If you continue to have issues, please contact support.
+
+Available DisCos:
+${getValidDiscosList()}
+
+Examples:
+- ELECTRIC 1234567890 ABUJA 5000
+- ELECTRIC 1234567890 AEDC 5000
+- ELECTRIC 1234567890 IKEDC 5000
+
+Type HELP for more commands.`;
+      }
+      
+      let customerName = verificationResult.data?.customerName || "Unknown";
+      let customerAddress = verificationResult.data?.customerAddress || null;
+      let customerPhone = verificationResult.data?.customerPhone || null;
+      let customerEmail = verificationResult.data?.customerEmail || null;
+      let meterStatus = verificationResult.data?.status || null;
+      
+      // ✅ Check WhatsApp PIN setting for NEW meters
+      const pinRequired = await isWhatsAppPinRequired(user.id, false);
+
+      // Save meter (only if verification succeeded)
+      await saveMeterWithCustomerInfo(
+        user.id,
+        meterNumber,
+        discoUpper,
+        "Prepaid",
+        customerName,
+        customerAddress,
+        customerPhone,
+        customerEmail,
+        meterStatus
+      );
+
+      if (!pinRequired) {
+        // ✅ PIN NOT REQUIRED - Process immediately
+        const transaction = await prisma.vtuTransaction.create({
+          data: {
+            userId: user.id,
+            transactionType: VtuType.ELECTRICITY_INSTANT,
+            product: discoUpper,
+            amount: amount,
+            totalDebited: 0,
+            meterNumber: meterNumber,
+            meterType: MeterType.HOME,
+            status: TransactionStatus.PROCESSING,
+            channel: ChannelType.WHATSAPP,
+            metadata: {
+              source: "WhatsApp",
+              service: "ELECTRICITY",
+              timestamp: new Date().toISOString(),
+              discoCode: discoUpper,
+              meterType: "Prepaid",
+              customerName: customerName,
+              customerAddress: customerAddress,
+              customerPhone: customerPhone,
+              customerEmail: customerEmail,
+              meterStatus: meterStatus,
+              queued: true,
+              skipVerification: false,
+              requiresPin: false,
+              isSavedMeter: false,
+              balanceAtPurchase: balanceCheck.balance,
+              verificationStatus: "SUCCESS",
+            },
+          },
+        });
+
+        await createJob(
+          JobType.VTU_TRANSACTION,
+          {
+            transactionId: transaction.id,
+            userId: user.id,
+            meterNumber: meterNumber,
+            amount: amount,
+            discoCode: discoUpper,
+            meterType: "Prepaid",
+            phone: user.phone,
+            customerName: customerName,
+            customerAddress: customerAddress,
+            customerPhone: customerPhone,
+            customerEmail: customerEmail,
+            meterStatus: meterStatus,
+            serviceType: "ELECTRICITY",
+            skipVerification: false,
+          },
+          5,
+          3,
+          new Date()
+        );
+
+        return `Processing your electricity purchase...
 
 Meter: ${meterNumber}
 DisCo: ${discoUpper} (${discoInfo.fullName})
 Amount: NGN ${amount.toFixed(2)}
 Customer: ${customerName}
+${customerAddress ? `Address: ${customerAddress}` : ''}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+      }
+
+      // ✅ PIN REQUIRED - For NEW meters when PIN is ON
+      const transaction = await prisma.vtuTransaction.create({
+        data: {
+          userId: user.id,
+          transactionType: VtuType.ELECTRICITY_INSTANT,
+          product: discoUpper,
+          amount: amount,
+          totalDebited: 0,
+          meterNumber: meterNumber,
+          meterType: MeterType.HOME,
+          status: TransactionStatus.PENDING,
+          channel: ChannelType.WHATSAPP,
+          metadata: {
+            source: "WhatsApp",
+            service: "ELECTRICITY",
+            timestamp: new Date().toISOString(),
+            discoCode: discoUpper,
+            meterType: "Prepaid",
+            customerName: customerName,
+            customerAddress: customerAddress,
+            customerPhone: customerPhone,
+            customerEmail: customerEmail,
+            meterStatus: meterStatus,
+            queued: false,
+            skipVerification: false,
+            requiresPin: true,
+            isSavedMeter: false,
+            balanceAtPurchase: balanceCheck.balance,
+            verificationStatus: "SUCCESS",
+          },
+        },
+      });
+
+      const validationToken = generateValidationToken();
+      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+      await prisma.vtuTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          metadata: {
+            ...transaction.metadata,
+            validationToken: validationToken,
+            validationExpiry: validationExpiry,
+          },
+        },
+      });
+
+      const appUrl = getAppUrl();
+      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+      return `⚡ Electricity Purchase Initiated!
+
+Meter: ${meterNumber}
+DisCo: ${discoUpper} (${discoInfo.fullName})
+Amount: NGN ${amount.toFixed(2)}
+Customer: ${customerName}
+${customerAddress ? `Address: ${customerAddress}` : ''}
 Reference: ${transaction.id.substring(0, 10)}
 
 🔹 **Complete Purchase:** ${purchaseLink}
@@ -4369,110 +4521,42 @@ Reference: ${transaction.id.substring(0, 10)}
 This link expires in 5 minutes.
 
 You'll receive a confirmation via WhatsApp after completion.`;
-  }
-  
-  // Default: Show available meters
-  const meters = await prisma.savedMeter.findMany({
-    where: { userId: user.id },
-    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-  });
-
-  let message = "Buy Electricity\n\n";
-  
-  if (meters.length > 0) {
-    message += "Your Saved Meters:\n";
-    meters.forEach((meter: any, index: number) => {
-      const defaultTag = meter.isDefault ? " (Default)" : "";
-      message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
-      message += `   ${meter.disco}\n\n`;
-    });
-    message += `To buy: ELECTRIC [index] [amount]\n`;
-    message += `Example: ELECTRIC 1 5000\n\n`;
-  }
-  
-  message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
-  message += `Examples:\n`;
-  message += `- ELECTRIC 1234567890 ABUJA 5000\n`;
-  message += `- ELECTRIC 1234567890 AEDC 5000\n`;
-  message += `- ELECTRIC 1234567890 IKEDC 5000\n\n`;
-  message += `To add meter: ADDMETER [meter] [disco] [name]\n`;
-  message += `To see DisCos: DISCOS`;
-
-  return message;
-}
-
-  // ============================================================
-  // SUBSCRIPTION PROCESSOR (UNCHANGED)
-  // ============================================================
-  async function processSubscriptionWhatsApp(
-    user: any,
-    meterNumber: string,
-    discoCode: string,
-    amount: number,
-    days: number,
-    meterType: string = "Prepaid"
-  ): Promise<string> {
-    try {
-      const balanceCheck = await checkUserBalance(user.id, amount);
-      if (!balanceCheck.success) {
-        return balanceCheck.message!;
-      }
-      
-      const deliveryDate = new Date();
-      deliveryDate.setDate(deliveryDate.getDate() + days);
-
-      const preOrder = await prisma.preOrder.create({
-        data: {
-          userId: user.id,
-          meterNumber: meterNumber,
-          disco: discoCode,
-          meterType: meterType,
-          amount: amount,
-          deliveryDate: deliveryDate,
-          status: "PENDING",
-          isRecurring: false,
-          channel: ChannelType.WHATSAPP,
-        },
-      });
-
-      await createJob(
-        JobType.PREORDER_DELIVERY,
-        {
-          preOrderId: preOrder.id,
-          userId: user.id,
-          meterNumber: meterNumber,
-          discoCode: discoCode,
-          amount: amount,
-          meterType: meterType,
-        },
-        5,
-        3,
-        deliveryDate
-      );
-
-      return `✅ Electricity Subscription Scheduled!
-
-Meter: ${meterNumber}
-DisCo: ${discoCode}
-Amount: NGN ${amount.toFixed(2)}
-Delivery Date: ${deliveryDate.toLocaleDateString()}
-Subscription ID: ${preOrder.id.substring(0, 10)}
-
-You will receive your token on the delivery date.
-
-To manage subscriptions: SUBSCRIPTIONS
-To cancel: CANCEL ${preOrder.id}`;
-
-    } catch (error) {
-      console.error("Subscription error:", error);
-      return formatErrorMessage(error);
     }
+    
+    // Default: Show available meters
+    const meters = await prisma.savedMeter.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+
+    let message = "Buy Electricity\n\n";
+    
+    if (meters.length > 0) {
+      message += "Your Saved Meters:\n";
+      meters.forEach((meter: any, index: number) => {
+        const defaultTag = meter.isDefault ? " (Default)" : "";
+        message += `${index + 1}. ${meter.name || meter.meterNumber}${defaultTag}\n`;
+        message += `   ${meter.disco}\n\n`;
+      });
+      message += `To buy: ELECTRIC [index] [amount]\n`;
+      message += `Example: ELECTRIC 1 5000\n\n`;
+    }
+    
+    message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
+    message += `Examples:\n`;
+    message += `- ELECTRIC 1234567890 ABUJA 5000\n`;
+    message += `- ELECTRIC 1234567890 AEDC 5000\n`;
+    message += `- ELECTRIC 1234567890 IKEDC 5000\n\n`;
+    message += `To add meter: ADDMETER [meter] [disco] [name]\n`;
+    message += `To see DisCos: DISCOS`;
+
+    return message;
   }
 
-// ============================================================
-// UNKNOWN COMMAND (UNCHANGED)
-// ============================================================
-return `Unknown Command
+  // ============================================================
+  // UNKNOWN COMMAND
+  // ============================================================
+  return `Unknown Command
 
 I didn't understand that command.
 
