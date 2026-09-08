@@ -65,6 +65,99 @@ async function toggleWhatsAppPin(userId: string, enabled: boolean) {
   });
 }
 
+
+// Cache for packages to avoid repeated API calls
+let cachedPackages: Record<string, any[]> = {};
+let packageCacheTime: Record<string, number> = {};
+const PACKAGE_CACHE_TTL = 300000; // 5 minutes
+
+async function fetchPackagesForProvider(provider: string): Promise<any[]> {
+  const normalizedProvider = provider.toUpperCase().trim();
+  const cacheKey = normalizedProvider;
+  
+  // ✅ Check cache
+  if (cachedPackages[cacheKey] && 
+      packageCacheTime[cacheKey] && 
+      Date.now() - packageCacheTime[cacheKey] < PACKAGE_CACHE_TTL) {
+    console.log(`[Packages] Using cached packages for ${provider}`);
+    return cachedPackages[cacheKey];
+  }
+  
+  try {
+    const serviceMap: Record<string, string> = {
+      'DSTV': 'dstv',
+      'GOTV': 'gotv',
+      'STARTIMES': 'startimes',
+    };
+    
+    const serviceId = serviceMap[normalizedProvider];
+    if (!serviceId) return [];
+    
+    const isProduction = process.env.NODE_ENV === "production";
+    const baseUrl = isProduction 
+      ? "https://vtpass.com/api/service-variations"
+      : "https://sandbox.vtpass.com/api/service-variations";
+    
+    const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      const variations = data.content?.variations || data.content?.varations || [];
+      
+      const packages = variations
+        .filter((v: any) => {
+          const price = parseFloat(v.variation_amount);
+          return price > 0 && v.variation_code;
+        })
+        .map((v: any) => ({
+          name: v.name || v.variation_name || "Package",
+          price: parseFloat(v.variation_amount) || 0,
+          code: v.variation_code || "",
+        }))
+        .sort((a: any, b: any) => a.price - b.price);
+      
+      // ✅ Cache the result
+      cachedPackages[cacheKey] = packages;
+      packageCacheTime[cacheKey] = Date.now();
+      
+      console.log(`[Packages] Fetched ${packages.length} packages for ${provider}`);
+      return packages;
+    }
+  } catch (error) {
+    console.error(`[Packages] Error fetching for ${provider}:`, error);
+  }
+  
+  // ✅ Fallback packages
+  const fallbackPackages: Record<string, any[]> = {
+    'DSTV': [
+      { code: 'PREMIUM', name: 'Premium Bouquet', price: 15000 },
+      { code: 'COMPACT+', name: 'Compact Plus', price: 12000 },
+      { code: 'COMPACT', name: 'Compact Bouquet', price: 10000 },
+      { code: 'FAMILY', name: 'Family Bouquet', price: 5000 },
+      { code: 'YANGA', name: 'Yanga Bouquet', price: 3000 },
+    ],
+    'GOTV': [
+      { code: 'GOTV MAX', name: 'Gotv Max', price: 8000 },
+      { code: 'GOTV PLUS', name: 'Gotv Plus', price: 5000 },
+      { code: 'GOTV LITE', name: 'Gotv Lite', price: 3000 },
+    ],
+    'STARTIMES': [
+      { code: 'nova', name: 'Nova (Dish)', price: 2100 },
+      { code: 'basic', name: 'Basic (Antenna)', price: 4000 },
+      { code: 'smart', name: 'Basic (Dish)', price: 5100 },
+      { code: 'classic', name: 'Classic (Antenna)', price: 6000 },
+      { code: 'super', name: 'Super (Dish)', price: 9800 },
+    ],
+  };
+  
+  const fallback = fallbackPackages[normalizedProvider] || fallbackPackages['DSTV'];
+  console.log(`[Packages] Using fallback packages for ${provider}`);
+  return fallback;
+}
+
 // ============================================================
 // WHATSAPP SETTINGS COMMAND HANDLER (NEW)
 // ============================================================
@@ -1444,18 +1537,19 @@ Example: PACKAGES DSTV`;
           const MAX_PACKAGES = 8;
           const displayPackages = packages.slice(0, MAX_PACKAGES);
           
-          // ✅ Build concise message with INDEX NUMBERS
+          // ✅ Build concise message with INDEX NUMBERS for packages
           let message = `📺 *${providerDisplayName} Packages*\n\n`;
+          message += `_Use these numbers to subscribe_\n\n`;
           
           displayPackages.forEach((pkg: any, index: number) => {
-            const displayIndex = index + 1; // 1-based indexing for users
+            const packageIndex = index + 1; // 1-based indexing for users
             // ✅ Clean up name - remove price and duration from name
             const cleanName = pkg.name
               .replace(/\s*-\s*[0-9,]+ Naira\s*-\s*[0-9]+\s*(Month|Week|month|week)s?/g, '')
               .replace(/\s*-\s*[0-9,]+ Naira\s*-\s*[0-9]+(Month|Week|month|week)?/g, '')
               .trim();
             
-            message += `${displayIndex}. 📦 *${pkg.code}* - ${cleanName}\n`;
+            message += `${packageIndex}. 📦 *${pkg.code}* - ${cleanName}\n`;
             message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
           });
           
@@ -1466,10 +1560,11 @@ Example: PACKAGES DSTV`;
             message += `_💡 Visit app for full list_\n\n`;
           }
           
-          // ✅ Show correct command format with index
+          // ✅ Show correct command format with decoder index and package index
           message += `\n_To subscribe: CABLE [decoder_index] [package_number]_\n`;
-          message += `_Example: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_\n\n`;
-          message += `_Or: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_`;
+          message += `_Example: CABLE 1 1 (buys package #1 for decoder #1)_\n\n`;
+          message += `📋 *Your Saved Decoders:*\n`;
+          message += `   Type DECODERS to see your saved decoders`;
           
           console.log(`[Packages] Response message length: ${message.length}`);
           console.log(`[Packages] Showing ${displayPackages.length} of ${packages.length} packages`);
@@ -1514,15 +1609,18 @@ Example: PACKAGES DSTV`;
   const providerPackages = fallbackPackages[normalizedProvider] || fallbackPackages['DSTV'];
   
   let message = `📺 *${normalizedProvider} Packages* (Cached)\n\n`;
+  message += `_Use these numbers to subscribe_\n\n`;
   
   providerPackages.forEach((pkg: any, index: number) => {
-    const displayIndex = index + 1;
-    message += `${displayIndex}. 📦 *${pkg.code}* - ${pkg.name}\n`;
+    const packageIndex = index + 1;
+    message += `${packageIndex}. 📦 *${pkg.code}* - ${pkg.name}\n`;
     message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
   });
   
   message += `\n_To subscribe: CABLE [decoder_index] [package_number]_\n`;
-  message += `_Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}_`;
+  message += `_Example: CABLE 1 1 (buys package #1 for decoder #1)_\n\n`;
+  message += `📋 *Your Saved Decoders:*\n`;
+  message += `   Type DECODERS to see your saved decoders`;
   
   console.log(`[Packages] Fallback response length: ${message.length}`);
   
@@ -3882,138 +3980,297 @@ You'll receive a confirmation via WhatsApp after completion.`;
     return `Buy Airtime\n\nAIRTIME [amount] - For YOUR number\nAIRTIME [phone] [amount] - For another number\n\nMinimum amount: NGN 50`;
   }
 
-  // ============================================================
-  // CABLE COMMAND (AFTER PACKAGES)
-  // ============================================================
-  if (command.startsWith("CABLE") || command.startsWith("TV")) {
-    userSessions.delete(user.id);
-    
-    if (command === "CABLE" || command === "TV") {
-      const decoders = await prisma.savedDecoder.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      });
+// ============================================================
+// CABLE COMMAND (UPDATED - Supports package index & code)
+// ============================================================
+if (command.startsWith("CABLE") || command.startsWith("TV")) {
+  userSessions.delete(user.id);
+  
+  if (command === "CABLE" || command === "TV") {
+    const decoders = await prisma.savedDecoder.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
 
-      if (decoders.length === 0) {
-        return `No saved decoders.\n\nAdd one with:\nADDDECODER [decoder_number] [provider] [name]\n\nAvailable providers: DSTV, GOTV, STARTIMES\n\nAfter adding, you can buy cable by just typing CABLE!`;
-      }
+    if (decoders.length === 0) {
+      return `No saved decoders.
 
-      let message = "Your Saved Decoders:\n\n";
-      decoders.forEach((decoder: any, index: number) => {
-        const defaultTag = decoder.isDefault ? " (Default)" : "";
-        message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
-        message += `   ${decoder.provider}\n`;
-        message += `   ${decoder.decoderNumber}\n\n`;
-      });
+Add one with:
+ADDDECODER [decoder_number] [provider] [name]
 
-      message += `To buy cable: CABLE [decoder_index] [package]\n`;
-      message += `Example: CABLE 1 PREMIUM\n\n`;
-      message += `To see available packages: PACKAGES [provider]\n`;
-      message += `Example: PACKAGES DSTV\n\n`;
-      message += `To add more decoders: ADDDECODER [decoder] [provider] [name]`;
+Available providers: DSTV, GOTV, STARTIMES
 
-      return message;
+After adding, you can buy cable by just typing CABLE!`;
     }
 
-    const cableParts = body.split(" ").filter(p => p.length > 0);
+    let message = "📺 Your Saved Decoders:\n\n";
+    decoders.forEach((decoder: any, index: number) => {
+      const defaultTag = decoder.isDefault ? " 🔹 (Default)" : "";
+      message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
+      message += `   ${decoder.provider}\n`;
+      message += `   📟 ${decoder.decoderNumber}\n`;
+      if (decoder.customerName) {
+        message += `   👤 ${decoder.customerName}\n`;
+      }
+      if (decoder.customerAddress) {
+        message += `   📍 ${decoder.customerAddress}\n`;
+      }
+      message += `\n`;
+    });
+
+    message += `\n--- Commands ---\n`;
+    message += `🔹 CABLE [decoder_index] [package_number] - Subscribe\n`;
+    message += `🔹 CABLE [decoder_index] [package_code] - Subscribe\n`;
+    message += `🔹 Example: CABLE 1 2 (decoder #1, package #2)\n`;
+    message += `🔹 Example: CABLE 1 PREMIUM (decoder #1, PREMIUM package)\n\n`;
+    message += `🔹 PACKAGES [provider] - See available packages\n`;
+    message += `🔹 Example: PACKAGES DSTV\n\n`;
+    message += `🔹 DECODERS - Show this list again`;
+
+    return message;
+  }
+
+  const cableParts = body.split(" ").filter(p => p.length > 0);
+  
+  if (cableParts.length < 3) {
+    const decoders = await prisma.savedDecoder.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    });
+
+    if (decoders.length === 0) {
+      return `No saved decoders.
+
+Add one with:
+ADDDECODER [decoder_number] [provider] [name]
+
+Available providers: DSTV, GOTV, STARTIMES`;
+    }
+
+    let message = "Missing Package Selection\n\n";
+    message += "Your Saved Decoders:\n\n";
+    decoders.forEach((decoder: any, index: number) => {
+      const defaultTag = decoder.isDefault ? " (Default)" : "";
+      message += `${index + 1}. ${decoder.name || decoder.decoderNumber}${defaultTag}\n`;
+      message += `   ${decoder.provider}\n`;
+      message += `   ${decoder.decoderNumber}\n\n`;
+    });
+
+    message += `To subscribe: CABLE [decoder_index] [package_number]\n`;
+    message += `Example: CABLE 1 2\n\n`;
+    message += `Or use package code: CABLE [decoder_index] [package_code]\n`;
+    message += `Example: CABLE 1 PREMIUM\n\n`;
+    message += `To see packages: PACKAGES [provider]`;
     
-    if (cableParts.length >= 3) {
-      const [, indexStr, packageQuery] = cableParts;
-      const index = parseInt(indexStr) - 1;
-      
-      if (isNaN(index) || index < 0) {
-        return `Invalid Selection\n\nPlease choose a number from the list.\nExample: CABLE 1 PREMIUM`;
-      }
-      
-      const decoders = await prisma.savedDecoder.findMany({
-        where: { userId: user.id },
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    return message;
+  }
+
+  // ✅ Parse: CABLE [decoder_index] [package_input]
+  const [, decoderIndexStr, packageInput] = cableParts;
+  const decoderIndex = parseInt(decoderIndexStr) - 1;
+  
+  // ✅ Validate decoder index
+  if (isNaN(decoderIndex) || decoderIndex < 0) {
+    return `❌ Invalid Decoder Selection
+
+Please choose a number from the list.
+Example: CABLE 1 2
+
+Type DECODERS to see your saved decoders.`;
+  }
+  
+  const decoders = await prisma.savedDecoder.findMany({
+    where: { userId: user.id },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+  });
+  
+  if (decoderIndex >= decoders.length) {
+    return `❌ Invalid Decoder Selection
+
+Decoder #${decoderIndex + 1} not found.
+You have ${decoders.length} saved decoder(s).
+
+Type DECODERS to see your saved decoders.`;
+  }
+  
+  const selectedDecoder = decoders[decoderIndex];
+  
+  // ✅ Determine if packageInput is an index number or a package code
+  let packageCode = packageInput;
+  let packageIndex = -1;
+  let selectedPackage: any = null;
+  
+  // ✅ Fetch packages for the provider
+  const packages = await fetchPackagesForProvider(selectedDecoder.provider);
+  
+  if (packages.length === 0) {
+    return `❌ No packages available for ${selectedDecoder.provider}
+
+Please try again later or contact support.`;
+  }
+  
+  // ✅ Check if packageInput is a number (index)
+  if (/^\d+$/.test(packageInput)) {
+    packageIndex = parseInt(packageInput) - 1;
+    
+    if (packageIndex >= 0 && packageIndex < packages.length) {
+      selectedPackage = packages[packageIndex];
+      packageCode = selectedPackage.code;
+    } else {
+      // ✅ Show available packages with index numbers
+      let message = `❌ Invalid package number: ${packageInput}
+
+Available packages for ${selectedDecoder.provider}:
+
+`;
+      const MAX_SHOW = 10;
+      const showPackages = packages.slice(0, MAX_SHOW);
+      showPackages.forEach((pkg: any, idx: number) => {
+        const num = idx + 1;
+        message += `${num}. ${pkg.code} - ${pkg.name}\n`;
+        message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
       });
       
-      if (index >= decoders.length) {
-        return `Invalid Selection\n\nPlease choose a number from the list.`;
+      if (packages.length > MAX_SHOW) {
+        message += `_... and ${packages.length - MAX_SHOW} more packages_\n\n`;
       }
       
-      const selectedDecoder = decoders[index];
+      message += `\nTo subscribe: CABLE ${decoderIndex + 1} [number]\n`;
+      message += `Example: CABLE ${decoderIndex + 1} 1`;
+      
+      return message;
+    }
+  } else {
+    // ✅ It's a package code (e.g., "PREMIUM")
+    // Try to find the package by code (case insensitive)
+    const foundPackage = packages.find(
+      (p: any) => p.code.toUpperCase() === packageInput.toUpperCase()
+    );
+    
+    if (foundPackage) {
+      selectedPackage = foundPackage;
+      packageCode = foundPackage.code;
+    } else {
+      // ✅ Package code not found - show available packages
+      let message = `❌ Invalid package: "${packageInput}"
 
-      await getAvailablePackagesForWhatsApp(selectedDecoder.provider);
-      
-      // ✅ Check WhatsApp PIN setting
-      const pinRequired = await isWhatsAppPinRequired(user.id, false);
-      
-      const transaction = await prisma.vtuTransaction.create({
-        data: {
-          userId: user.id,
-          transactionType: VtuType.CABLE_TV,
-          product: selectedDecoder.provider,
-          amount: 0,
-          totalDebited: 0,
-          phoneNumber: user.phone,
-          networkPlan: packageQuery,
-          status: pinRequired ? TransactionStatus.PENDING : TransactionStatus.PROCESSING,
-          channel: ChannelType.WHATSAPP,
-          metadata: {
-            source: "WhatsApp",
-            service: "CABLE_TV",
-            timestamp: new Date().toISOString(),
-            provider: selectedDecoder.provider,
-            packageQuery: packageQuery,
-            decoderNumber: selectedDecoder.decoderNumber,
-            smartCardNumber: selectedDecoder.decoderNumber,
-            queued: !pinRequired,
-            requiresPin: pinRequired,
-          },
-        },
+Available packages for ${selectedDecoder.provider}:
+
+`;
+      const MAX_SHOW = 10;
+      const showPackages = packages.slice(0, MAX_SHOW);
+      showPackages.forEach((pkg: any, idx: number) => {
+        const num = idx + 1;
+        message += `${num}. *${pkg.code}* - ${pkg.name}\n`;
+        message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
       });
+      
+      if (packages.length > MAX_SHOW) {
+        message += `_... and ${packages.length - MAX_SHOW} more packages_\n\n`;
+      }
+      
+      message += `\nTo subscribe: CABLE ${decoderIndex + 1} [number or code]\n`;
+      message += `Example: CABLE ${decoderIndex + 1} 1\n`;
+      message += `Example: CABLE ${decoderIndex + 1} ${packages[0]?.code || 'PREMIUM'}`;
+      
+      return message;
+    }
+  }
+  
+  // ✅ We have a valid package - process the subscription
+  if (!selectedPackage) {
+    return `❌ Error: Could not find package "${packageInput}"
 
-      if (!pinRequired) {
-        await createJob(
-          JobType.VTU_TRANSACTION,
-          {
-            transactionId: transaction.id,
-            userId: user.id,
-            decoderNumber: selectedDecoder.decoderNumber,
-            provider: selectedDecoder.provider,
-            packageQuery: packageQuery,
-            serviceType: "CABLE_TV",
-          },
-          5,
-          3,
-          new Date()
-        );
+Please try again or contact support.`;
+  }
+  
+  // ✅ Check if user has a PIN set (for security)
+  const pinRequired = await isWhatsAppPinRequired(user.id, false);
+  
+  // ✅ Create transaction
+  const transaction = await prisma.vtuTransaction.create({
+    data: {
+      userId: user.id,
+      transactionType: VtuType.CABLE_TV,
+      product: selectedDecoder.provider,
+      amount: selectedPackage.price,
+      totalDebited: 0,
+      phoneNumber: user.phone,
+      networkPlan: packageCode,
+      status: pinRequired ? TransactionStatus.PENDING : TransactionStatus.PROCESSING,
+      channel: ChannelType.WHATSAPP,
+      metadata: {
+        source: "WhatsApp",
+        service: "CABLE_TV",
+        timestamp: new Date().toISOString(),
+        provider: selectedDecoder.provider,
+        packageCode: packageCode,
+        packageName: selectedPackage.name,
+        packagePrice: selectedPackage.price,
+        decoderNumber: selectedDecoder.decoderNumber,
+        smartCardNumber: selectedDecoder.decoderNumber,
+        decoderName: selectedDecoder.name,
+        queued: !pinRequired,
+        requiresPin: pinRequired,
+        packageIndex: packageIndex >= 0 ? packageIndex + 1 : null,
+      },
+    },
+  });
 
-        return `Processing your cable subscription...!
+  if (!pinRequired) {
+    // ✅ PIN NOT REQUIRED - Process immediately via job
+    await createJob(
+      JobType.VTU_TRANSACTION,
+      {
+        transactionId: transaction.id,
+        userId: user.id,
+        decoderNumber: selectedDecoder.decoderNumber,
+        provider: selectedDecoder.provider,
+        packageCode: packageCode,
+        packageName: selectedPackage.name,
+        packagePrice: selectedPackage.price,
+        serviceType: "CABLE_TV",
+      },
+      5,
+      3,
+      new Date()
+    );
 
-Decoder: ${selectedDecoder.decoderNumber}
+    return `📺 Processing your cable subscription...!
+
+Decoder: ${selectedDecoder.name || selectedDecoder.decoderNumber}
 Provider: ${selectedDecoder.provider}
-Package: ${packageQuery}
+Package: ${selectedPackage.name}
+Amount: NGN ${selectedPackage.price.toFixed(0)}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
-      }
+  }
 
-      const validationToken = generateValidationToken();
-      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+  // ✅ PIN REQUIRED - Generate validation link
+  const validationToken = generateValidationToken();
+  const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
 
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          metadata: {
-            ...transaction.metadata,
-            validationToken: validationToken,
-            validationExpiry: validationExpiry,
-          },
-        },
-      });
+  await prisma.vtuTransaction.update({
+    where: { id: transaction.id },
+    data: {
+      metadata: {
+        ...transaction.metadata,
+        validationToken: validationToken,
+        validationExpiry: validationExpiry,
+      },
+    },
+  });
 
-      const appUrl = getAppUrl();
-      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+  const appUrl = getAppUrl();
+  const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
 
-      return `📺 Cable Subscription Initiated!
+  return `📺 Cable Subscription Initiated!
 
-Decoder: ${selectedDecoder.decoderNumber}
+Decoder: ${selectedDecoder.name || selectedDecoder.decoderNumber}
 Provider: ${selectedDecoder.provider}
-Package: ${packageQuery}
+Package: ${selectedPackage.name}
+Amount: NGN ${selectedPackage.price.toFixed(0)}
 Reference: ${transaction.id.substring(0, 10)}
 
 🔹 **Complete Purchase:** ${purchaseLink}
@@ -4022,12 +4279,7 @@ Reference: ${transaction.id.substring(0, 10)}
 This link expires in 5 minutes.
 
 You'll receive a confirmation via WhatsApp after completion.`;
-    }
-    
-    if (cableParts.length === 2) {
-      return `Missing Package\n\nPlease specify the package as well.\nExample: CABLE ${cableParts[1]} PREMIUM\n\nTo see available packages: PACKAGES [provider]\nExample: PACKAGES DSTV`;
-    }
-  }
+}
 
   // ============================================================
   // ELECTRICITY COMMAND (UPDATED - Saved meters NEVER require PIN)
