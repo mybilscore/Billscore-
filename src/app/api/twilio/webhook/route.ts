@@ -1375,7 +1375,6 @@ async function getAvailablePackagesForWhatsApp(provider: string = "DSTV"): Promi
   try {
     console.log(`[Packages] Fetching packages for provider: ${provider}`);
     
-    // ✅ FIX: Normalize provider to uppercase for consistent mapping
     const normalizedProvider = provider.toUpperCase().trim();
     
     const serviceMap: Record<string, string> = {
@@ -1384,7 +1383,6 @@ async function getAvailablePackagesForWhatsApp(provider: string = "DSTV"): Promi
       'STARTIMES': 'startimes',
     };
 
-    // ✅ FIX: Check if provider is valid
     if (!serviceMap[normalizedProvider]) {
       const validProviders = Object.keys(serviceMap).join(', ');
       return `❌ Invalid provider: "${provider}"
@@ -1402,7 +1400,6 @@ Example: PACKAGES DSTV`;
 
     console.log(`[Packages] Service ID: ${serviceId}`);
 
-    // Try to fetch from VTpass API
     const isProduction = process.env.NODE_ENV === "production";
     const baseUrl = isProduction 
       ? "https://vtpass.com/api/service-variations"
@@ -1412,7 +1409,7 @@ Example: PACKAGES DSTV`;
 
     const response = await fetch(`${baseUrl}?serviceID=${serviceId}`, {
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(10000), // Increased timeout
+      signal: AbortSignal.timeout(10000),
     });
 
     console.log(`[Packages] API Response Status: ${response.status}`);
@@ -1421,9 +1418,14 @@ Example: PACKAGES DSTV`;
       const data = await response.json();
       console.log(`[Packages] API Response received`);
       
-      // ✅ FIX: Check for successful response
-      if (data.response_description === "000" && data.content?.variations) {
-        const packages = data.content.variations
+      // ✅ Check for variations in both possible keys
+      const variations = data.content?.variations || data.content?.varations || [];
+      
+      if (data.response_description === "000" && variations.length > 0) {
+        console.log(`[Packages] Found ${variations.length} packages from API`);
+        
+        // ✅ Filter and map packages
+        const packages = variations
           .filter((v: any) => {
             const price = parseFloat(v.variation_amount);
             return price > 0 && v.variation_code;
@@ -1435,22 +1437,43 @@ Example: PACKAGES DSTV`;
           }))
           .sort((a: any, b: any) => a.price - b.price);
 
-        console.log(`[Packages] Found ${packages.length} packages from API`);
+        console.log(`[Packages] Filtered to ${packages.length} valid packages`);
 
         if (packages.length > 0) {
+          // ✅ ONLY SHOW TOP 8 PACKAGES (most affordable)
+          const MAX_PACKAGES = 8;
+          const displayPackages = packages.slice(0, MAX_PACKAGES);
+          
+          // ✅ Build concise message
           let message = `📺 *${providerDisplayName} Packages*\n\n`;
-          packages.forEach((pkg: any) => {
-            message += `📦 *${pkg.code}* - ${pkg.name}\n`;
-            message += `   💰 Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+          
+          displayPackages.forEach((pkg: any) => {
+            // ✅ Clean up name - remove price and duration from name
+            const cleanName = pkg.name
+              .replace(/\s*-\s*[0-9,]+ Naira\s*-\s*[0-9]+\s*(Month|Week|month|week)s?/g, '')
+              .trim();
+            
+            message += `📦 *${pkg.code}* - ${cleanName}\n`;
+            message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
           });
-          message += `\n_To subscribe: CABLE [decoder_index] [package_code]_\n`;
-          message += `_Example: CABLE 1 ${packages[0]?.code || 'PREMIUM'}_\n\n`;
-          message += `📋 *Your Saved Decoders:*\n`;
-          message += `   Type DECODERS to see your saved decoders`;
+          
+          // ✅ Show count of remaining packages
+          if (packages.length > MAX_PACKAGES) {
+            const remaining = packages.length - MAX_PACKAGES;
+            message += `_📌 ${remaining} more packages available_\n`;
+            message += `_💡 Visit app for full list_\n\n`;
+          }
+          
+          message += `\n_To subscribe: CABLE [index] [code]_\n`;
+          message += `_Example: CABLE 1 ${displayPackages[0]?.code || 'PREMIUM'}_`;
+          
+          console.log(`[Packages] Response message length: ${message.length}`);
+          console.log(`[Packages] Showing ${displayPackages.length} of ${packages.length} packages`);
+          
           return message;
         }
       } else {
-        console.log(`[Packages] API returned no packages:`, data);
+        console.log(`[Packages] API returned unexpected format:`, JSON.stringify(data).substring(0, 200));
       }
     } else {
       console.log(`[Packages] API returned error: ${response.status}`);
@@ -1464,38 +1487,39 @@ Example: PACKAGES DSTV`;
   
   const fallbackPackages: Record<string, any[]> = {
     'DSTV': [
-      { code: 'PREMIUM', name: 'Premium Bouquet', price: 15000 },
+      { code: 'PREMIUM', name: 'Premium', price: 15000 },
       { code: 'COMPACT+', name: 'Compact Plus', price: 12000 },
-      { code: 'COMPACT', name: 'Compact Bouquet', price: 10000 },
-      { code: 'FAMILY', name: 'Family Bouquet', price: 5000 },
-      { code: 'YANGA', name: 'Yanga Bouquet', price: 3000 },
+      { code: 'COMPACT', name: 'Compact', price: 10000 },
+      { code: 'FAMILY', name: 'Family', price: 5000 },
+      { code: 'YANGA', name: 'Yanga', price: 3000 },
     ],
     'GOTV': [
-      { code: 'GOTV MAX', name: 'Gotv Max', price: 8000 },
-      { code: 'GOTV PLUS', name: 'Gotv Plus', price: 5000 },
-      { code: 'GOTV LITE', name: 'Gotv Lite', price: 3000 },
+      { code: 'GOTV MAX', name: 'Max', price: 8000 },
+      { code: 'GOTV PLUS', name: 'Plus', price: 5000 },
+      { code: 'GOTV LITE', name: 'Lite', price: 3000 },
     ],
     'STARTIMES': [
-      { code: 'PREMIUM', name: 'Premium', price: 7000 },
-      { code: 'STANDARD', name: 'Standard', price: 4500 },
-      { code: 'BASIC', name: 'Basic', price: 2500 },
+      { code: 'nova', name: 'Nova (Dish)', price: 2100 },
+      { code: 'basic', name: 'Basic (Antenna)', price: 4000 },
+      { code: 'smart', name: 'Basic (Dish)', price: 5100 },
+      { code: 'classic', name: 'Classic (Antenna)', price: 6000 },
+      { code: 'super', name: 'Super (Dish)', price: 9800 },
     ],
   };
 
   const providerPackages = fallbackPackages[normalizedProvider] || fallbackPackages['DSTV'];
   
-  let message = `📺 *${normalizedProvider} Packages* (Fallback)\n\n`;
-  message += `_Note: Using cached package list_\n\n`;
+  let message = `📺 *${normalizedProvider} Packages* (Cached)\n\n`;
   
   providerPackages.forEach((pkg: any) => {
     message += `📦 *${pkg.code}* - ${pkg.name}\n`;
-    message += `   💰 Price: NGN ${pkg.price.toFixed(2)}\n\n`;
+    message += `   💰 NGN ${pkg.price.toFixed(0)}\n\n`;
   });
   
-  message += `\n_To subscribe: CABLE [decoder_index] [package_code]_\n`;
-  message += `_Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}_\n\n`;
-  message += `📋 *Your Saved Decoders:*\n`;
-  message += `   Type DECODERS to see your saved decoders`;
+  message += `\n_To subscribe: CABLE [index] [code]_\n`;
+  message += `_Example: CABLE 1 ${providerPackages[0]?.code || 'PREMIUM'}_`;
+  
+  console.log(`[Packages] Fallback response length: ${message.length}`);
   
   return message;
 }
