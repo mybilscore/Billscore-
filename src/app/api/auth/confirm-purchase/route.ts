@@ -1,4 +1,5 @@
-// app/api/auth/confirm-purchase/route.ts
+// app/api/auth/confirm-purchase/route.ts - COMPLETE UPDATED WITH ELECTRICITY DISCO FIX
+
 import { NextRequest, NextResponse } from "next/server";
 import { compare } from "bcrypt";
 import { prisma } from "~/lib/db";
@@ -13,6 +14,30 @@ import {
   MeterType,
   VtuVendor,
 } from "@prisma/client";
+
+// ============================================================
+// DISCO TO VTpass SERVICE ID MAPPING (NEW)
+// ============================================================
+
+const DISCO_TO_SERVICE_ID: Record<string, string> = {
+  'IKEJA': 'ikeja-electric',
+  'EKO': 'eko-electric',
+  'ABUJA': 'abuja-electric',
+  'KANO': 'kano-electric',
+  'PHCN': 'phcn-electric',
+  'IBADAN': 'ibadan-electric',
+  'BENIN': 'benin-electric',
+  'ENUGU': 'enugu-electric',
+  'JOS': 'jos-electric',
+  'PORT_HARCOURT': 'portharcourt-electric',
+  'PORTHARCOURT': 'portharcourt-electric',
+  'KADUNA': 'kaduna-electric',
+  'YOLA': 'yola-electric',
+};
+
+function getDiscoServiceId(discoCode: string): string | null {
+  return DISCO_TO_SERVICE_ID[discoCode.toUpperCase()] || null;
+}
 
 function getAppUrl(): string {
   const url = process.env.NEXTAUTH_URL || 
@@ -143,7 +168,7 @@ Thank you for using Bilscore!`;
 }
 
 // ============================================================
-// HELPER: Process Different Service Types
+// HELPER: Process Different Service Types (UPDATED - Electricity Fix)
 // ============================================================
 
 async function processServicePurchase(
@@ -201,11 +226,24 @@ async function processServicePurchase(
 
       case "ELECTRICITY_INSTANT":
       case "ELECTRICITY_PREORDER":
+        // ✅ FIX: Convert DisCo code to VTpass service ID
+        const discoCode = transaction.product || "";
+        const serviceId = getDiscoServiceId(discoCode);
+        
+        if (!serviceId) {
+          return { 
+            success: false, 
+            error: `Invalid DisCo: ${discoCode}. Supported: IKEJA, EKO, ABUJA, KANO, etc.` 
+          };
+        }
+        
+        console.log(`[Confirm Purchase] Converting DisCo ${discoCode} -> service ID ${serviceId}`);
+        
         result = await vendorService.buyElectricity(
           {
             meterNumber: transaction.meterNumber || "",
             amount: amount,
-            discoCode: transaction.product || "",
+            discoCode: serviceId,  // ← Use service ID, not display code
             meterType: transaction.meterType || "Prepaid",
             phone: user.phone,
           },

@@ -2277,12 +2277,16 @@ async function handlePinCommand(user: any, parts: string[]): Promise<string> {
   return `PIN Set Successfully!\n\nYour PIN has been encrypted and saved.\nYou'll need this PIN for all transactions.\n\nPIN: **** (hidden for security)\n\nKeep your PIN safe and never share it with anyone.\n\nYou can change your PIN anytime in the Bilscore app.`;
 }
 
-// ============================================================
-// HELP MESSAGE (UPDATED with WA and MYWA commands)
-// ============================================================
+
 
 // ============================================================
 // HELP MESSAGE (UPDATED with ACTIVATE AGENT)
+
+// ⚙️ *WhatsApp Settings:*
+//WA - View full WhatsApp settings
+//MYWA - Quick view of your WhatsApp PIN status
+//WA PIN ON - Require PIN for all WhatsApp purchases
+//WA PIN OFF - Disable PIN for all WhatsApp purchases
 // ============================================================
 
 function getHelpMessage(user: any): string {
@@ -2296,11 +2300,7 @@ BALANCE - Check wallet balance
 TRANSACTIONS - View transaction history
 PIN [code] - Set transaction PIN
 
-⚙️ *WhatsApp Settings:*
-WA - View full WhatsApp settings
-MYWA - Quick view of your WhatsApp PIN status
-WA PIN ON - Require PIN for all WhatsApp purchases
-WA PIN OFF - Disable PIN for all WhatsApp purchases
+
 
 👤 *Account:*
 ${agentCommands}${isAgent ? '🤝 You are an Agent! Enjoy special pricing on data plans.\n' : ''}
@@ -2676,16 +2676,15 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         response += `• Bank: ${wallet.bankName}\n`;
         response += `• Acct No: ${wallet.accountNumber}\n`;
         response += `• Acct Name: ${wallet.accountName}\n`;
-        if (virtualAccountNo) {
-          response += `• Virtual Acct: ${virtualAccountNo}\n`;
-        }
-        if (isSimulation) {
-          response += `• Mode: Simulation (Sandbox)\n`;
-        }
+        // if (virtualAccountNo) {
+        //   response += `• Virtual Acct: ${virtualAccountNo}\n`;
+        // }
+        // if (isSimulation) {
+        //   response += `• Mode: Simulation (Sandbox)\n`;
+        // }
         response += `• Balance: ₦0\n\n`;
         
-        response += `💳 Fund your wallet by transferring to the account above.\n`;
-        response += `Your wallet will be credited instantly upon transfer.\n\n`;
+       response += `💳 Fund your wallet by transferring to your account. Instant credit upon transfer.\n\n`;
       }
 
       response += `Default Credentials:\n`;
@@ -3918,10 +3917,10 @@ You'll receive a confirmation via WhatsApp after completion.`;
         message += `\n`;
       });
 
-      message += `To buy for saved meter: ELECTRIC [index] [amount]\n`;
-      message += `Example: ELECTRIC 1 5000\n\n`;
-      message += `To buy for any meter: ELECTRIC [meter_number] [disco] [amount]\n`;
-      message += `Example: ELECTRIC 1234567890 ABUJA 5000\n\n`;
+      message += `To buy for saved meter: POWER [index] [amount]\n`;
+      message += `Example: POWER 1 5000\n\n`;
+      message += `To buy for any meter: POWER [meter_number] [disco] [amount]\n`;
+      message += `Example: POWER 1234567890 ABUJA 5000\n\n`;
       message += `To add more meters: ADDMETER [meter] [disco] [name]`;
 
       return message;
