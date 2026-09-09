@@ -18,6 +18,7 @@ import {
   Calendar,
   User,
   Key,
+  MessageCircle,
 } from "lucide-react";
 
 // ============================================
@@ -96,6 +97,29 @@ function PasswordStrengthIndicator({ password }: { password: string }) {
       </div>
     </div>
   );
+}
+
+// ============================================
+// MOBILE DETECTION HOOK
+// ============================================
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|windows phone|opera mini|iemobile|mobile/i.test(userAgent);
+      const isSmallScreen = window.innerWidth < 768;
+      setIsMobile(isMobileDevice || isSmallScreen);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  return isMobile;
 }
 
 // ============================================
@@ -261,6 +285,50 @@ function ForgotPasswordModal({
 }
 
 // ============================================
+// WHATSAPP LOGIN BUTTON
+// ============================================
+function WhatsAppLoginButton() {
+  const handleWhatsAppRedirect = () => {
+    const message = encodeURIComponent(
+      "Hello Bilscore! I'd like to get started with WhatsApp payments."
+    );
+    window.open(`https://wa.me/2348155080861?text=${message}`, "_blank");
+  };
+
+  return (
+    <button
+      onClick={handleWhatsAppRedirect}
+      className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#1ebe5c] text-white rounded-xl transition-all duration-200 font-medium flex items-center justify-center gap-2 shadow-sm hover:shadow-md"
+    >
+      <MessageCircle className="h-5 w-5" />
+      Continue with WhatsApp
+    </button>
+  );
+}
+
+// ============================================
+// WHATSAPP HELP BUTTON
+// ============================================
+function WhatsAppHelpButton() {
+  const handleWhatsAppHelp = () => {
+    const message = encodeURIComponent(
+      "Hello Bilscore! I need help with my account."
+    );
+    window.open(`https://wa.me/2348155080861?text=${message}`, "_blank");
+  };
+
+  return (
+    <button
+      onClick={handleWhatsAppHelp}
+      className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#25D366] transition-colors"
+    >
+      <MessageCircle className="h-3.5 w-3.5" />
+      Need help? Chat with us on WhatsApp
+    </button>
+  );
+}
+
+// ============================================
 // MAIN AUTH PAGE
 // ============================================
 export default function AuthPage() {
@@ -268,6 +336,9 @@ export default function AuthPage() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
   const [socialLoading, setSocialLoading] = useState(false);
+  
+  // ✅ Mobile detection
+  const isMobile = useIsMobile();
 
   const urlReferralCode = searchParams.get("ref") || "";
   const isFromReferral = !!urlReferralCode;
@@ -372,7 +443,7 @@ export default function AuthPage() {
   }, [signUpData.referralCode]);
 
   // ============================================
-  // SIGN IN HANDLER - OPTIMIZED
+  // SIGN IN HANDLER
   // ============================================
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,7 +483,6 @@ export default function AuthPage() {
         return;
       }
 
-      // ✅ Get session and redirect in one step
       const sessionRes = await fetch("/api/auth/session");
       const session = await sessionRes.json();
 
@@ -442,7 +512,7 @@ export default function AuthPage() {
   };
 
   // ============================================
-  // SIGN UP HANDLER - OPTIMIZED
+  // SIGN UP HANDLER
   // ============================================
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -517,7 +587,6 @@ export default function AuthPage() {
         throw new Error(result.error || "Registration failed");
       }
 
-      // ✅ Auto sign in after registration
       const signInResult = await signIn("credentials", {
         email: signUpData.email,
         password: signUpData.password,
@@ -525,13 +594,11 @@ export default function AuthPage() {
       });
 
       if (signInResult?.error) {
-        // If auto sign-in fails, go to login page
         router.push("/auth?registered=true");
         setSignUpLoading(false);
         return;
       }
 
-      // ✅ Get session and redirect in one step (no artificial delay)
       const sessionRes = await fetch("/api/auth/session");
       const session = await sessionRes.json();
 
@@ -947,6 +1014,37 @@ export default function AuthPage() {
                 setError={setError}
               />
 
+              {/* ========================================== */}
+              {/* ✅ WHATSAPP LOGIN BUTTON - MOBILE ONLY */}
+              {/* ========================================== */}
+              {isMobile && (
+                <div className="mb-4">
+                  <div className="text-center mb-2">
+                    <p className="text-xs text-gray-400 flex items-center justify-center gap-2">
+                      <span className="w-8 h-px bg-gray-300" />
+                      <span>Get started in seconds</span>
+                      <span className="w-8 h-px bg-gray-300" />
+                    </p>
+                  </div>
+                  <WhatsAppLoginButton />
+                  <p className="text-xs text-gray-400 text-center mt-2">
+                    💬 No password needed. Just chat with us on WhatsApp.
+                  </p>
+                </div>
+              )}
+
+              {/* Divider - Only show if WhatsApp button is visible */}
+              {isMobile && (
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200" />
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="px-3 bg-white text-gray-400">or continue with email</span>
+                  </div>
+                </div>
+              )}
+
               {/* Referral Banner */}
               {isFromReferral && showReferralBanner && referralValid && (
                 <div className="mb-6 p-4 bg-gradient-to-r from-emerald-50 to-emerald-100/50 rounded-xl border border-emerald-200 animate-in fade-in slide-in-from-top-2 duration-300">
@@ -994,7 +1092,7 @@ export default function AuthPage() {
               )}
 
               {/* ========================================== */}
-              {/* SIGN IN FORM - With welcome message */}
+              {/* SIGN IN FORM */}
               {/* ========================================== */}
               {activeTab === "signin" && (
                 <>
@@ -1084,12 +1182,19 @@ export default function AuthPage() {
                         Sign up free
                       </button>
                     </div>
+
+                    {/* ✅ WhatsApp Help - Bottom of Sign In */}
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      <div className="flex justify-center">
+                        <WhatsAppHelpButton />
+                      </div>
+                    </div>
                   </form>
                 </>
               )}
 
               {/* ========================================== */}
-              {/* SIGN UP FORM - With welcome message */}
+              {/* SIGN UP FORM */}
               {/* ========================================== */}
               {activeTab === "signup" && (
                 <>
@@ -1124,7 +1229,9 @@ export default function AuthPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Full Name</label>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Full Name <span className="text-rose-500">*</span>
+                      </label>
                       <input
                         type="text"
                         name="fullName"
@@ -1137,7 +1244,9 @@ export default function AuthPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Email Address</label>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Email Address <span className="text-rose-500">*</span>
+                      </label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                         <input
@@ -1153,7 +1262,9 @@ export default function AuthPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Phone Number</label>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Phone Number <span className="text-rose-500">*</span>
+                      </label>
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                         <input
@@ -1169,7 +1280,9 @@ export default function AuthPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[#1e293b] mb-1">Password</label>
+                      <label className="block text-sm font-medium text-[#1e293b] mb-1">
+                        Password <span className="text-rose-500">*</span>
+                      </label>
                       <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                         <input
@@ -1324,6 +1437,13 @@ export default function AuthPage() {
                       >
                         Sign in
                       </button>
+                    </div>
+
+                    {/* ✅ WhatsApp Help - Bottom of Sign Up */}
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      <div className="flex justify-center">
+                        <WhatsAppHelpButton />
+                      </div>
                     </div>
                   </form>
                 </>

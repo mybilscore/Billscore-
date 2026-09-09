@@ -984,7 +984,7 @@ export function DashboardClient({ initialData }: ClientProps) {
     { label: "Buy Data", icon: "Wifi", description: "Data bundles for all networks", href: "/dashboard/data" },
     { label: "Buy Electricity", icon: "Zap", description: "Instant electricity tokens", href: "/dashboard/electricity" },
     { label: "Cable TV", icon: "Tv", description: "DSTV, GOTV, Startimes", href: "/dashboard/cable" },
-    { label: "Bulk SMS", icon: "Send", description: "Send SMS to multiple contacts", href: "/dashboard/education" },
+    { label: "Bulk SMS", icon: "Send", description: "Send SMS to multiple contacts", href: "" },
     { label: "Exams", icon: "GraduationCap", description: "WAEC, NECO, JAMB registration", href: "dashboard/education" },
     { label: "Exam Result", icon: "FileText", description: "Check exam results", href: "" },
     { label: "Bill Scheduller", icon: "Package", description: "Buy multiple units", href: "/dashboard/subscriptions" },
