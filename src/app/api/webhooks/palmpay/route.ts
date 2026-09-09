@@ -1,11 +1,10 @@
-// app/api/webhooks/palmpay/route.ts - USING YOUR EXISTING SIGNATURE VERIFICATION
+// app/api/webhooks/palmpay/route.ts - LAUNCH READY
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
 import { WalletFundingStatus } from "@prisma/client";
 import { verifyWebhookSignature } from "~/lib/palmpay/signature";
 
-// Helper function to get app URL
 function getAppUrl(): string {
   const url = process.env.NEXTAUTH_URL || 
               process.env.NEXT_PUBLIC_APP_URL || 
@@ -14,7 +13,6 @@ function getAppUrl(): string {
   return url.replace(/\/$/, '');
 }
 
-// ✅ Get public key from environment for webhook verification
 function getPublicKeyPEM(): string {
   let publicKey = process.env.PALMPAY_PUBLIC_KEY || '';
   if (!publicKey.includes('BEGIN PUBLIC KEY')) {
@@ -25,13 +23,11 @@ function getPublicKeyPEM(): string {
 
 export async function POST(request: NextRequest) {
   try {
-    // ✅ Get raw body for signature verification
     const rawBody = await request.text();
     const body = JSON.parse(rawBody);
     
     console.log(`📊 [PalmPay Webhook] Received:`, JSON.stringify(body, null, 2));
 
-    // ✅ Extract webhook data
     const {
       orderNo,
       virtualAccountNo,
@@ -40,12 +36,12 @@ export async function POST(request: NextRequest) {
       payerAccountNo,
       payerBankName,
       orderStatus,
-      sign, // PalmPay sends signature in 'sign' field
+      sign,
       transactionId,
       sessionId,
     } = body;
 
-    // ✅ Verify webhook signature using your existing function
+    // ✅ 1. VERIFY SIGNATURE - Return 401 on failure
     const publicKeyPEM = getPublicKeyPEM();
     const isVerified = verifyWebhookSignature(body, sign, publicKeyPEM);
 
@@ -59,7 +55,23 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ [PalmPay Webhook] Signature verified for order ${orderNo}`);
 
-    // Only process successful payments (orderStatus: 1 = SUCCESS)
+    // ✅ 2. LOG ALL EVENTS (for audit trail)
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          provider: "PALMPAY",
+          eventType: "VIRTUAL_ACCOUNT",
+          orderNo: orderNo,
+          payload: body,
+          receivedAt: new Date(),
+          status: orderStatus === 1 ? "SUCCESS" : "IGNORED",
+        },
+      });
+    } catch (logError) {
+      console.warn("⚠️ Failed to log webhook:", logError);
+    }
+
+    // ✅ 3. IGNORE NON-SUCCESSFUL PAYMENTS
     if (orderStatus !== 1) {
       console.log(`ℹ️ [PalmPay Webhook] Ignoring order with status: ${orderStatus}`);
       return NextResponse.json({ 
@@ -68,7 +80,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const amount = orderAmount / 100; // Convert from cents to Naira
+    const amount = orderAmount / 100;
 
     if (amount <= 0) {
       console.error(`❌ [PalmPay Webhook] Invalid amount: ${amount}`);
@@ -78,7 +90,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ✅ Find the user by virtual account number
+    // ✅ 4. FIND WALLET - Return 404 if not found
     const wallet = await prisma.wallet.findFirst({
       where: { accountNumber: virtualAccountNo },
       include: { 
@@ -103,7 +115,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`📊 [PalmPay Webhook] Found user: ${wallet.user.fullName} (${wallet.user.id})`);
 
-    // ✅ Check for duplicate transaction
+    // ✅ 5. PREVENT DUPLICATES
     const existing = await prisma.walletTransaction.findFirst({
       where: { 
         OR: [
@@ -123,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     const currentBalance = Number(wallet.walletBalance) || 0;
 
-    // ✅ Process funding in a transaction
+    // ✅ 6. PROCESS TRANSACTION
     await prisma.$transaction([
       prisma.wallet.update({
         where: { id: wallet.id },
@@ -177,11 +189,9 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ [PalmPay Webhook] Credited ₦${amount} to user ${wallet.user.id}`);
 
-    // ✅ Trigger referral bonus (if applicable)
+    // ✅ 7. TRIGGER REFERRAL (non-blocking)
     try {
       const webhookUrl = `${getAppUrl()}/api/webhooks/wallet-funding`;
-      console.log(`📊 [PalmPay Webhook] Triggering referral webhook: ${webhookUrl}`);
-      
       const referralResponse = await fetch(webhookUrl, {
         method: "POST",
         headers: { 
@@ -208,7 +218,6 @@ export async function POST(request: NextRequest) {
       }
     } catch (error) {
       console.error("❌ [PalmPay Webhook] Referral webhook error:", error);
-      // Don't fail the main transaction
     }
 
     return NextResponse.json({ 
@@ -221,15 +230,19 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error("❌ [PalmPay Webhook] Error:", error);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message || "Webhook processing failed" 
-    }, { status: 200 });
+    // ✅ 8. RETURN 500 FOR UNEXPECTED ERRORS
+    console.error("❌ [PalmPay Webhook] Error:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
-// ✅ Health check endpoint
 export async function GET(request: NextRequest) {
   return NextResponse.json({
     status: "healthy",

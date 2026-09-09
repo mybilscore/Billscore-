@@ -216,6 +216,7 @@ enum JobType {
   QR_PAYMENT
   OTP_DELIVERY
   WALLET_FUNDING
+  WHATSAPP_REMINDER
 }
 
 enum VendorStatus {
@@ -827,7 +828,7 @@ model User {
   pinAttempts           Int             @default(0)
   pinLockedUntil        DateTime?
   lastLoginAt           DateTime?
-
+  lastWhatsAppReminder  DateTime?  
 
   whatsappSettings      WhatsAppSettings? 
   whatsappSettingsId    String?           @unique
