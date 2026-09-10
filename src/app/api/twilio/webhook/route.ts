@@ -934,6 +934,10 @@ function getDisplayPrice(plan: any, userRole: string = 'END_USER'): number {
 // HELPER: Process plans and build message (UPDATED - Role-based)
 // ============================================================
 
+// ============================================================
+// HELPER: Process plans and build message (UPDATED - Role-based + Full ID tracking)
+// ============================================================
+
 function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: string = 'END_USER'): {
   planMap: Map<number, { planData: any, provider: string, network: string, planId: string }>;
   message: string;
@@ -967,15 +971,33 @@ function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: stri
       priceNote = ` (Retail: ₦${Number(plan.ourPrice).toFixed(0)})`;
     }
     
-    const planId = plan.vendorPlanId || plan.id || plan.planCode || plan.dataDisplay;
+    // ✅ PRIMARY ID: vendorPlanId (unique within vendor — critical for third-party purchases)
+    // ✅ FALLBACKS: planCode → dbId → dataDisplay
+    const planId = plan.vendorPlanId || plan.planCode || plan.id || plan.dataDisplay;
     
     planMap.set(index, {
       planData: {
+        // Display data
         data: dataDisplay,
         price: displayPrice,
         validity: validityDisplay,
-        planCode: plan.planCode || plan.id || dataDisplay,
         amountMB: plan.amountMB || 0,
+        
+        // ✅ ALL IDs preserved for reliable vendor mapping
+        planCode: plan.planCode || plan.id || dataDisplay,
+        vendorPlanId: plan.vendorPlanId || null,   // ← CRITICAL for third-party
+        dbId: plan.id || null,                      // ← Database UUID
+        vendorId: plan.vendorId || null,
+        vendorNetworkCode: plan.vendorNetworkCode || null,
+        vendorPlanType: plan.vendorPlanType || null,
+        network: plan.network || network,
+        planType: plan.planType || null,
+        
+        // Pricing snapshot (for audit)
+        ourPrice: Number(plan.ourPrice) || 0,
+        agentPrice: Number(plan.agentPrice) || 0,
+        vendorPrice: Number(plan.vendorPrice) || 0,
+        priceType: isAgent ? 'AGENT' : 'RETAIL',
       },
       provider: network,
       network: network,
@@ -1025,33 +1047,39 @@ async function countActivePlansForNetwork(vendorId: string, network: string): Pr
 // MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (UPDATED)
 // ============================================================
 
+// ============================================================
+// MAIN FUNCTION: GET AVAILABLE PLANS FOR NETWORK (UPDATED)
+// ============================================================
+
 async function getAvailablePlansForNetwork(
   network: string, 
   phoneNumber?: string, 
   userRole: string = 'END_USER'
 ): Promise<string> {
   try {
-    const cacheKey = `${network.toUpperCase()}_${userRole}`;
+    const networkUpper = network.toUpperCase();
+    const cacheKey = `${networkUpper}_${userRole}`;
     
+    // ✅ Return cached message if fresh
     if (networkPlanCacheTime.get(cacheKey) && 
         Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) < CACHE_TTL && 
         cachedNetworkMessages.has(cacheKey)) {
-      console.log(`[Data Plans] Returning cached WhatsApp plans for ${network} (${userRole})`);
+      console.log(`[Data Plans] Returning cached WhatsApp plans for ${cacheKey}`);
       return cachedNetworkMessages.get(cacheKey)!;
     }
     
-    console.log(`[Data Plans] Fetching WhatsApp plans for ${network} (${userRole}) from database...`);
+    console.log(`[Data Plans] Fetching WhatsApp plans for ${cacheKey} from database...`);
 
     const vendorService = await getActiveDataVendor();
     if (!vendorService) {
       console.log('[Data Plans] No active vendor found for DATA');
-      return getFallbackPlansForNetwork(network, userRole);
+      return getFallbackPlansForNetwork(networkUpper, userRole);
     }
 
     console.log(`[Data Plans] Active vendor: ${vendorService.vendor.name} (${vendorService.vendor.code})`);
 
-    const where = buildWhatsAppPlanWhereClause(vendorService.vendorId, network);
-    console.log(`[Data Plans] Where clause (WhatsApp only):`, JSON.stringify(where));
+    const where = buildWhatsAppPlanWhereClause(vendorService.vendorId, networkUpper);
+    console.log(`[Data Plans] Where clause:`, JSON.stringify(where));
 
     const dbPlans = await prisma.dataPlan.findMany({
       where,
@@ -1065,48 +1093,52 @@ async function getAvailablePlansForNetwork(
     console.log(`[Data Plans] Database returned ${dbPlans.length} WhatsApp-active plans`);
 
     if (dbPlans.length === 0) {
-      const totalPlans = await countActivePlansForNetwork(vendorService.vendorId, network);
+      const totalPlans = await countActivePlansForNetwork(vendorService.vendorId, networkUpper);
       console.log(`[Data Plans] Found ${totalPlans} total active plans, 0 are WhatsApp-enabled`);
-      return getFallbackPlansForNetwork(network, userRole);
+      return getFallbackPlansForNetwork(networkUpper, userRole);
     }
 
+    // ✅ Log plan details including vendorPlanId for debugging
     if (dbPlans.length > 0) {
-      console.log(`[Data Plans] First WhatsApp plan:`, JSON.stringify({
-        id: dbPlans[0].id,
-        name: dbPlans[0].name,
-        ourPrice: dbPlans[0].ourPrice?.toString(),
-        agentPrice: dbPlans[0].agentPrice?.toString(),
-        amountMB: dbPlans[0].amountMB,
-        validity: dbPlans[0].validity,
-        validityUnit: dbPlans[0].validityUnit,
-        vendorPlanId: dbPlans[0].vendorPlanId,
-        isActiveForWhatsApp: dbPlans[0].isActiveForWhatsApp,
-      }));
+      console.log(`[Data Plans] First 3 plans (${cacheKey}):`, dbPlans.slice(0, 3).map(p => ({
+        name: p.name,
+        amountMB: p.amountMB,
+        ourPrice: p.ourPrice?.toString(),
+        agentPrice: p.agentPrice?.toString(),
+        vendorPlanId: p.vendorPlanId,
+        dbId: p.id,
+        vendorId: p.vendorId,
+        network: p.network,
+      })));
     }
 
-    // ✅ Pass userRole to processPlansForWhatsApp
-    const { planMap, message, count } = processPlansForWhatsApp(dbPlans, network, userRole);
-    console.log(`[Data Plans] Added ${count} WhatsApp plans to message using ${userRole} pricing`);
+    const { planMap, message, count } = processPlansForWhatsApp(dbPlans, networkUpper, userRole);
+    console.log(`[Data Plans] Added ${count} plans to message using ${userRole} pricing`);
 
     if (count === 0) {
-      console.log('[Data Plans] No valid WhatsApp plans with price > 0, using fallback');
-      return getFallbackPlansForNetwork(network, userRole);
+      console.log('[Data Plans] No valid plans with price > 0, using fallback');
+      return getFallbackPlansForNetwork(networkUpper, userRole);
     }
 
+    // ✅ Cache both map and message
     cachedNetworkPlans.set(cacheKey, planMap);
     cachedNetworkMessages.set(cacheKey, message);
     networkPlanCacheTime.set(cacheKey, Date.now());
     
-    console.log(`[Data Plans] Cached ${planMap.size} WhatsApp plans for ${network} (${userRole})`);
-    console.log(`[Data Plans] Message preview:`, message.substring(0, 100) + '...');
+    console.log(`[Data Plans] ✅ Cached ${planMap.size} plans for ${cacheKey}`);
+    console.log(`[Data Plans] Cache indices: ${Array.from(planMap.keys()).join(', ')}`);
     
     return message;
     
   } catch (error) {
     console.error('[Data Plans] Error fetching plans:', error);
-    return getFallbackPlansForNetwork(network, userRole);
+    return getFallbackPlansForNetwork(network.toUpperCase(), userRole);
   }
 }
+
+// ============================================================
+// FALLBACK PLANS (UPDATED - includes vendorPlanId for consistency)
+// ============================================================
 
 function getFallbackPlansForNetwork(network: string, userRole: string = 'END_USER'): string {
   const fallbackPlans: Record<string, any[]> = {
@@ -1133,14 +1165,15 @@ function getFallbackPlansForNetwork(network: string, userRole: string = 'END_USE
     ],
   };
 
-  const plans = fallbackPlans[network.toUpperCase()] || fallbackPlans['MTN'];
-  const cacheKey = `${network.toUpperCase()}_${userRole}`;
+  const networkUpper = network.toUpperCase();
+  const plans = fallbackPlans[networkUpper] || fallbackPlans['MTN'];
+  const cacheKey = `${networkUpper}_${userRole}`;
   const planMap = new Map<number, { planData: any, provider: string, network: string, planId: string }>();
   
   const isAgent = (userRole === 'AGENT' || userRole === 'RETAILER');
   const emoji = isAgent ? '🤝' : '📱';
   
-  let message = `${emoji} Available Data Plans for ${network}`;
+  let message = `${emoji} Available Data Plans for ${networkUpper}`;
   if (isAgent) {
     message += ` (Agent Pricing)`;
   }
@@ -1151,29 +1184,53 @@ function getFallbackPlansForNetwork(network: string, userRole: string = 'END_USE
     const price = isAgent ? (plan.agentPrice || plan.retailPrice) : plan.retailPrice;
     const retailNote = isAgent && plan.retailPrice > price ? ` (Retail: NGN ${plan.retailPrice})` : '';
     
+    // ✅ Fallback plans use data string as planId (e.g., "1GB")
+    const fallbackPlanId = `FALLBACK_${networkUpper}_${plan.data}`;
+    
     planMap.set(idx, {
       planData: {
         data: plan.data,
         price: price,
         validity: plan.validity,
         planCode: plan.data,
-        amountMB: plan.data.includes('GB') ? parseInt(plan.data) * 1024 : parseInt(plan.data),
+        amountMB: plan.data.includes('GB') ? parseFloat(plan.data) * 1024 : parseFloat(plan.data),
+        // ✅ Include fallback identifiers
+        vendorPlanId: null,
+        dbId: null,
+        vendorId: null,
+        vendorNetworkCode: null,
+        vendorPlanType: null,
+        network: networkUpper,
+        planType: 'FALLBACK',
+        ourPrice: plan.retailPrice,
+        agentPrice: plan.agentPrice,
+        vendorPrice: 0,
+        priceType: isAgent ? 'AGENT' : 'RETAIL',
+        isFallback: true,
       },
-      provider: network,
-      network: network,
-      planId: plan.data,
+      provider: networkUpper,
+      network: networkUpper,
+      planId: fallbackPlanId,
     });
+    
     message += `  ${idx}. ${plan.data} - NGN ${price} (${plan.validity})${retailNote}\n`;
   });
   
   cachedNetworkPlans.set(cacheKey, planMap);
   cachedNetworkMessages.set(cacheKey, message + `\n\nTo buy: DATA [index]\nExample: DATA 1`);
   networkPlanCacheTime.set(cacheKey, Date.now());
+  
+  console.log(`[Data Plans] ⚠️ Using fallback plans for ${cacheKey} (${planMap.size} plans)`);
+  
   return cachedNetworkMessages.get(cacheKey)!;
 }
 
 // ============================================================
 // GET PLAN BY INDEX FOR NETWORK (UPDATED)
+// ============================================================
+
+// ============================================================
+// GET PLAN BY INDEX FOR NETWORK (UPDATED - Robust cache handling)
 // ============================================================
 
 async function getPlanByIndexForNetwork(
@@ -1186,27 +1243,54 @@ async function getPlanByIndexForNetwork(
   network: string, 
   planId: string 
 } | null> {
-  const cacheKey = `${network.toUpperCase()}_${userRole}`;
+  const networkUpper = network.toUpperCase();
+  const cacheKey = `${networkUpper}_${userRole}`;
   
-  if (!cachedNetworkPlans.has(cacheKey) || 
-      Date.now() - (networkPlanCacheTime.get(cacheKey) || 0) >= CACHE_TTL) {
-    console.log(`[Data Plans] Cache empty for ${network} (${userRole}), refreshing...`);
-    await getAvailablePlansForNetwork(network, undefined, userRole);
+  // ✅ Check if cache exists AND is still valid
+  const cacheExists = cachedNetworkPlans.has(cacheKey);
+  const cacheAge = Date.now() - (networkPlanCacheTime.get(cacheKey) || 0);
+  const cacheExpired = cacheAge >= CACHE_TTL;
+  
+  if (!cacheExists || cacheExpired) {
+    console.log(`[Data Plans] Cache ${!cacheExists ? 'missing' : 'expired'} for ${cacheKey}, refreshing...`);
+    await getAvailablePlansForNetwork(networkUpper, undefined, userRole);
   }
   
   const planMap = cachedNetworkPlans.get(cacheKey);
   if (!planMap) {
-    console.log(`[Data Plans] No plan map for ${network} (${userRole})`);
+    console.log(`[Data Plans] ❌ No plan map found for ${cacheKey} after refresh`);
     return null;
   }
   
   const plan = planMap.get(indexNumber);
-  if (plan) {
-    console.log(`[Data Plans] Found plan at index ${indexNumber}: ${plan.planData.data} - ₦${plan.planData.price} (Plan ID: ${plan.planId})`);
-  } else {
-    console.log(`[Data Plans] No plan at index ${indexNumber}, map size: ${planMap.size}`);
+  
+  if (!plan) {
+    console.log(`[Data Plans] ❌ Index ${indexNumber} not found in ${cacheKey} (map size: ${planMap.size})`);
+    console.log(`[Data Plans] Available indices: ${Array.from(planMap.keys()).join(', ')}`);
+    return null;
   }
-  return plan || null;
+  
+  // ✅ Verify plan integrity before returning
+  if (!plan.planId) {
+    console.error(`[Data Plans] ⚠️ Plan at index ${indexNumber} has no planId! Plan:`, {
+      data: plan.planData?.data,
+      price: plan.planData?.price,
+      vendorPlanId: plan.planData?.vendorPlanId,
+      dbId: plan.planData?.dbId,
+    });
+    return null;
+  }
+  
+  console.log(`[Data Plans] ✅ Resolved index ${indexNumber} for ${cacheKey}:`, {
+    data: plan.planData.data,
+    price: plan.planData.price,
+    planId: plan.planId,
+    vendorPlanId: plan.planData.vendorPlanId,
+    dbId: plan.planData.dbId,
+    network: plan.network,
+  });
+  
+  return plan;
 }
 
 // ============================================================
@@ -1252,6 +1336,10 @@ Please fund your wallet and try again.`
 // PROCESS DATA PURCHASE WITH QUEUE (UPDATED - passes user role)
 // ============================================================
 
+// ============================================================
+// PROCESS DATA PURCHASE WITH QUEUE (UPDATED - Full plan metadata)
+// ============================================================
+
 async function processDataPurchaseWithQueue(
   user: any,
   phoneNumber: string,
@@ -1278,14 +1366,23 @@ async function processDataPurchaseWithQueue(
   const provider = planInfo.provider;
   const amount = Number(planData.price);
   const normalizedTarget = normalizePhoneNumber(phoneNumber);
-  const planId = planInfo.planId;
+  const planId = planInfo.planId;  // ✅ vendorPlanId
 
   const balanceCheck = await checkUserBalance(user.id, amount);
   if (!balanceCheck.success) {
     return balanceCheck.message!;
   }
 
-  console.log(`[Data Purchase] Balance check passed: ${balanceCheck.balance} >= ${amount}`);
+  console.log(`[Data Purchase Queue] Plan resolved:`, {
+    network: detectedNetwork,
+    index: indexNum,
+    planId: planId,
+    vendorPlanId: planData.vendorPlanId,
+    dbId: planData.dbId,
+    target: normalizedTarget,
+    isOwnNumber: isOwnNumber,
+    priceType: planData.priceType,
+  });
 
   const transaction = await prisma.vtuTransaction.create({
     data: {
@@ -1309,10 +1406,19 @@ async function processDataPurchaseWithQueue(
         isOwnNumber: isOwnNumber,
         queued: true,
         requiresPin: false,
-        planId: planId,
+        
+        // ✅ CRITICAL IDENTIFIERS for third-party vendor mapping
+        planId: planId,                      // vendorPlanId (e.g., "194")
+        vendorPlanId: planData.vendorPlanId,
+        dbPlanId: planData.dbId,
+        planCode: planData.planCode,
+        vendorNetworkCode: planData.vendorNetworkCode,
+        vendorPlanType: planData.vendorPlanType,
+        selectedIndex: indexNum,             // ← Which index the user picked
+        
         balanceAtPurchase: balanceCheck.balance,
         userRole: user.role,
-        priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
+        priceType: planData.priceType,
       },
     },
   });
@@ -1328,7 +1434,15 @@ async function processDataPurchaseWithQueue(
       detectedNetwork: detectedNetwork,
       serviceType: "DATA",
       isOwnNumber: isOwnNumber,
+      
+      // ✅ CRITICAL: All IDs for vendor routing
       planId: planId,
+      vendorPlanId: planData.vendorPlanId,
+      dbPlanId: planData.dbId,
+      planCode: planData.planCode,
+      vendorNetworkCode: planData.vendorNetworkCode,
+      vendorPlanType: planData.vendorPlanType,
+      selectedIndex: indexNum,
     },
     5,
     3,
@@ -1351,6 +1465,8 @@ You'll receive a confirmation shortly.`;
 // ============================================================
 // PROCESS DATA PURCHASE WITH PIN (UPDATED - passes user role)
 // ============================================================
+
+
 
 async function processDataPurchaseWithPin(
   user: any,
@@ -1377,14 +1493,22 @@ async function processDataPurchaseWithPin(
   const provider = planInfo.provider;
   const amount = Number(planData.price);
   const normalizedTarget = normalizePhoneNumber(phoneNumber);
-  const planId = planInfo.planId;
+  const planId = planInfo.planId;  // ✅ vendorPlanId
 
   const balanceCheck = await checkUserBalance(user.id, amount);
   if (!balanceCheck.success) {
     return balanceCheck.message!;
   }
 
-  console.log(`[Data Purchase PIN] Balance check passed: ${balanceCheck.balance} >= ${amount}`);
+  console.log(`[Data Purchase PIN] Plan resolved:`, {
+    network: detectedNetwork,
+    index: indexNum,
+    planId: planId,
+    vendorPlanId: planData.vendorPlanId,
+    dbId: planData.dbId,
+    target: normalizedTarget,
+    priceType: planData.priceType,
+  });
 
   const transaction = await prisma.vtuTransaction.create({
     data: {
@@ -1408,10 +1532,19 @@ async function processDataPurchaseWithPin(
         isOwnNumber: false,
         queued: false,
         requiresPin: true,
+        
+        // ✅ CRITICAL IDENTIFIERS for third-party vendor mapping
         planId: planId,
+        vendorPlanId: planData.vendorPlanId,
+        dbPlanId: planData.dbId,
+        planCode: planData.planCode,
+        vendorNetworkCode: planData.vendorNetworkCode,
+        vendorPlanType: planData.vendorPlanType,
+        selectedIndex: indexNum,
+        
         balanceAtPurchase: balanceCheck.balance,
         userRole: user.role,
-        priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
+        priceType: planData.priceType,
       },
     },
   });
@@ -2991,102 +3124,43 @@ ${settings.requirePin ? '⚠️ Remember: PIN is never required for your own num
   // ============================================================
   // SPECIAL CASE: Just an index number (e.g., "1", "2", "3")
   // ============================================================
-  if (/^\d+$/.test(command) && !command.startsWith("0")) {
-    const session = userSessions.get(user.id);
+if (/^\d+$/.test(command) && !command.startsWith("0")) {
+  const session = userSessions.get(user.id);
+  
+  if (session && session.command === 'DATA' && (Date.now() - session.timestamp) < SESSION_TIMEOUT) {
+    const targetPhone = session.phoneNumber;
+    const isOwnNumber = session.isOwnNumber;
+    const network = session.network;  // ✅ Use network from session (detected from target phone)
+    const indexNum = parseInt(command);
     
-    if (session && session.command === 'DATA' && (Date.now() - session.timestamp) < SESSION_TIMEOUT) {
-      const targetPhone = session.phoneNumber;
-      const isOwnNumber = session.isOwnNumber;
-      const network = session.network;
-      const indexNum = parseInt(command);
-      
-      const planInfo = await getPlanByIndexForNetwork(network, indexNum, user.role);
+    console.log(`[Session Data] User ${user.id} selected index ${indexNum} for ${network} (target: ${targetPhone}, role: ${user.role})`);
+    
+    // ✅ Look up using the SAME network and user role as the session
+    const planInfo = await getPlanByIndexForNetwork(network, indexNum, user.role);
 
-      if (!planInfo) {
-        const plans = await getAvailablePlansForNetwork(network, targetPhone, user.role);
-        return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
-      }
-      
-      const planData = planInfo.planData;
-      const provider = planInfo.provider;
-      const planId = planInfo.planId;
-      const normalizedTarget = normalizePhoneNumber(targetPhone);
-      const amount = Number(planData.price);
-      
-      userSessions.delete(user.id);
-      
-      const balanceCheck = await checkUserBalance(user.id, amount);
-      if (!balanceCheck.success) {
-        return balanceCheck.message!;
-      }
-      
-      // ✅ Check WhatsApp PIN setting
-      const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
-      
-      if (!pinRequired) {
-        // ✅ NO PIN - use queue
-        const transaction = await prisma.vtuTransaction.create({
-          data: {
-            userId: user.id,
-            transactionType: VtuType.DATA,
-            product: `${network} - ${planData.data}`,
-            amount: amount,
-            totalDebited: 0,
-            phoneNumber: normalizedTarget,
-            network: mapNetwork(network),
-            networkPlan: planData.planCode || planData.data,
-            status: TransactionStatus.PROCESSING,
-            channel: ChannelType.WHATSAPP,
-            metadata: {
-              source: "WhatsApp",
-              service: "DATA",
-              timestamp: new Date().toISOString(),
-              network: network,
-              planData: planData,
-              provider: provider,
-              isOwnNumber: isOwnNumber,
-              queued: true,
-              requiresPin: false,
-              planId: planId,
-              balanceAtPurchase: balanceCheck.balance,
-              userRole: user.role,
-              priceType: (user.role === 'AGENT' || user.role === 'RETAILER') ? 'AGENT' : 'RETAIL',
-            },
-          },
-        });
-
-        await createJob(
-          JobType.VTU_TRANSACTION,
-          {
-            transactionId: transaction.id,
-            userId: user.id,
-            phoneNumber: normalizedTarget,
-            planData: planData,
-            provider: provider,
-            detectedNetwork: network,
-            serviceType: "DATA",
-            isOwnNumber: isOwnNumber,
-            planId: planId,
-          },
-          5,
-          3,
-          new Date()
-        );
-
-        const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
-        return `Processing your data purchase...!
-
-Phone: ${normalizedTarget}
-Plan: ${dataDisplay} (${provider})
-Amount: NGN ${amount.toFixed(2)}
-Network: ${network}
-Reference: ${transaction.id.substring(0, 10)}
-
-You'll receive a confirmation shortly.`;
-      }
-      
-      // ✅ PIN REQUIRED
+    if (!planInfo) {
+      const plans = await getAvailablePlansForNetwork(network, targetPhone, user.role);
+      return `Invalid Plan Index\n\nNo plan found with index ${indexNum} for ${network}.\n\n${plans}`;
+    }
+    
+    const planData = planInfo.planData;
+    const provider = planInfo.provider;
+    const planId = planInfo.planId;  // ✅ vendorPlanId
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    const amount = Number(planData.price);
+    
+    userSessions.delete(user.id);
+    
+    const balanceCheck = await checkUserBalance(user.id, amount);
+    if (!balanceCheck.success) {
+      return balanceCheck.message!;
+    }
+    
+    // ✅ Check WhatsApp PIN setting
+    const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
+    
+    if (!pinRequired) {
+      // ✅ NO PIN - use queue
       const transaction = await prisma.vtuTransaction.create({
         data: {
           userId: user.id,
@@ -3097,7 +3171,7 @@ You'll receive a confirmation shortly.`;
           phoneNumber: normalizedTarget,
           network: mapNetwork(network),
           networkPlan: planData.planCode || planData.data,
-          status: TransactionStatus.PENDING,
+          status: TransactionStatus.PROCESSING,
           channel: ChannelType.WHATSAPP,
           metadata: {
             source: "WhatsApp",
@@ -3106,35 +3180,125 @@ You'll receive a confirmation shortly.`;
             network: network,
             planData: planData,
             provider: provider,
-            isOwnNumber: false,
-            queued: false,
-            requiresPin: true,
+            isOwnNumber: isOwnNumber,
+            queued: true,
+            requiresPin: false,
+            
+            // ✅ CRITICAL IDENTIFIERS
             planId: planId,
+            vendorPlanId: planData.vendorPlanId,
+            dbPlanId: planData.dbId,
+            planCode: planData.planCode,
+            vendorNetworkCode: planData.vendorNetworkCode,
+            vendorPlanType: planData.vendorPlanType,
+            selectedIndex: indexNum,
+            
             balanceAtPurchase: balanceCheck.balance,
+            userRole: user.role,
+            priceType: planData.priceType,
           },
         },
       });
 
-      const validationToken = generateValidationToken();
-      const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-      await prisma.vtuTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          metadata: {
-            ...transaction.metadata,
-            validationToken: validationToken,
-            validationExpiry: validationExpiry,
-          },
+      await createJob(
+        JobType.VTU_TRANSACTION,
+        {
+          transactionId: transaction.id,
+          userId: user.id,
+          phoneNumber: normalizedTarget,
+          planData: planData,
+          provider: provider,
+          detectedNetwork: network,
+          serviceType: "DATA",
+          isOwnNumber: isOwnNumber,
+          
+          // ✅ CRITICAL: All IDs for vendor routing
+          planId: planId,
+          vendorPlanId: planData.vendorPlanId,
+          dbPlanId: planData.dbId,
+          planCode: planData.planCode,
+          vendorNetworkCode: planData.vendorNetworkCode,
+          vendorPlanType: planData.vendorPlanType,
+          selectedIndex: indexNum,
         },
-      });
-
-      const appUrl = getAppUrl();
-      const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+        5,
+        3,
+        new Date()
+      );
 
       const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
 
-      return `📱 Data Purchase Initiated!
+      return `Processing your data purchase...!
+
+Phone: ${normalizedTarget}
+Plan: ${dataDisplay} (${provider})
+Amount: NGN ${amount.toFixed(2)}
+Network: ${network}
+Reference: ${transaction.id.substring(0, 10)}
+
+You'll receive a confirmation shortly.`;
+    }
+    
+    // ✅ PIN REQUIRED
+    const transaction = await prisma.vtuTransaction.create({
+      data: {
+        userId: user.id,
+        transactionType: VtuType.DATA,
+        product: `${network} - ${planData.data}`,
+        amount: amount,
+        totalDebited: 0,
+        phoneNumber: normalizedTarget,
+        network: mapNetwork(network),
+        networkPlan: planData.planCode || planData.data,
+        status: TransactionStatus.PENDING,
+        channel: ChannelType.WHATSAPP,
+        metadata: {
+          source: "WhatsApp",
+          service: "DATA",
+          timestamp: new Date().toISOString(),
+          network: network,
+          planData: planData,
+          provider: provider,
+          isOwnNumber: false,
+          queued: false,
+          requiresPin: true,
+          
+          // ✅ CRITICAL IDENTIFIERS
+          planId: planId,
+          vendorPlanId: planData.vendorPlanId,
+          dbPlanId: planData.dbId,
+          planCode: planData.planCode,
+          vendorNetworkCode: planData.vendorNetworkCode,
+          vendorPlanType: planData.vendorPlanType,
+          selectedIndex: indexNum,
+          
+          balanceAtPurchase: balanceCheck.balance,
+          userRole: user.role,
+          priceType: planData.priceType,
+        },
+      },
+    });
+
+    const validationToken = generateValidationToken();
+    const validationExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.vtuTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        metadata: {
+          ...transaction.metadata,
+          validationToken: validationToken,
+          validationExpiry: validationExpiry,
+        },
+      },
+    });
+
+    const appUrl = getAppUrl();
+    const purchaseLink = `${appUrl}/auth/validate-purchase?token=${validationToken}`;
+
+    const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
+
+    return `📱 Data Purchase Initiated!
 
 Phone: ${normalizedTarget}
 Plan: ${dataDisplay} (${provider})
@@ -3148,33 +3312,33 @@ Reference: ${transaction.id.substring(0, 10)}
 This link expires in 5 minutes.
 
 You'll receive a confirmation via WhatsApp after completion.`;
-    }
-    
-    // No session, show help for DATA command
-    const normalizedUserPhone = normalizePhoneNumber(user.phone);
-    const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-    
-    if (!detectedNetwork) {
-      return `Could Not Detect Your Network\n\nPlease type DATA to see available plans for your number.`;
-    }
-    
-    userSessions.set(user.id, {
-      command: 'DATA',
-      phoneNumber: user.phone,
-      network: detectedNetwork,
-      isOwnNumber: true,
-      timestamp: Date.now()
-    });
-    
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone);
-    return `📱 Buy Data
+  }
+  
+  // No session, show help for DATA command
+  const normalizedUserPhone = normalizePhoneNumber(user.phone);
+  const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
+  
+  if (!detectedNetwork) {
+    return `Could Not Detect Your Network\n\nPlease type DATA to see available plans for your number.`;
+  }
+  
+  userSessions.set(user.id, {
+    command: 'DATA',
+    phoneNumber: user.phone,
+    network: detectedNetwork,
+    isOwnNumber: true,
+    timestamp: Date.now()
+  });
+  
+  const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
+  return `📱 Buy Data
 
 DATA [index] - Buy data for YOUR number
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for another number
 
 ${plans}`;
-  }
+}
 
   // ============================================================
   // HELP
@@ -3232,115 +3396,131 @@ Type HELP for available commands.`;
   // ============================================================
   // DATA COMMAND
   // ============================================================
-  if (command.startsWith("DATA") || command.startsWith("DATA ")) {
-    let targetPhone: string;
-    let planQuery: string;
-    let isOwnNumber = false;
+// ============================================================
+// DATA COMMAND (UPDATED - Session-based network consistency)
+// ============================================================
+if (command.startsWith("DATA") || command.startsWith("DATA ")) {
+  let targetPhone: string;
+  let planQuery: string;
+  let isOwnNumber = false;
+  
+  // CASE 1: Just "DATA" - show plans for user's own number
+  if (parts.length === 1 && command === "DATA") {
+    const normalizedUserPhone = normalizePhoneNumber(user.phone);
+    const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
     
-    if (parts.length === 1 && command === "DATA") {
-      const normalizedUserPhone = normalizePhoneNumber(user.phone);
-      const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-      
-      if (!detectedNetwork) {
-        return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
-      }
-      
-      userSessions.set(user.id, {
-        command: 'DATA',
-        phoneNumber: user.phone,
-        network: detectedNetwork,
-        isOwnNumber: true,
-        timestamp: Date.now()
-      });
-      
-      const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
-      return `📱 Buy Data for YOUR number (${normalizedUserPhone})
+    if (!detectedNetwork) {
+      return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
+    }
+    
+    userSessions.set(user.id, {
+      command: 'DATA',
+      phoneNumber: user.phone,
+      network: detectedNetwork,
+      isOwnNumber: true,
+      timestamp: Date.now()
+    });
+    
+    const plans = await getAvailablePlansForNetwork(detectedNetwork, user.phone, user.role);
+    return `📱 Buy Data for YOUR number (${normalizedUserPhone})
 
 DATA [index] - Buy data
 DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for another number
 
 ${plans}`;
-    }
+  }
+  
+  // CASE 2: "DATA [single]" - could be index OR phone
+  if (parts.length === 2) {
+    const firstParam = parts[1];
+    const isPhoneNumber = /^[\d+]{10,15}$/.test(firstParam.replace(/\s/g, ''));
     
-    if (parts.length === 2) {
-      const firstParam = parts[1];
-      const isPhoneNumber = /^[\d+]{10,15}$/.test(firstParam.replace(/\s/g, ''));
-      
-      if (isPhoneNumber) {
-        targetPhone = firstParam;
-        const normalizedTarget = normalizePhoneNumber(targetPhone);
-        const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
-        
-        if (!detectedNetwork) {
-          return `Could Not Detect Network\n\nWe couldn't detect the network for ${targetPhone}.`;
-        }
-        
-        const normalizedUser = normalizePhoneNumber(user.phone);
-        isOwnNumber = normalizedTarget === normalizedUser;
-        
-        userSessions.set(user.id, {
-          command: 'DATA',
-          phoneNumber: targetPhone,
-          network: detectedNetwork,
-          isOwnNumber: isOwnNumber,
-          timestamp: Date.now()
-        });
-        
-        const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone, user.role);
-        return `📱 Buy Data for ${targetPhone}
-
-Just type the index number to buy
-
-${plans}`;
-      }
-      
-      targetPhone = user.phone;
-      planQuery = firstParam;
-      isOwnNumber = true;
-      
+    // ✅ SUB-CASE 2A: It's a phone number → show plans for that number
+    if (isPhoneNumber) {
+      targetPhone = firstParam;
       const normalizedTarget = normalizePhoneNumber(targetPhone);
-      const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
-      
-      if (!detectedNetwork) {
-        return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
-      }
-      
-      // ✅ Check WhatsApp PIN setting
-      const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
-      
-      if (!pinRequired) {
-        return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
-      }
-      return await processDataPurchaseWithPin(user, targetPhone, planQuery, detectedNetwork);
-    }
-    
-    if (parts.length >= 3) {
-      targetPhone = parts[1];
-      planQuery = parts.slice(2).join(' ');
-      const normalizedTarget = normalizePhoneNumber(targetPhone);
-      const normalizedUser = normalizePhoneNumber(user.phone);
-      isOwnNumber = normalizedTarget === normalizedUser;
       const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
       
       if (!detectedNetwork) {
         return `Could Not Detect Network\n\nWe couldn't detect the network for ${targetPhone}.`;
       }
       
-      // ✅ Check WhatsApp PIN setting
-      const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
+      const normalizedUser = normalizePhoneNumber(user.phone);
+      isOwnNumber = normalizedTarget === normalizedUser;
       
-      if (!pinRequired) {
-        return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
-      }
-      return await processDataPurchaseWithPin(user, targetPhone, planQuery, detectedNetwork);
+      // ✅ Store session with TARGET phone's network
+      userSessions.set(user.id, {
+        command: 'DATA',
+        phoneNumber: targetPhone,
+        network: detectedNetwork,
+        isOwnNumber: isOwnNumber,
+        timestamp: Date.now()
+      });
+      
+      const plans = await getAvailablePlansForNetwork(detectedNetwork, targetPhone, user.role);
+      return `📱 Buy Data for ${targetPhone}
+
+Just type the index number to buy
+
+${plans}`;
     }
     
-    const normalizedUserPhone = normalizePhoneNumber(user.phone);
-    const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
-    const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone, user.role);
+    // ✅ SUB-CASE 2B: It's an index → buy for own number
+    targetPhone = user.phone;
+    planQuery = firstParam;
+    isOwnNumber = true;
     
-    return `📱 Buy Data
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+    
+    if (!detectedNetwork) {
+      return `Could Not Detect Your Network\n\nPlease ensure your phone number is correct.`;
+    }
+    
+    const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
+    
+    if (!pinRequired) {
+      return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
+    }
+    return await processDataPurchaseWithPin(user, targetPhone, planQuery, detectedNetwork);
+  }
+  
+  // CASE 3: "DATA [phone] [index]" - third-party purchase
+  if (parts.length >= 3) {
+    targetPhone = parts[1];
+    planQuery = parts.slice(2).join(' ');
+    const normalizedTarget = normalizePhoneNumber(targetPhone);
+    const normalizedUser = normalizePhoneNumber(user.phone);
+    isOwnNumber = normalizedTarget === normalizedUser;
+    const detectedNetwork = detectNetworkFromPhone(normalizedTarget);
+    
+    if (!detectedNetwork) {
+      return `Could Not Detect Network\n\nWe couldn't detect the network for ${targetPhone}.`;
+    }
+    
+    console.log(`[Data Purchase] Third-party request:`, {
+      target: normalizedTarget,
+      network: detectedNetwork,
+      index: planQuery,
+      isOwnNumber,
+      userRole: user.role,
+    });
+    
+    const pinRequired = await isWhatsAppPinRequired(user.id, isOwnNumber);
+    
+    if (!pinRequired) {
+      return await processDataPurchaseWithQueue(user, targetPhone, planQuery, detectedNetwork, isOwnNumber);
+    }
+    return await processDataPurchaseWithPin(user, targetPhone, planQuery, detectedNetwork);
+  }
+  
+  // Fallback
+  const normalizedUserPhone = normalizePhoneNumber(user.phone);
+  const detectedNetwork = detectNetworkFromPhone(normalizedUserPhone);
+  const plans = await getAvailablePlansForNetwork(detectedNetwork || 'MTN', user.phone, user.role);
+  
+  return `📱 Buy Data
 
 DATA - Show available plans for YOUR number
 DATA [index] - Buy data for YOUR number
@@ -3348,7 +3528,7 @@ DATA [phone] - Show plans for another number
 DATA [phone] [index] - Buy data for another number
 
 ${plans}`;
-  }
+}
 
   // ============================================================
   // QR COMMAND
