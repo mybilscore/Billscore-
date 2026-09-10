@@ -938,6 +938,10 @@ function getDisplayPrice(plan: any, userRole: string = 'END_USER'): number {
 // HELPER: Process plans and build message (UPDATED - Role-based + Full ID tracking)
 // ============================================================
 
+// ============================================================
+// HELPER: Process plans and build message (UPDATED - Role-based + Full ID tracking)
+// ============================================================
+
 function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: string = 'END_USER'): {
   planMap: Map<number, { planData: any, provider: string, network: string, planId: string }>;
   message: string;
@@ -948,11 +952,11 @@ function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: stri
   const isAgent = (userRole === 'AGENT' || userRole === 'RETAILER');
   const emoji = isAgent ? '🤝' : '📱';
   
-  let message = `${emoji} *${network} Data Plans*`;
+  // ✅ Normalize network to enum-valid string
+  const networkEnum = network.toUpperCase().replace('9MOBILE', 'NINEMOBILE');
   
-  if (isAgent) {
-    message += ` (Agent Pricing)`;
-  }
+  let message = `${emoji} *${networkEnum} Data Plans*`;
+  if (isAgent) message += ` (Agent Pricing)`;
   message += `\n\n`;
   
   let index = 1;
@@ -971,37 +975,59 @@ function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: stri
       priceNote = ` (Retail: ₦${Number(plan.ourPrice).toFixed(0)})`;
     }
     
-    // ✅ PRIMARY ID: vendorPlanId (unique within vendor — critical for third-party purchases)
-    // ✅ FALLBACKS: planCode → dbId → dataDisplay
-    const planId = plan.vendorPlanId || plan.planCode || plan.id || plan.dataDisplay;
+    // ✅ THE ID THAT GETS SENT TO THE VENDOR
+    // For BilalSada: this is the numeric code (e.g., "194", "263")
+    // For VTPass: this is the variation_code
+    const vendorPlanId = plan.vendorPlanId || plan.planCode || plan.id;
+    
+    if (!vendorPlanId) {
+      console.warn(`[Data Plans] ⚠️ Skipping plan with no vendorPlanId:`, {
+        name: plan.name,
+        dbId: plan.id,
+      });
+      continue;
+    }
+    
+    // ✅ This is the ID that will actually be sent to the vendor
+    // Mirrors web-app route: finalPlanCode = dataPlan.vendorPlanId
+    const finalPlanCode = String(vendorPlanId);
     
     planMap.set(index, {
       planData: {
-        // Display data
-        data: dataDisplay,
+        // ===== DISPLAY FIELDS (for WhatsApp message only) =====
+        data: dataDisplay,               // "1.0GB"
         price: displayPrice,
-        validity: validityDisplay,
+        validity: validityDisplay,       // "30 days"
         amountMB: plan.amountMB || 0,
         
-        // ✅ ALL IDs preserved for reliable vendor mapping
-        planCode: plan.planCode || plan.id || dataDisplay,
-        vendorPlanId: plan.vendorPlanId || null,   // ← CRITICAL for third-party
-        dbId: plan.id || null,                      // ← Database UUID
+        // ===== THE REAL VENDOR ID =====
+        vendorPlanId: plan.vendorPlanId || null,   // ← "194" (what BilalSada expects)
+        planCode: plan.planCode || null,
+        finalPlanCode: finalPlanCode,              // ← mirror of web-app route
+        dbId: plan.id || null,
         vendorId: plan.vendorId || null,
+        
+        // ===== VENDOR ROUTING =====
         vendorNetworkCode: plan.vendorNetworkCode || null,
         vendorPlanType: plan.vendorPlanType || null,
-        network: plan.network || network,
+        
+        // ===== NETWORK (must be enum string) =====
+        network: networkEnum,            // "MTN" | "GLO" | "AIRTEL" | "NINEMOBILE"
         planType: plan.planType || null,
         
-        // Pricing snapshot (for audit)
+        // ===== PRICING SNAPSHOT =====
         ourPrice: Number(plan.ourPrice) || 0,
         agentPrice: Number(plan.agentPrice) || 0,
         vendorPrice: Number(plan.vendorPrice) || 0,
         priceType: isAgent ? 'AGENT' : 'RETAIL',
+        
+        // ===== FLAGS =====
+        isFallback: false,
+        displayIndex: index,             // What the user saw (1-based)
       },
-      provider: network,
-      network: network,
-      planId: planId,
+      provider: networkEnum,
+      network: networkEnum,
+      planId: finalPlanCode,             // ← ALWAYS the vendor's ID, never display
     });
     
     message += `${index}. ${dataDisplay} - ${priceDisplay} (${validityDisplay})${priceNote}\n`;
@@ -1013,10 +1039,7 @@ function processPlansForWhatsApp(dbPlans: any[], network: string, userRole: stri
     message += `\n_Reply with DATA [index] to buy_\n`;
     message += `_Example: DATA 1_\n`;
     message += `_For another number: DATA [phone] [index]_`;
-    
-    if (isAgent) {
-      message += `\n\n🤝 *Agent Benefits:* You get these special prices!`;
-    }
+    if (isAgent) message += `\n\n🤝 *Agent Benefits:* You get these special prices!`;
   }
 
   return { planMap, message, count };
@@ -1337,7 +1360,7 @@ Please fund your wallet and try again.`
 // ============================================================
 
 // ============================================================
-// PROCESS DATA PURCHASE WITH QUEUE (UPDATED - Full plan metadata)
+// PROCESS DATA PURCHASE WITH QUEUE (UPDATED - resolves finalPlanCode from vendorPlanId)
 // ============================================================
 
 async function processDataPurchaseWithQueue(
@@ -1347,75 +1370,105 @@ async function processDataPurchaseWithQueue(
   detectedNetwork: string,
   isOwnNumber: boolean
 ): Promise<string> {
+  const networkEnum = detectedNetwork.toUpperCase().replace('9MOBILE', 'NINEMOBILE');
   const isIndex = /^\d+$/.test(planQuery);
   
   if (!isIndex) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
+    const plans = await getAvailablePlansForNetwork(networkEnum, phoneNumber, user.role);
     return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
   
   const indexNum = parseInt(planQuery);
-  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum, user.role);
+  const planInfo = await getPlanByIndexForNetwork(networkEnum, indexNum, user.role);
   
   if (!planInfo) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
-    return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
+    const plans = await getAvailablePlansForNetwork(networkEnum, phoneNumber, user.role);
+    return `Invalid plan index ${indexNum} for ${networkEnum}.\n\n${plans}`;
   }
 
   const planData = planInfo.planData;
-  const provider = planInfo.provider;
   const amount = Number(planData.price);
   const normalizedTarget = normalizePhoneNumber(phoneNumber);
-  const planId = planInfo.planId;  // ✅ vendorPlanId
+  
+  // ============================================================
+  // ✅ RESOLVE finalPlanCode — same pattern as web-app route
+  //     finalPlanCode = dataPlan.vendorPlanId   ← critical
+  // ============================================================
+  let finalPlanCode = String(
+    planData.finalPlanCode ||
+    planData.vendorPlanId ||
+    planData.planCode ||
+    ''
+  ).trim();
+  
+  // ✅ Reject fallback plans (no real vendor ID)
+  if (planData.isFallback || !finalPlanCode) {
+    return `⚠️ This plan is currently unavailable for purchase.
+
+Please try again later or contact support.
+
+Type DATA to refresh plans.`;
+  }
 
   const balanceCheck = await checkUserBalance(user.id, amount);
   if (!balanceCheck.success) {
     return balanceCheck.message!;
   }
 
-  console.log(`[Data Purchase Queue] Plan resolved:`, {
-    network: detectedNetwork,
-    index: indexNum,
-    planId: planId,
+  console.log(`[Data Purchase Queue] Resolved:`, {
+    displayIndex: indexNum,
+    displayData: planData.data,
+    finalPlanCode,                        // "194"
     vendorPlanId: planData.vendorPlanId,
-    dbId: planData.dbId,
+    planCode: planData.planCode,
+    network: networkEnum,
     target: normalizedTarget,
-    isOwnNumber: isOwnNumber,
-    priceType: planData.priceType,
+    isOwnNumber,
   });
 
   const transaction = await prisma.vtuTransaction.create({
     data: {
       userId: user.id,
       transactionType: VtuType.DATA,
-      product: `${detectedNetwork} - ${planData.data}`,
+      product: `${networkEnum} - ${planData.data}`,
       amount: amount,
       totalDebited: 0,
       phoneNumber: normalizedTarget,
-      network: mapNetwork(detectedNetwork),
-      networkPlan: planData.planCode || planData.data,
+      network: mapNetwork(networkEnum),
+      networkPlan: finalPlanCode,        // ✅ "194", NOT "1GB"
       status: TransactionStatus.PROCESSING,
       channel: ChannelType.WHATSAPP,
       metadata: {
         source: "WhatsApp",
         service: "DATA",
         timestamp: new Date().toISOString(),
-        network: detectedNetwork,
+        network: networkEnum,
+        
+        // ✅ IDs — mirror web-app route's fields
+        finalPlanCode: finalPlanCode,        // "194" ← vendor-facing
+        planId: finalPlanCode,               // "194"
+        vendorPlanId: planData.vendorPlanId, // "194"
+        planCode: planData.planCode,
+        dbPlanId: planData.dbId,
+        vendorNetworkCode: planData.vendorNetworkCode,
+        vendorPlanType: planData.vendorPlanType,
+        vendorId: planData.vendorId,
+        
+        // ✅ Display (never sent to vendor)
+        displayData: planData.data,
+        displayValidity: planData.validity,
+        displayIndex: indexNum,
+        amountMB: planData.amountMB,
+        
+        // ✅ Full plan object — matches web-app's requestData.dataPlan
         planData: planData,
-        provider: provider,
+        
+        // ✅ Flow
         isOwnNumber: isOwnNumber,
         queued: true,
         requiresPin: false,
         
-        // ✅ CRITICAL IDENTIFIERS for third-party vendor mapping
-        planId: planId,                      // vendorPlanId (e.g., "194")
-        vendorPlanId: planData.vendorPlanId,
-        dbPlanId: planData.dbId,
-        planCode: planData.planCode,
-        vendorNetworkCode: planData.vendorNetworkCode,
-        vendorPlanType: planData.vendorPlanType,
-        selectedIndex: indexNum,             // ← Which index the user picked
-        
+        // ✅ Audit
         balanceAtPurchase: balanceCheck.balance,
         userRole: user.role,
         priceType: planData.priceType,
@@ -1429,34 +1482,52 @@ async function processDataPurchaseWithQueue(
       transactionId: transaction.id,
       userId: user.id,
       phoneNumber: normalizedTarget,
-      planData: planData,
-      provider: provider,
-      detectedNetwork: detectedNetwork,
-      serviceType: "DATA",
-      isOwnNumber: isOwnNumber,
       
-      // ✅ CRITICAL: All IDs for vendor routing
-      planId: planId,
-      vendorPlanId: planData.vendorPlanId,
+      // ===== NETWORK =====
+      network: networkEnum,                  // "MTN"
+      detectedNetwork: networkEnum,          // "MTN"
+      
+      // ===== THE IDS (mirror web-app's requestData) =====
+      planCode: finalPlanCode,               // "194" ← vendor-facing
+      finalPlanCode: finalPlanCode,          // "194"
+      planId: finalPlanCode,                 // "194"
+      vendorPlanId: planData.vendorPlanId,   // "194"
       dbPlanId: planData.dbId,
-      planCode: planData.planCode,
       vendorNetworkCode: planData.vendorNetworkCode,
       vendorPlanType: planData.vendorPlanType,
-      selectedIndex: indexNum,
+      vendorId: planData.vendorId,
+      
+      // ===== FULL PLAN OBJECT (matches web-app's requestData.dataPlan) =====
+      dataPlan: {
+        id: planData.dbId,
+        name: planData.data,
+        network: networkEnum,
+        amountMB: planData.amountMB,
+        vendorPlanId: planData.vendorPlanId,
+        vendorNetworkCode: planData.vendorNetworkCode,
+        vendorPlanType: planData.vendorPlanType,
+      },
+      
+      // ===== BACKWARD COMPAT =====
+      planData: planData,
+      provider: networkEnum,
+      displayIndex: indexNum,
+      
+      // ===== FLOW =====
+      serviceType: "DATA",
+      isOwnNumber: isOwnNumber,
     },
     5,
     3,
     new Date()
   );
 
-  const dataDisplay = planData.data || `${planData.amountMB || 0}MB`;
-
   return `Processing your data purchase...!
 
 Phone: ${normalizedTarget}
-Plan: ${dataDisplay} (${provider})
+Plan: ${planData.data} (${networkEnum})
 Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
+Network: ${networkEnum}
 Reference: ${transaction.id.substring(0, 10)}
 
 You'll receive a confirmation shortly.`;
@@ -1474,74 +1545,100 @@ async function processDataPurchaseWithPin(
   planQuery: string,
   detectedNetwork: string
 ): Promise<string> {
+  const networkEnum = detectedNetwork.toUpperCase().replace('9MOBILE', 'NINEMOBILE');
   const isIndex = /^\d+$/.test(planQuery);
   
   if (!isIndex) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
+    const plans = await getAvailablePlansForNetwork(networkEnum, phoneNumber, user.role);
     return `Invalid input. Please use a plan index number.\nExample: 1\n\n${plans}`;
   }
   
   const indexNum = parseInt(planQuery);
-  const planInfo = await getPlanByIndexForNetwork(detectedNetwork, indexNum, user.role);
+  const planInfo = await getPlanByIndexForNetwork(networkEnum, indexNum, user.role);
   
   if (!planInfo) {
-    const plans = await getAvailablePlansForNetwork(detectedNetwork, phoneNumber, user.role);
-    return `Invalid plan index ${indexNum} for ${detectedNetwork}.\n\n${plans}`;
+    const plans = await getAvailablePlansForNetwork(networkEnum, phoneNumber, user.role);
+    return `Invalid plan index ${indexNum} for ${networkEnum}.\n\n${plans}`;
   }
 
   const planData = planInfo.planData;
-  const provider = planInfo.provider;
   const amount = Number(planData.price);
   const normalizedTarget = normalizePhoneNumber(phoneNumber);
-  const planId = planInfo.planId;  // ✅ vendorPlanId
+  
+  // ============================================================
+  // ✅ RESOLVE finalPlanCode — same pattern as web-app route
+  // ============================================================
+  let finalPlanCode = String(
+    planData.finalPlanCode ||
+    planData.vendorPlanId ||
+    planData.planCode ||
+    ''
+  ).trim();
+  
+  if (planData.isFallback || !finalPlanCode) {
+    return `⚠️ This plan is currently unavailable for purchase.
+
+Please try again later or contact support.
+
+Type DATA to refresh plans.`;
+  }
 
   const balanceCheck = await checkUserBalance(user.id, amount);
   if (!balanceCheck.success) {
     return balanceCheck.message!;
   }
 
-  console.log(`[Data Purchase PIN] Plan resolved:`, {
-    network: detectedNetwork,
-    index: indexNum,
-    planId: planId,
+  console.log(`[Data Purchase PIN] Resolved:`, {
+    displayIndex: indexNum,
+    displayData: planData.data,
+    finalPlanCode,
     vendorPlanId: planData.vendorPlanId,
-    dbId: planData.dbId,
-    target: normalizedTarget,
-    priceType: planData.priceType,
+    network: networkEnum,
   });
 
   const transaction = await prisma.vtuTransaction.create({
     data: {
       userId: user.id,
       transactionType: VtuType.DATA,
-      product: `${detectedNetwork} - ${planData.data}`,
+      product: `${networkEnum} - ${planData.data}`,
       amount: amount,
       totalDebited: 0,
       phoneNumber: normalizedTarget,
-      network: mapNetwork(detectedNetwork),
-      networkPlan: planData.planCode || planData.data,
+      network: mapNetwork(networkEnum),
+      networkPlan: finalPlanCode,        // ✅ "194"
       status: TransactionStatus.PENDING,
       channel: ChannelType.WHATSAPP,
       metadata: {
         source: "WhatsApp",
         service: "DATA",
         timestamp: new Date().toISOString(),
-        network: detectedNetwork,
+        network: networkEnum,
+        
+        // ✅ IDs
+        finalPlanCode: finalPlanCode,
+        planId: finalPlanCode,
+        vendorPlanId: planData.vendorPlanId,
+        planCode: planData.planCode,
+        dbPlanId: planData.dbId,
+        vendorNetworkCode: planData.vendorNetworkCode,
+        vendorPlanType: planData.vendorPlanType,
+        vendorId: planData.vendorId,
+        
+        // ✅ Display
+        displayData: planData.data,
+        displayValidity: planData.validity,
+        displayIndex: indexNum,
+        amountMB: planData.amountMB,
+        
+        // ✅ Full plan object
         planData: planData,
-        provider: provider,
+        
+        // ✅ Flow
         isOwnNumber: false,
         queued: false,
         requiresPin: true,
         
-        // ✅ CRITICAL IDENTIFIERS for third-party vendor mapping
-        planId: planId,
-        vendorPlanId: planData.vendorPlanId,
-        dbPlanId: planData.dbId,
-        planCode: planData.planCode,
-        vendorNetworkCode: planData.vendorNetworkCode,
-        vendorPlanType: planData.vendorPlanType,
-        selectedIndex: indexNum,
-        
+        // ✅ Audit
         balanceAtPurchase: balanceCheck.balance,
         userRole: user.role,
         priceType: planData.priceType,
@@ -1571,9 +1668,9 @@ async function processDataPurchaseWithPin(
   return `Data Purchase Initiated!
 
 Phone: ${normalizedTarget}
-Plan: ${dataDisplay} (${provider})
+Plan: ${dataDisplay} (${networkEnum})
 Amount: NGN ${amount.toFixed(2)}
-Network: ${detectedNetwork}
+Network: ${networkEnum}
 Reference: ${transaction.id.substring(0, 10)}
 
  **Complete Purchase:** ${purchaseLink}
