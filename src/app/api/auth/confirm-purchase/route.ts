@@ -1,4 +1,4 @@
-// app/api/auth/confirm-purchase/route.ts - UPDATED TO MATCH PROCESSOR
+// app/api/auth/confirm-purchase/route.ts - ALIGNED WITH PROCESSOR
 
 import { NextRequest, NextResponse } from "next/server";
 import { compare } from "bcrypt";
@@ -16,28 +16,8 @@ import {
 } from "@prisma/client";
 
 // ============================================================
-// DISCO TO VTpass SERVICE ID MAPPING (MATCHES PROCESSOR)
+// HELPERS
 // ============================================================
-
-const DISCO_TO_SERVICE_ID: Record<string, string> = {
-  'IKEJA': 'ikeja-electric',
-  'EKO': 'eko-electric',
-  'ABUJA': 'abuja-electric',
-  'KANO': 'kano-electric',
-  'PHCN': 'phcn-electric',
-  'IBADAN': 'ibadan-electric',
-  'BENIN': 'benin-electric',
-  'ENUGU': 'enugu-electric',
-  'JOS': 'jos-electric',
-  'PORT_HARCOURT': 'portharcourt-electric',
-  'PORTHARCOURT': 'portharcourt-electric',
-  'KADUNA': 'kaduna-electric',
-  'YOLA': 'yola-electric',
-};
-
-function getDiscoServiceId(discoCode: string): string | null {
-  return DISCO_TO_SERVICE_ID[discoCode.toUpperCase()] || null;
-}
 
 function getAppUrl(): string {
   const url = process.env.NEXTAUTH_URL || 
@@ -45,18 +25,27 @@ function getAppUrl(): string {
               process.env.APP_URL ||
               process.env.VERCEL_URL ||
               'https://app.bilscore.com';
-  
   const cleanUrl = url.replace(/\/$/, '');
-  
   if (url === process.env.VERCEL_URL && !url.startsWith('http')) {
     return `https://${cleanUrl}`;
   }
-  
   return cleanUrl;
 }
 
+// ✅ Network resolver — must match processor
+function resolveNetworkEnum(input: string | undefined | null): string {
+  const normalized = String(input || '').toUpperCase().trim();
+  if (normalized.includes('MTN')) return 'MTN';
+  if (normalized.includes('AIRTEL')) return 'AIRTEL';
+  if (normalized.includes('GLO')) return 'GLO';
+  if (normalized.includes('9MOBILE') || normalized.includes('NINEMOBILE') || normalized.includes('ETISALAT')) {
+    return 'NINEMOBILE';
+  }
+  return 'MTN';  // default
+}
+
 // ============================================================
-// HELPER: Send Token to WhatsApp - DIRECT IMPLEMENTATION
+// HELPER: Send Token to WhatsApp
 // ============================================================
 
 async function sendTokenToWhatsApp(phoneNumber: string, data: any): Promise<boolean> {
@@ -76,7 +65,7 @@ Thank you for using Bilscore!`;
         break;
 
       case "DATA":
-        const dataDisplay = data.metadata?.planData?.data || data.networkPlan || 'N/A';
+        const dataDisplay = data.metadata?.displayData || data.metadata?.planData?.data || data.networkPlan || 'N/A';
         message = `✅ Data Purchase Confirmed!
 
 Phone: ${data.phoneNumber || 'N/A'}
@@ -152,12 +141,7 @@ Reference: ${data.transactionId?.substring(0, 10) || 'N/A'}
 Thank you for using Bilscore!`;
     }
 
-    console.log(`📤 [WhatsApp] Sending confirmation to ${phoneNumber}`);
-    console.log(`📝 [WhatsApp] Message:`, message);
-
     await sendWhatsAppMessage(phoneNumber, message);
-
-    console.log(`✅ [WhatsApp] Message sent successfully to ${phoneNumber}`);
     return true;
 
   } catch (error) {
@@ -167,7 +151,7 @@ Thank you for using Bilscore!`;
 }
 
 // ============================================================
-// HELPER: Process Different Service Types (UPDATED - Matches Processor)
+// HELPER: Process Different Service Types (ALIGNED WITH PROCESSOR)
 // ============================================================
 
 async function processServicePurchase(
@@ -178,37 +162,95 @@ async function processServicePurchase(
   const vendorService = getVendorService();
 
   try {
-    // Validate PIN again for security
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
       return { success: false, error: "Invalid PIN" };
     }
 
-    let result;
+    const metadata = (transaction.metadata || {}) as any;
     const amount = Number(transaction.amount);
 
+    // ✅ Normalize network (mirrors job processor)
+    const network = resolveNetworkEnum(
+      metadata.network ||
+      metadata.detectedNetwork ||
+      metadata.planData?.network ||
+      transaction.product
+    );
+
+    let result;
+
     switch (transaction.transactionType) {
+      // ============================================================
+      // AIRTIME
+      // ============================================================
       case "AIRTIME":
         result = await vendorService.buyAirtime(
           {
             phoneNumber: transaction.phoneNumber || user.phone,
             amount: amount,
-            network: transaction.product || "MTN",
+            network: network,                    // ✅ enum string, never product
           },
           user.id
         );
         break;
 
-      case "DATA":
-        const planData = transaction.metadata?.planData || {};
-        const planId = transaction.metadata?.planId || planData?.planCode || planData?.data || transaction.networkPlan;
+      // ============================================================
+      // DATA — CRITICAL FIX
+      // ============================================================
+      case "DATA": {
+        const planData = metadata.planData || {};
+        
+        // ✅ Resolve finalPlanCode — mirror processor's priority order
+        // Priority: finalPlanCode → vendorPlanId → planId → planCode
+        // NEVER fall back to planData.data (that's display-only)
+        let finalPlanCode = String(
+          metadata.finalPlanCode ||
+          metadata.vendorPlanId ||
+          metadata.planId ||
+          planData.vendorPlanId ||
+          planData.planCode ||
+          ''
+        ).trim();
+        
+        if (!finalPlanCode) {
+          return {
+            success: false,
+            error: "Missing vendorPlanId in transaction metadata — cannot route to vendor",
+          };
+        }
+        
+        console.log(`[Confirm Purchase][DATA] Resolved:`, {
+          transactionId: transaction.id,
+          network,
+          finalPlanCode,                        // "194"
+          vendorPlanId: planData.vendorPlanId,
+          displayData: planData.data,           // "1.0GB" (never sent to vendor)
+        });
         
         result = await vendorService.buyData(
           {
             phoneNumber: transaction.phoneNumber || user.phone,
-            planCode: planId,
-            network: transaction.product || "MTN",
+            
+            // ✅ Vendor-facing ID
+            planCode: finalPlanCode,            // "194"
+            vendorPlanId: planData.vendorPlanId,
+            
+            // ✅ Network enum
+            network: network,                   // "MTN"
+            
             amount: amount,
+            
+            // ✅ Full plan object (mirrors web-app route + processor)
+            dataPlan: {
+              id: planData.dbId,
+              name: planData.data,
+              network: network,
+              amountMB: planData.amountMB,
+              vendorPlanId: planData.vendorPlanId,
+              vendorNetworkCode: planData.vendorNetworkCode,
+              vendorPlanType: planData.vendorPlanType,
+            },
           },
           user.id
         );
@@ -220,39 +262,61 @@ async function processServicePurchase(
           };
         }
         break;
+      }
 
+      // ============================================================
+      // ELECTRICITY — consistent discoCode (enum name, not service ID)
+      // ============================================================
       case "ELECTRICITY_INSTANT":
-      case "ELECTRICITY_PREORDER":
-        // ✅ Convert DisCo code to VTpass service ID (matches processor)
-        const discoCode = transaction.product || "";
-        const serviceId = getDiscoServiceId(discoCode);
+      case "ELECTRICITY_PREORDER": {
+        // ✅ Read from metadata first (webhook stores it there), fall back to product
+        // Match the processor: send the enum name like "IKEJA", not "ikeja-electric"
+        const discoCode = String(
+          metadata.discoCode ||
+          transaction.product ||
+          ''
+        ).toUpperCase().trim();
         
-        if (!serviceId) {
-          return { 
-            success: false, 
-            error: `Invalid DisCo code: ${discoCode}. Expected: IKEJA, EKO, ABUJA, etc.`
-          };
+        if (!discoCode) {
+          return { success: false, error: "Missing discoCode for electricity purchase" };
         }
         
-        console.log(`[Confirm Purchase] Converting DisCo ${discoCode} -> service ID ${serviceId}`);
+        console.log(`[Confirm Purchase][ELECTRICITY] Sending discoCode: ${discoCode}`);
         
         result = await vendorService.buyElectricity(
           {
             meterNumber: transaction.meterNumber || "",
             amount: amount,
-            discoCode: serviceId,  // ✅ Use service ID (matches processor)
+            discoCode: discoCode,               // "IKEJA" — matches processor
             meterType: transaction.meterType || "Prepaid",
             phone: user.phone,
           },
           user.id
         );
         break;
+      }
 
-      case "CABLE_TV":
+      // ============================================================
+      // CABLE TV — read package from metadata.packageCode
+      // ============================================================
+      case "CABLE_TV": {
+        const packageCode = String(
+          metadata.packageCode ||
+          transaction.networkPlan ||
+          ''
+        ).trim();
+        
+        const decoderNumber = String(
+          metadata.decoderNumber ||
+          metadata.smartCardNumber ||
+          transaction.phoneNumber ||
+          ''
+        ).trim();
+        
         result = await vendorService.buyCableTV(
           {
-            decoderNumber: transaction.metadata?.smartCardNumber || transaction.phoneNumber || "",
-            packageCode: transaction.networkPlan || "",
+            decoderNumber: decoderNumber,
+            packageCode: packageCode,           // ✅ from metadata.packageCode
             provider: transaction.product || "DSTV",
             amount: amount,
             phone: user.phone,
@@ -260,8 +324,12 @@ async function processServicePurchase(
           user.id
         );
         break;
+      }
 
-      case "EDUCATION":
+      // ============================================================
+      // EDUCATION
+      // ============================================================
+      case "EDUCATION": {
         result = await vendorService.buyEducation(
           {
             serviceId: transaction.product || "",
@@ -272,6 +340,7 @@ async function processServicePurchase(
           user.id
         );
         break;
+      }
 
       default:
         return { success: false, error: `Unsupported service: ${transaction.transactionType}` };
@@ -306,7 +375,7 @@ async function processServicePurchase(
 }
 
 // ============================================================
-// MAIN API ROUTE
+// MAIN API ROUTE (unchanged flow — only uses processServicePurchase)
 // ============================================================
 
 export async function POST(request: NextRequest) {
@@ -323,7 +392,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`🔍 [Confirm Purchase] Looking for token: ${token}`);
 
-    // Find transaction by validation token
     let transaction = await prisma.vtuTransaction.findFirst({
       where: {
         status: "PENDING",
@@ -334,9 +402,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Fallback: manual filter
     if (!transaction) {
-      console.log(`🔍 [Confirm Purchase] Fallback search...`);
       const pendingTransactions = await prisma.vtuTransaction.findMany({
         where: { status: "PENDING" },
         take: 50,
@@ -348,12 +414,10 @@ export async function POST(request: NextRequest) {
       
       if (found) {
         transaction = found;
-        console.log(`✅ [Confirm Purchase] Found via fallback: ${transaction.id}`);
       }
     }
 
     if (!transaction) {
-      console.log(`❌ [Confirm Purchase] No transaction found`);
       return NextResponse.json({
         success: false,
         error: "Invalid or expired validation link",
@@ -363,7 +427,6 @@ export async function POST(request: NextRequest) {
     console.log(`✅ [Confirm Purchase] Found transaction: ${transaction.id}`);
     console.log(`📋 [Confirm Purchase] Type: ${transaction.transactionType}`);
 
-    // Check if expired
     const validationExpiry = transaction.metadata?.validationExpiry;
     if (validationExpiry && new Date(validationExpiry) < new Date()) {
       return NextResponse.json({
@@ -372,7 +435,6 @@ export async function POST(request: NextRequest) {
       }, { status: 410 });
     }
 
-    // Check if already processed
     if (transaction.metadata?.processed === true) {
       return NextResponse.json({
         success: false,
@@ -380,17 +442,13 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get user
     const user = await prisma.user.findUnique({
       where: { id: transaction.userId },
       include: { wallet: true },
     });
 
     if (!user) {
-      return NextResponse.json({
-        success: false,
-        error: "User not found",
-      }, { status: 404 });
+      return NextResponse.json({ success: false, error: "User not found" }, { status: 404 });
     }
 
     if (!user.pinHash) {
@@ -400,23 +458,18 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Verify PIN
     const isValidPin = await compare(pin, user.pinHash);
     if (!isValidPin) {
       const updatedUser = await prisma.user.update({
         where: { id: user.id },
-        data: {
-          pinAttempts: { increment: 1 },
-        },
+        data: { pinAttempts: { increment: 1 } },
       });
 
       const attempts = updatedUser.pinAttempts;
       if (attempts >= 5) {
         await prisma.user.update({
           where: { id: user.id },
-          data: {
-            pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000),
-          },
+          data: { pinLockedUntil: new Date(Date.now() + 15 * 60 * 1000) },
         });
         return NextResponse.json({
           success: false,
@@ -431,29 +484,20 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // Reset PIN attempts
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        pinAttempts: 0,
-        pinLockedUntil: null,
-      },
+      data: { pinAttempts: 0, pinLockedUntil: null },
     });
 
-    // Check wallet balance
     const wallet = user.wallet;
     if (!wallet) {
-      return NextResponse.json({
-        success: false,
-        error: "Wallet not found",
-      }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Wallet not found" }, { status: 404 });
     }
 
     const amount = Number(transaction.amount);
     const currentBalance = Number(wallet.walletBalance);
     
     if (currentBalance < amount) {
-      // Update transaction as failed
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -467,19 +511,13 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // ✅ Send WhatsApp failure message for insufficient balance
       try {
         await sendWhatsAppMessage(
           user.phone,
-          `❌ ${transaction.transactionType} Purchase Failed!
-
-Amount: NGN ${amount.toFixed(2)}
-Error: Insufficient balance. You have NGN ${currentBalance.toFixed(2)}.
-
-Please fund your wallet and try again.`
+          `❌ ${transaction.transactionType} Purchase Failed!\n\nAmount: NGN ${amount.toFixed(2)}\nError: Insufficient balance. You have NGN ${currentBalance.toFixed(2)}.\n\nPlease fund your wallet and try again.`
         );
-      } catch (whatsappError) {
-        console.error("❌ [WhatsApp] Failed to send failure message:", whatsappError);
+      } catch (e) {
+        console.error("❌ [WhatsApp] Failed to send failure message:", e);
       }
 
       return NextResponse.json({
@@ -488,11 +526,9 @@ Please fund your wallet and try again.`
       }, { status: 400 });
     }
 
-    // Process the purchase
     const purchaseResult = await processServicePurchase(transaction, user, pin);
 
     if (!purchaseResult.success) {
-      // Update transaction as failed
       await prisma.vtuTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -506,19 +542,13 @@ Please fund your wallet and try again.`
         },
       });
 
-      // ✅ Send WhatsApp failure message
       try {
         await sendWhatsAppMessage(
           user.phone,
-          `❌ ${transaction.transactionType} Purchase Failed!
-
-Amount: NGN ${amount.toFixed(2)}
-Error: ${purchaseResult.error || "Purchase failed"}
-
-Please try again or contact support.`
+          `❌ ${transaction.transactionType} Purchase Failed!\n\nAmount: NGN ${amount.toFixed(2)}\nError: ${purchaseResult.error || "Purchase failed"}\n\nPlease try again or contact support.`
         );
-      } catch (whatsappError) {
-        console.error("❌ [WhatsApp] Failed to send failure message:", whatsappError);
+      } catch (e) {
+        console.error("❌ [WhatsApp] Failed to send failure message:", e);
       }
 
       return NextResponse.json({
@@ -529,15 +559,10 @@ Please try again or contact support.`
 
     const vendorData = purchaseResult.data;
 
-    // Debit wallet and update transaction
     await prisma.$transaction([
       prisma.wallet.update({
         where: { id: wallet.id },
-        data: {
-          walletBalance: {
-            decrement: amount,
-          },
-        },
+        data: { walletBalance: { decrement: amount } },
       }),
       prisma.walletTransaction.create({
         data: {
@@ -572,7 +597,6 @@ Please try again or contact support.`
       }),
     ]);
 
-    // Update pending wallet transaction to SUCCESS
     await prisma.walletTransaction.updateMany({
       where: {
         reference: `PENDING_${transaction.id}`,
@@ -584,19 +608,18 @@ Please try again or contact support.`
       },
     });
 
-    // Extract data for WhatsApp message based on transaction type
-    let serviceData: any = {
+    const serviceData: any = {
       transactionType: transaction.transactionType,
       amount: transaction.amount,
       transactionId: transaction.id,
       phoneNumber: transaction.phoneNumber || user.phone,
-      network: transaction.product,
+      network: transaction.metadata?.network,           // ← enum, not product
       networkPlan: transaction.networkPlan,
       meterNumber: transaction.meterNumber,
-      disco: transaction.product,
+      disco: transaction.metadata?.discoCode || transaction.product,
       provider: transaction.product,
       packageName: transaction.metadata?.packageName,
-      decoderNumber: transaction.metadata?.smartCardNumber || transaction.phoneNumber,
+      decoderNumber: transaction.metadata?.decoderNumber || transaction.metadata?.smartCardNumber,
       token: vendorData.token || vendorData.purchased_code || null,
       tokens: vendorData.tokens || [],
       cards: vendorData.cards || [],
@@ -606,11 +629,7 @@ Please try again or contact support.`
       metadata: transaction.metadata,
     };
 
-    // ✅ Send confirmation via WhatsApp - DIRECT CALL
     const messageSent = await sendTokenToWhatsApp(user.phone, serviceData);
-
-    console.log(`✅ [Confirm Purchase] Transaction ${transaction.id} completed successfully`);
-    console.log(`📤 [Confirm Purchase] WhatsApp message sent: ${messageSent}`);
 
     return NextResponse.json({
       success: true,
@@ -627,34 +646,26 @@ Please try again or contact support.`
   } catch (error: any) {
     console.error("❌ [Confirm Purchase] Error:", error);
     
-    // ✅ Try to send error message via WhatsApp if possible
     try {
       const body = await request.json().catch(() => null);
       const token = body?.token;
       if (token) {
-        const transaction = await prisma.vtuTransaction.findFirst({
+        const tx = await prisma.vtuTransaction.findFirst({
           where: {
-            metadata: {
-              path: "$.validationToken",
-              equals: token,
-            },
+            metadata: { path: "$.validationToken", equals: token },
           },
           include: { user: true },
         });
         
-        if (transaction?.user?.phone) {
+        if (tx?.user?.phone) {
           await sendWhatsAppMessage(
-            transaction.user.phone,
-            `❌ Purchase Failed!
-
-Error: ${error.message || "Unknown error"}
-
-Please try again or contact support.`
+            tx.user.phone,
+            `❌ Purchase Failed!\n\nError: ${error.message || "Unknown error"}\n\nPlease try again or contact support.`
           );
         }
       }
-    } catch (whatsappError) {
-      console.error("❌ Failed to send error WhatsApp:", whatsappError);
+    } catch (e) {
+      console.error("❌ Failed to send error WhatsApp:", e);
     }
 
     return NextResponse.json({
