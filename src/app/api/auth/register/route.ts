@@ -288,14 +288,13 @@ export async function POST(request: NextRequest) {
             refereeId: user.id,
             referralCode: validated.referralCode.toUpperCase(),
             status: "PENDING",
-            rewardAmount: 0, // Will be calculated on first deposit
-            channel: validated.preferredChannel as ChannelType || "MOBILE_APP",
+            rewardAmount: 0,
+            channel: validated.preferredChannel as any || "MOBILE_APP",
           },
         });
         console.log(`✅ Referral record created: ${referrerId} -> ${user.id}`);
       } catch (error) {
         console.error("❌ Failed to create referral record:", error);
-        // Continue with registration even if referral record fails
       }
     }
 
@@ -309,12 +308,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // STEP 11: CREATE PALMPAY WALLET
+    // STEP 11: CREATE PALMPAY WALLET (required — no fallback)
     // ============================================================
     let wallet: any = null;
     let virtualAccountNo: string | null = null;
     let isSimulation = false;
-    let palmpayError: string | null = null;
 
     try {
       console.log(`📤 Creating PalmPay virtual account for user ${user.id}...`);
@@ -338,96 +336,51 @@ export async function POST(request: NextRequest) {
       
     } catch (error: any) {
       console.error('❌ PalmPay virtual account creation failed:', error);
-      palmpayError = error.message;
       
-      // Create a fallback wallet
-      const accountNumber = `BIL${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-      
-      wallet = await prisma.wallet.create({
-        data: {
-          userId: user.id,
-          accountNumber: accountNumber,
-          bankName: "BILSCORE",
-          accountName: user.fullName,
-          walletBalance: 0,
-          ledgerBalance: 0,
-          currency: "NGN",
-          isActive: true,
-          kycLevel: 1,
-          metadata: {
-            createdVia: "registration_fallback",
-            palmpayError: palmpayError,
-            timestamp: new Date().toISOString(),
-          },
-        },
-      });
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { hasWallet: true },
-      });
-
-      console.log(`⚠️ Fallback wallet created: ${wallet.accountNumber}`);
-    }
-
-    // ============================================================
-    // STEP 12: CREDIT WELCOME BONUS
-    // ============================================================
-    const WELCOME_BONUS = parseInt(process.env.WELCOME_BONUS_AMOUNT || '20000');
-
-    if (wallet) {
-      const existingBonus = await prisma.walletTransaction.findFirst({
-        where: {
-          walletId: wallet.id,
-          reference: { startsWith: 'WELCOME_BONUS_' },
-        },
-      });
-
-      if (!existingBonus) {
-        const currentBalance = Number(wallet.walletBalance || 0);
-
-        await prisma.$transaction([
-          prisma.wallet.update({
-            where: { id: wallet.id },
-            data: {
-              walletBalance: { increment: WELCOME_BONUS },
-              ledgerBalance: { increment: WELCOME_BONUS },
-            },
-          }),
-          prisma.walletTransaction.create({
-            data: {
-              walletId: wallet.id,
-              userId: user.id,
-              type: "CREDIT",
-              amount: WELCOME_BONUS,
-              balanceBefore: currentBalance,
-              balanceAfter: currentBalance + WELCOME_BONUS,
-              reference: `WELCOME_BONUS_${user.id}`,
-              description: `Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} for joining Bilscore!`,
-              status: "SUCCESS",
-              category: "SYSTEM",
-              metadata: {
-                isWelcomeBonus: true,
-                amount: WELCOME_BONUS,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          }),
-        ]);
-
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { 
-            walletBalance: currentBalance + WELCOME_BONUS,
-          },
-        });
-
-        console.log(`🎉 Welcome bonus of ₦${WELCOME_BONUS.toLocaleString()} credited`);
+      // ✅ ROLLBACK: Delete the user and any partial wallet so the customer can retry
+      try {
+        // Cleanup any partial wallet that may have been created
+        await prisma.wallet.deleteMany({ where: { userId: user.id } });
+        
+        // Cleanup referral record if created
+        await prisma.referral.deleteMany({ where: { refereeId: user.id } });
+        
+        // Delete the user
+        await prisma.user.delete({ where: { id: user.id } });
+        
+        console.log(`🗑️ Rolled back user ${user.id} due to wallet creation failure`);
+      } catch (rollbackError) {
+        console.error('❌ Rollback failed:', rollbackError);
       }
+
+      // Audit the failure
+      auditLogger.log({
+        action: 'REGISTRATION_WALLET_FAILED' as any,
+        userId: validated.email,
+        metadata: {
+          email: validated.email,
+          phone: validated.phone,
+          error: error.message,
+          ip,
+          userAgent,
+        },
+        ipAddress: ip as string,
+        userAgent,
+      }).catch(() => {});
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "We couldn't set up your wallet right now. Please try again in a moment. If the problem persists, contact support.",
+          code: 'WALLET_CREATION_FAILED',
+          details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        },
+        { status: 503 }
+      );
     }
 
     // ============================================================
-    // STEP 13: AUDIT LOG
+    // STEP 12: AUDIT LOG
     // ============================================================
     auditLogger.log({
       userId: user.id,
@@ -447,13 +400,13 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
 
     // ============================================================
-    // STEP 14: Return success response
+    // STEP 13: Return success response
     // ============================================================
-    const finalWalletBalance = wallet ? Number(wallet.walletBalance) + WELCOME_BONUS : 0;
+    const finalWalletBalance = wallet ? Number(wallet.walletBalance) : 0;
 
     return NextResponse.json({
       success: true,
-      message: `Registration successful! Your wallet has been created with a ₦${WELCOME_BONUS.toLocaleString()} welcome bonus.`,
+      message: "Registration successful! Your wallet has been created.",
       user: {
         id: user.id,
         username: user.username,
@@ -478,8 +431,6 @@ export async function POST(request: NextRequest) {
         accountNumber: virtualAccountNo,
         isSimulation: isSimulation,
       } : null,
-      welcomeBonus: WELCOME_BONUS,
-      palmpayError: palmpayError,
       isSimulationMode: isSimulation,
     }, { status: 201 });
 
