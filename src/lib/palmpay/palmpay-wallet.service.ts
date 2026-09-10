@@ -2,17 +2,76 @@
 
 import { prisma } from '~/lib/db';
 import { getPalmPayService } from './palmpay.service';
-import { CreateVirtualAccountRequest, CreateVirtualAccountResponse } from './types';
+import {
+  CreateVirtualAccountRequest,
+  CreateVirtualAccountResponse,
+} from './types';
+
+// ============================================================
+// TYPES
+// ============================================================
 
 export interface CreateVirtualAccountForUserParams {
+  /** Company / business name — must match the CAC record */
   fullName: string;
   email: string;
   phone: string;
   role: string;
 }
 
+// ============================================================
+// HELPERS
+// ============================================================
+
 /**
- * Create a PalmPay virtual account for a user and link it to their wallet
+ * CAC validation.
+ * PalmPay requires: starts with "RC" or "BN", followed by 4–10 digits.
+ */
+function isValidCAC(value: string): boolean {
+  return /^(RC|BN)\d{4,10}$/i.test(value);
+}
+
+/**
+ * Read the CAC number from environment.
+ * Throws if missing or invalid — we fail fast rather than send bad data to PalmPay.
+ */
+function getEnvCAC(): string {
+  const raw = (process.env.PALMPAY_CAC_NUMBER || '').replace(/\s+/g, '').toUpperCase();
+
+  if (!raw) {
+    throw new Error(
+      'PALMPAY_CAC_NUMBER is not configured. Set it in .env (e.g., PALMPAY_CAC_NUMBER=RC1234567).'
+    );
+  }
+
+  if (!isValidCAC(raw)) {
+    throw new Error(
+      `PALMPAY_CAC_NUMBER is invalid: "${raw}". Must start with "RC" or "BN" followed by 4–10 digits.`
+    );
+  }
+
+  return raw;
+}
+
+/**
+ * Sanitize a name for `virtualAccountName`.
+ * Strips special characters, trims to 50 chars, replaces spaces with underscores.
+ */
+function cleanAccountName(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9 ]/g, '')
+    .substring(0, 50)
+    .trim()
+    .replace(/\s+/g, '_');
+}
+
+// ============================================================
+// CREATE VIRTUAL ACCOUNT FOR USER
+// ============================================================
+
+/**
+ * Create a PalmPay **company** virtual account for a user and link it to their wallet.
+ * Uses `identityType: 'company'` and the CAC number from `PALMPAY_CAC_NUMBER` env var.
  */
 export async function createPalmPayVirtualAccountForUser(
   userId: string,
@@ -24,37 +83,31 @@ export async function createPalmPayVirtualAccountForUser(
   const palmPay = getPalmPayService();
 
   try {
-    // Determine identity type based on what's available
-    const identityType = userData.phone.match(/^[0-9]{10,15}$/) 
-      ? 'personal'
-      : 'personal_nin';
+    // ---------- 1. Read and validate CAC from env ----------
+    const cacNumber = getEnvCAC();
+    const cacMasked = cacNumber.substring(0, 4) + '***';
 
-    // Clean virtual account name (remove special characters, max 50 chars)
-    const cleanName = userData.fullName
-      .replace(/[^a-zA-Z0-9 ]/g, '')
-      .substring(0, 50)
-      .replace(/ /g, '_');
+    console.log('📝 Creating PalmPay company virtual account:', {
+      userId,
+      identityType: 'company',
+      cacMasked,
+      customerName: userData.fullName,
+      email: userData.email,
+    });
 
-    // Build request according to PalmPay docs
+    // ---------- 2. Build request ----------
+    const cleanName = cleanAccountName(userData.fullName);
+
     const request: CreateVirtualAccountRequest = {
       virtualAccountName: `Bilscore_${cleanName}`,
-      identityType: identityType as 'personal' | 'personal_nin' | 'company',
-      licenseNumber: `BVN${userData.phone.substring(0, 11)}`,
+      identityType: 'company',
+      licenseNumber: cacNumber,
       email: userData.email,
       customerName: userData.fullName,
       accountReference: `BILSCORE_${userId}_${Date.now()}`,
     };
 
-    console.log('📝 Creating PalmPay virtual account:', {
-      userId,
-      virtualAccountName: request.virtualAccountName,
-      identityType: request.identityType,
-      email: request.email,
-      customerName: request.customerName,
-      // Don't log licenseNumber for privacy
-    });
-
-    // ✅ Create virtual account via PalmPay API
+    // ---------- 3. Call PalmPay ----------
     const response = await palmPay.createVirtualAccount(request);
 
     if (!response.status || !response.data) {
@@ -66,12 +119,11 @@ export async function createPalmPayVirtualAccountForUser(
 
     console.log(`✅ PalmPay virtual account created: ${virtualAccount.virtualAccountNo}`);
 
-    // ✅ Create wallet in database with PalmPay account number
+    // ---------- 4. Persist wallet ----------
     const wallet = await prisma.$transaction(async (tx) => {
-      // Create wallet with PalmPay account number
       const newWallet = await tx.wallet.create({
         data: {
-          userId: userId,
+          userId,
           accountNumber: virtualAccount.virtualAccountNo,
           bankName: 'PALMPAY',
           accountName: virtualAccount.virtualAccountName || userData.fullName,
@@ -79,13 +131,13 @@ export async function createPalmPayVirtualAccountForUser(
           ledgerBalance: 0,
           currency: 'NGN',
           isActive: true,
-          kycLevel: 1,
+          kycLevel: 2, // company accounts are Tier 2
           metadata: {
             palmpay: {
               virtualAccountNo: virtualAccount.virtualAccountNo,
               virtualAccountName: virtualAccount.virtualAccountName,
-              identityType: virtualAccount.identityType,
-              licenseNumber: virtualAccount.licenseNumber,
+              identityType: 'company',
+              cacMasked, // never store raw CAC
               accountReference: virtualAccount.accountReference,
               status: virtualAccount.status,
               appId: (virtualAccount as any).appId,
@@ -96,38 +148,32 @@ export async function createPalmPayVirtualAccountForUser(
         },
       });
 
-      // Update user
       await tx.user.update({
         where: { id: userId },
-        data: { 
-          hasWallet: true,
-        },
+        data: { hasWallet: true },
       });
 
-      // ✅ Create wallet transaction for virtual account creation (SYSTEM type)
       await tx.walletTransaction.create({
         data: {
           walletId: newWallet.id,
-          userId: userId,
-          type: 'SYSTEM', // ✅ Valid WalletTransactionType
+          userId,
+          type: 'SYSTEM',
           amount: 0,
           balanceBefore: 0,
           balanceAfter: 0,
           reference: `VA_${virtualAccount.virtualAccountNo}`,
-          description: `PalmPay virtual account created: ${virtualAccount.virtualAccountNo}`,
+          description: `PalmPay company virtual account created: ${virtualAccount.virtualAccountNo}`,
           status: 'SUCCESS',
           category: 'SYSTEM',
           metadata: {
             palmpay: {
               virtualAccountName: virtualAccount.virtualAccountName,
               virtualAccountNo: virtualAccount.virtualAccountNo,
-              identityType: virtualAccount.identityType,
+              identityType: 'company',
               email: virtualAccount.email,
-              licenseNumber: virtualAccount.licenseNumber,
-              customerName: virtualAccount.customerName,
+              cacMasked,
               status: virtualAccount.status,
               accountReference: virtualAccount.accountReference,
-              appId: (virtualAccount as any).appId,
             },
             action: 'VIRTUAL_ACCOUNT_CREATED',
           },
@@ -140,43 +186,38 @@ export async function createPalmPayVirtualAccountForUser(
     console.log(`✅ Wallet created: ${wallet.id} with account: ${wallet.accountNumber}`);
     console.log(`💰 Default balance: ₦${wallet.walletBalance}`);
 
-    return {
-      wallet,
-      virtualAccount,
-    };
-
+    return { wallet, virtualAccount };
   } catch (error: any) {
-    console.error('❌ Error creating PalmPay virtual account:', error);
+    console.error('❌ Error creating PalmPay virtual account:', error.message);
     throw error;
   }
 }
 
-/**
- * Check if PalmPay is in simulation mode
- */
+// ============================================================
+// HELPERS (unchanged)
+// ============================================================
+
 export function isPalmPaySimulationMode(): boolean {
   const palmPay = getPalmPayService();
   return palmPay.isSimulationMode();
 }
 
-/**
- * Get PalmPay virtual account for a user
- */
-export async function getPalmPayVirtualAccountForUser(userId: string): Promise<string | null> {
+export async function getPalmPayVirtualAccountForUser(
+  userId: string
+): Promise<string | null> {
   try {
     const wallet = await prisma.wallet.findUnique({
       where: { userId },
-      select: { accountNumber: true, metadata: true },
+      select: { accountNumber: true, metadata: true, bankName: true },
     });
 
     if (!wallet) return null;
 
-    // Check if this is a PalmPay virtual account
-    const isPalmpay = wallet.metadata?.palmpay || 
-                     (wallet.bankName === 'PALMPAY' && wallet.accountNumber.startsWith('6'));
+    const isPalmpay =
+      (wallet.metadata as any)?.palmpay ||
+      (wallet.bankName === 'PALMPAY' && wallet.accountNumber.startsWith('6'));
 
     if (!isPalmpay) return null;
-
     return wallet.accountNumber;
   } catch (error) {
     console.error('❌ Error fetching PalmPay virtual account:', error);
@@ -184,9 +225,6 @@ export async function getPalmPayVirtualAccountForUser(userId: string): Promise<s
   }
 }
 
-/**
- * Get PalmPay virtual account details for a user
- */
 export async function getPalmPayVirtualAccountDetails(userId: string): Promise<{
   virtualAccountNo: string;
   virtualAccountName: string;
@@ -201,20 +239,23 @@ export async function getPalmPayVirtualAccountDetails(userId: string): Promise<{
         accountName: true,
         walletBalance: true,
         metadata: true,
+        bankName: true,
       },
     });
 
     if (!wallet) return null;
 
-    const isPalmpay = wallet.metadata?.palmpay || 
-                     (wallet.bankName === 'PALMPAY' && wallet.accountNumber.startsWith('6'));
+    const meta: any = wallet.metadata || {};
+    const isPalmpay =
+      meta.palmpay ||
+      (wallet.bankName === 'PALMPAY' && wallet.accountNumber.startsWith('6'));
 
     if (!isPalmpay) return null;
 
     return {
       virtualAccountNo: wallet.accountNumber,
       virtualAccountName: wallet.accountName,
-      status: wallet.metadata?.palmpay?.status || 'Active',
+      status: meta.palmpay?.status || 'Active',
       balance: Number(wallet.walletBalance),
     };
   } catch (error) {
