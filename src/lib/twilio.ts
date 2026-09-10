@@ -4,7 +4,7 @@ export async function sendWhatsAppMessage(phoneNumber: string, message: string):
   try {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromNumber = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+2347084422183';
     
     if (!accountSid || !authToken) {
       console.error('Twilio credentials missing');
