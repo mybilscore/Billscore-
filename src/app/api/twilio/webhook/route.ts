@@ -2860,8 +2860,39 @@ export async function POST(request: NextRequest) {
       include: { wallet: true },
     });
 
-    if (!user) {
+       if (!user) {
       const upperBody = body.toUpperCase().trim();
+      
+      // ✅ Greeting detection (case-insensitive, same pattern as other commands)
+      if (
+        upperBody === "HELLO" ||
+        upperBody === "HI" ||
+        upperBody === "HEY" ||
+        upperBody === "START" ||
+        upperBody === "HELLO BILSCORE" ||
+        upperBody === "HI BILSCORE" ||
+        upperBody === "HEY BILSCORE"
+      ) {
+        return new NextResponse(buildTwilioResponse(`👋 *Welcome to Bilscore!*
+
+You're not registered yet. Join in seconds:
+
+*REG [Full Name] [Email] [Username]*
+
+Example:
+REG John Doe john@email.com johndoe
+
+You'll get:
+✅ Instant wallet account
+✅ Buy airtime & data
+✅ Pay electricity bills
+✅ Cable TV subscriptions
+
+Type HELP after registration to see all commands.`), {
+          headers: { "Content-Type": "text/xml" },
+        });
+      }
+      
       if (upperBody.startsWith("REG") || upperBody === "REGISTER" || upperBody === "SIGNUP" || upperBody === "JOIN") {
         const responseMessage = await handleUserRegistration(whatsappFrom, body);
         return new NextResponse(buildTwilioResponse(responseMessage), {
@@ -3181,6 +3212,56 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
 async function processWhatsAppCommand(user: any, body: string, phone: string): Promise<string> {
   const command = body.toUpperCase().trim();
   const parts = body.split(" ").filter(p => p.length > 0);
+
+  // ============================================================
+  // GREETING DETECTION (NEW - case-insensitive, same pattern as other commands)
+  // ============================================================
+
+   if (
+    command === "HELLO" ||
+    command === "HI" ||
+    command === "HEY" ||
+    command === "START" ||
+    command === "HELLO BILSCORE" ||
+    command === "HI BILSCORE" ||
+    command === "HEY BILSCORE"
+  ) {
+    userSessions.delete(user.id);
+    const firstName = (user.fullName || '').split(' ')[0] || 'there';
+    return `👋 *Hello ${firstName}! Welcome back to Bilscore*
+
+Here's what you can do:
+
+💰 *Wallet*
+BALANCE - Check your balance
+TRANSACTIONS - Recent transactions
+
+📱 *Airtime & Data*
+AIRTIME [amount] - Buy airtime for your number
+DATA - See available data plans
+DATA [index] - Buy data for your number
+
+⚡ *Electricity*
+POWER - Show your saved meters
+POWER [amount] - Buy electricity
+
+📺 *Cable TV*
+CABLE - Show saved decoders
+PACKAGES DSTV - See packages
+
+🎓 *Education*
+EDU [product] [quantity] - Buy exam PINs
+
+⚙️ *Settings*
+PIN [code] - Set transaction PIN
+WA - WhatsApp settings
+MYWA - Quick PIN status
+
+👥 *Referrals*
+REFERRAL - Get your referral link
+
+Type HELP for the full command list.`;
+  }
 
   // ============================================================
   // WHATSAPP SETTINGS - MYWA (NEW - User Friendly)
