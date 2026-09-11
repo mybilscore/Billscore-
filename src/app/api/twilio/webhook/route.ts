@@ -1355,9 +1355,7 @@ Please fund your wallet and try again.`
   return { success: true, balance: currentBalance };
 }
 
-// ============================================================
-// PROCESS DATA PURCHASE WITH QUEUE (UPDATED - passes user role)
-// ============================================================
+
 
 // ============================================================
 // PROCESS DATA PURCHASE WITH QUEUE (UPDATED - resolves finalPlanCode from vendorPlanId)
@@ -2855,10 +2853,30 @@ export async function POST(request: NextRequest) {
       });
     }
 
+  
+        // ============================================================
+    // FIND USER BY NORMALIZED PHONE (matches web-registered users)
+    // ============================================================
+    // Twilio sends "+2348064875435", but web registration may store
+    // "08064875435" / "2348064875435" / "8064875435".
+    // Normalize both sides and try all common formats.
+    const normalizedFrom = normalizePhoneNumber(whatsappFrom);
+
     let user = await prisma.user.findFirst({
-      where: { phone: whatsappFrom },
+      where: {
+        OR: [
+          { phone: whatsappFrom },
+          { phone: normalizedFrom },
+          { phone: `234${normalizedFrom.substring(1)}` },
+          { phone: normalizedFrom.substring(1) },
+        ],
+      },
       include: { wallet: true },
     });
+
+    console.log(
+      `[Twilio] Lookup: from=${whatsappFrom}, normalized=${normalizedFrom}, found=${!!user}`
+    );
 
        if (!user) {
       const upperBody = body.toUpperCase().trim();
@@ -2944,8 +2962,17 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
   try {
     console.log(`[WhatsApp] Starting registration for: ${phone}`);
 
+      const normalizedPhone = normalizePhoneNumber(phone);
+
     const existingUser = await prisma.user.findFirst({
-      where: { phone: phone },
+      where: {
+        OR: [
+          { phone: phone },
+          { phone: normalizedPhone },
+          { phone: `234${normalizedPhone.substring(1)}` },
+          { phone: normalizedPhone.substring(1) },
+        ],
+      },
     });
 
     if (existingUser) {
@@ -3018,7 +3045,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
           fullName: fullName,
           email: email,
           username: username,
-          phone: phone,
+          phone: normalizePhoneNumber(phone),
           passwordHash: hashedPassword,
           pinHash: hashedPin,
           referralCode: `BIL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
@@ -3051,58 +3078,105 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         },
       });
 
+           // ============================================================
+      // CREATE PALMPAY COMPANY VIRTUAL ACCOUNT (CAC from env)
+      // ============================================================
+   
+      const palmpayCac = (process.env.PALMPAY_CAC_NUMBER || '').trim();
+
+      if (!palmpayCac) {
+        console.error('❌ PALMPAY_CAC_NUMBER is not configured');
+
+        // Rollback the user we just created — no CAC means no wallet
+        try {
+          await prisma.wallet.deleteMany({ where: { userId: user.id } });
+          await prisma.referral.deleteMany({ where: { refereeId: user.id } });
+          await prisma.user.delete({ where: { id: user.id } });
+          console.log(`🗑️ Rolled back user ${user.id} (missing CAC config)`);
+        } catch (rollbackError) {
+          console.error('❌ Rollback failed:', rollbackError);
+        }
+
+        return `⚠️ Registration is temporarily unavailable. Please try again later or contact support.`;
+      }
+
+      // ============================================================
+      // CREATE PALMPAY COMPANY VIRTUAL ACCOUNT
+      // ============================================================
       let wallet: any = null;
       let virtualAccountNo: string | null = null;
       let isSimulation = false;
       let palmpayError: string | null = null;
-      let retryCount = 0;
-      const MAX_RETRIES = 3;
 
-      while (retryCount < MAX_RETRIES && !wallet) {
+      try {
+        console.log(`📤 Creating PalmPay company virtual account for user ${user.id}...`);
+
+        const { createPalmPayVirtualAccountForUser, isPalmPaySimulationMode } = await import(
+          "~/lib/palmpay/palmpay-wallet.service"
+        );
+
+        const result = await createPalmPayVirtualAccountForUser(user.id, {
+          fullName: fullName,
+          email: email,
+          phone: phone,
+          role: "END_USER",
+          cac: palmpayCac, // ✅ required, passed explicitly from env
+        });
+
+        wallet = result.wallet;
+        virtualAccountNo = result.virtualAccount?.virtualAccountNo || null;
+        isSimulation = isPalmPaySimulationMode();
+
+        console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
+        console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
+      } catch (error: any) {
+        console.error(`❌ PalmPay virtual account creation failed:`, error.message);
+        palmpayError = error.message;
+
+        // ✅ Audit BEFORE rollback
         try {
-          retryCount++;
-          console.log(`📤 Attempt ${retryCount}/${MAX_RETRIES} - Creating PalmPay wallet for user ${user.id}...`);
-          
-          const { createPalmPayVirtualAccountForUser, isPalmPaySimulationMode } = await import("~/lib/palmpay/palmpay-wallet.service");
-          
-          const result = await createPalmPayVirtualAccountForUser(
-            user.id,
-            {
-              fullName: fullName,
-              email: email,
-              phone: phone,
-              role: "END_USER",
-            }
-          );
-
-          wallet = result.wallet;
-          virtualAccountNo = result.virtualAccount?.virtualAccountNo || null;
-          isSimulation = isPalmPaySimulationMode();
-
-          console.log(`✅ PalmPay virtual account created: ${virtualAccountNo}`);
-          console.log(`💰 Wallet created: ${wallet.id}, Balance: ${wallet.walletBalance}`);
-          break;
-
-        } catch (error: any) {
-          console.error(`❌ Attempt ${retryCount} failed:`, error.message);
-          palmpayError = error.message;
-          
-          if (retryCount < MAX_RETRIES) {
-            const delay = retryCount * 2000;
-            console.log(`⏳ Retrying in ${delay/1000}s...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
+          await prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              action: "WHATSAPP_REGISTRATION_WALLET_FAILED",
+              metadata: {
+                email,
+                phone,
+                error: error.message,
+                source: "whatsapp",
+              },
+              ipAddress: "whatsapp",
+              channel: "WHATSAPP",
+            },
+          });
+        } catch (logError) {
+          console.error("⚠️ Failed to write audit log:", logError);
         }
-      }
 
-      if (!wallet) {
-        console.error(`❌ All ${MAX_RETRIES} attempts to create wallet failed`);
-        
-        await prisma.user.delete({
-          where: { id: user.id },
-        }).catch(() => {});
-        
-        return `Registration failed: Unable to create wallet. Please try again later. Error: ${palmpayError || 'Unknown error'}`;
+        // ✅ Rollback in the same order as /api/auth/register
+        try {
+          await prisma.wallet.deleteMany({ where: { userId: user.id } });
+          await prisma.referral.deleteMany({ where: { refereeId: user.id } });
+          await prisma.user.delete({ where: { id: user.id } });
+          console.log(`🗑️ Rolled back user ${user.id}`);
+        } catch (rollbackError) {
+          console.error("❌ Rollback failed:", rollbackError);
+        }
+
+        const isConfigError = /PALMPAY_CAC_NUMBER|CAC number is not configured|Invalid CAC|CAC number is required/i.test(
+          error.message
+        );
+        const isIdentityError = /licenseNumber|cac|identity/i.test(error.message);
+
+        if (isConfigError) {
+          return `⚠️ Registration is temporarily unavailable. Please try again later or contact support.`;
+        }
+        if (isIdentityError) {
+          return `❌ Registration failed: We couldn't complete your wallet setup with our payment provider. Please try again later.`;
+        }
+        return `❌ Registration failed: Unable to create wallet. Please try again later.
+
+Error: ${palmpayError || "Unknown error"}`;
       }
 
       await prisma.user.update({
@@ -3114,7 +3188,7 @@ async function handleUserRegistration(phone: string, body: string): Promise<stri
         await prisma.customer.create({
           data: {
             userId: user.id,
-            phone: phone,
+            phone: normalizePhoneNumber(phone),
             fullName: fullName,
             email: email,
             customerType: "REGULAR",
