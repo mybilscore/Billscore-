@@ -99,7 +99,7 @@ export async function createPalmPayVirtualAccountForUser(
     const cleanName = cleanAccountName(userData.fullName);
 
     const request: CreateVirtualAccountRequest = {
-      virtualAccountName: `Bilscore_${cleanName}`,
+      virtualAccountName: cleanName,
       identityType: 'company',
       licenseNumber: cacNumber,
       email: userData.email,
