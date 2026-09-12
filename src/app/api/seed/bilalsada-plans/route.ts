@@ -1,4 +1,4 @@
-// src/app/api/seed/bilalsada-plans/route.ts - CLEANED (MTN, AIRTEL, GLO, 9MOBILE ONLY)
+// src/app/api/seed/bilalsada-plans/route.ts - FIXED PARSER + NETWORK CONFIG SEED
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "~/lib/db";
@@ -15,9 +15,9 @@ const BILAL_SADA_PLANS = [
   "4 MTN SME 3GB ₦1,350.00 30days",
   "5 MTN SME 5GB ₦1,805.00 30days",
   "263 MTN SME 1GB ₦530.00 30days",
-  
+
   // ============================================
-  // MTN GIFTING Plans (35 plans)
+  // MTN GIFTING Plans
   // ============================================
   "20 MTN GIFTING 1GB ₦250.00 30days",
   "66 MTN GIFTING 2GB ₦470.00 30days",
@@ -57,7 +57,7 @@ const BILAL_SADA_PLANS = [
   "227 MTN GIFTING 800GB ₦122,500.00 365days",
 
   // ============================================
-  // AIRTEL SME Plans (10 plans)
+  // AIRTEL SME Plans
   // ============================================
   "7 AIRTEL SME 500MB ₦493.00 7days",
   "8 AIRTEL SME 1GB ₦784.00 7days",
@@ -71,7 +71,7 @@ const BILAL_SADA_PLANS = [
   "126 AIRTEL SME 1TB ₦196,000.00 1year",
 
   // ============================================
-  // AIRTEL GIFTING Plans (37 plans)
+  // AIRTEL GIFTING Plans
   // ============================================
   "145 AIRTEL GIFTING 35GB ₦10,000.00 30days",
   "146 AIRTEL GIFTING 60GB ₦15,000.00 30days",
@@ -115,7 +115,7 @@ const BILAL_SADA_PLANS = [
   "58 AIRTEL GIFTING 11GB ₦4,000.00 30days",
 
   // ============================================
-  // AIRTEL COOPERATE GIFTING Plans (5 plans)
+  // AIRTEL COOPERATE GIFTING Plans
   // ============================================
   "53 AIRTEL COOPERATE GIFTING 500MB ₦460.00 30days",
   "54 AIRTEL COOPERATE GIFTING 1GB ₦920.00 30days",
@@ -124,7 +124,7 @@ const BILAL_SADA_PLANS = [
   "57 AIRTEL COOPERATE GIFTING 10GB ₦9,200.00 30days",
 
   // ============================================
-  // GLO GIFTING Plans (64 plans)
+  // GLO GIFTING Plans
   // ============================================
   "11 GLO GIFTING 1.5GB ₦460.00 30days",
   "12 GLO GIFTING 2.9GB ₦940.00 30days",
@@ -210,7 +210,7 @@ const BILAL_SADA_PLANS = [
   "325 GLO GIFTING 10GB ₦1,960.00 7days",
 
   // ============================================
-  // GLO SME Plans (11 plans)
+  // GLO SME Plans
   // ============================================
   "150 GLO SME 500MB ₦190.00 14days Night plan",
   "151 GLO SME 1GB ₦360.00 14days Night plan",
@@ -225,7 +225,7 @@ const BILAL_SADA_PLANS = [
   "160 GLO SME 10GB ₦3,570.00 14days night plan",
 
   // ============================================
-  // GLO COOPERATE GIFTING Plans (7 plans)
+  // GLO COOPERATE GIFTING Plans
   // ============================================
   "29 GLO COOPERATE GIFTING 200MB ₦110.00 30days",
   "30 GLO COOPERATE GIFTING 500MB ₦199.00 30days",
@@ -236,7 +236,7 @@ const BILAL_SADA_PLANS = [
   "35 GLO COOPERATE GIFTING 10GB ₦3,990.00 30days after redeeming",
 
   // ============================================
-  // 9MOBILE Plans (3 plans)
+  // 9MOBILE Plans
   // ============================================
   "25 9MOBILE SME 1.1GB ₦400.00 30days",
   "27 9MOBILE GIFTING 1.5GB ₦880.00 30days",
@@ -244,212 +244,238 @@ const BILAL_SADA_PLANS = [
 ];
 
 // ============================================
+// NETWORK CONFIG — REQUIRED DEFAULTS
+// ============================================
+
+/**
+ * Upsert all required NetworkConfig rows before importing plans.
+ * DataPlan.network is a foreign key to NetworkConfig.network.
+ */
+async function ensureNetworkConfigs(): Promise<void> {
+  const requiredNetworks: Array<{
+    network: NetworkProvider;
+    code: string;
+    displayName: string;
+    color: string;
+    priority: number;
+  }> = [
+    { network: NetworkProvider.MTN,        code: 'MTN',       displayName: 'MTN',        color: '#FFCC00', priority: 1 },
+    { network: NetworkProvider.AIRTEL,     code: 'AIRTEL',    displayName: 'Airtel',     color: '#E40000', priority: 2 },
+    { network: NetworkProvider.GLO,        code: 'GLO',       displayName: 'Glo',        color: '#00A651', priority: 3 },
+    { network: NetworkProvider.NINEMOBILE, code: '9MOBILE',   displayName: '9mobile',    color: '#006E51', priority: 4 },
+  ];
+
+  for (const cfg of requiredNetworks) {
+    await prisma.networkConfig.upsert({
+      where: { network: cfg.network },
+      update: {
+        code: cfg.code,
+        displayName: cfg.displayName,
+        color: cfg.color,
+        priority: cfg.priority,
+        isActive: true,
+      },
+      create: {
+        network: cfg.network,
+        code: cfg.code,
+        displayName: cfg.displayName,
+        color: cfg.color,
+        priority: cfg.priority,
+        isActive: true,
+        vendorNetworkMapping: {},
+        metadata: {},
+      },
+    });
+  }
+
+  console.log(`✅ [Seed] NetworkConfig ensured for ${requiredNetworks.length} networks`);
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
 function extractAmountMB(amountStr: string): number {
   if (!amountStr) return 0;
-  
   const cleaned = amountStr.toUpperCase().trim();
-  
-  if (cleaned.includes('TB')) {
-    const num = parseFloat(cleaned.replace('TB', '').trim());
-    return isNaN(num) ? 0 : num * 1024 * 1024;
-  }
-  
-  if (cleaned.includes('GB')) {
-    const num = parseFloat(cleaned.replace('GB', '').trim());
-    return isNaN(num) ? 0 : num * 1024;
-  }
-  
-  if (cleaned.includes('MB')) {
-    const num = parseFloat(cleaned.replace('MB', '').trim());
-    return isNaN(num) ? 0 : num;
-  }
-  
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
+  const match = cleaned.match(/^(\d+(?:\.\d+)?)\s*(TB|GB|MB)$/);
+  if (!match) return 0;
+  const num = parseFloat(match[1]);
+  const unit = match[2];
+  if (isNaN(num) || num <= 0) return 0;
+  if (unit === 'TB') return Math.round(num * 1024 * 1024);
+  if (unit === 'GB') return Math.round(num * 1024);
+  return Math.round(num);
 }
 
 function parsePrice(priceStr: string): number {
   if (!priceStr) return 0;
-  const cleaned = priceStr.replace(/[₦,]/g, '').trim();
+  const cleaned = priceStr
+    .replace(/₦/g, '')
+    .replace(/â‚¦/g, '')
+    .replace(/â€¦/g, '')
+    .replace(/[Nn]/g, '')
+    .replace(/[,\s]/g, '')
+    .trim();
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
 }
 
 function parseValidity(validityStr: string): { days: number; unit: string } {
-  const lower = validityStr.toLowerCase();
+  const lower = (validityStr || '').toLowerCase();
   let days = 30;
   let unit = 'DAYS';
-  
+  const numberMatch = lower.match(/(\d+)/);
+
   if (lower.includes('hour') || lower.includes('hr')) {
     unit = 'HOURS';
-    const match = lower.match(/(\d+)/);
-    days = match ? parseInt(match[1]) || 1 : 1;
+    days = numberMatch ? parseInt(numberMatch[1], 10) || 1 : 1;
+  } else if (lower.includes('night')) {
+    unit = 'DAYS';
+    days = numberMatch ? parseInt(numberMatch[1], 10) || 1 : 1;
   } else if (lower.includes('day') || lower.includes('daily')) {
     unit = 'DAYS';
-    const match = lower.match(/(\d+)/);
-    days = match ? parseInt(match[1]) || 30 : 30;
+    days = numberMatch ? parseInt(numberMatch[1], 10) || 1 : 1;
   } else if (lower.includes('week')) {
     unit = 'DAYS';
-    const match = lower.match(/(\d+)/);
-    days = match ? parseInt(match[1]) * 7 : 7;
+    days = numberMatch ? (parseInt(numberMatch[1], 10) || 1) * 7 : 7;
   } else if (lower.includes('month') || lower.includes('monthly')) {
     unit = 'DAYS';
-    const match = lower.match(/(\d+)/);
-    days = match ? parseInt(match[1]) * 30 : 30;
+    days = numberMatch ? (parseInt(numberMatch[1], 10) || 1) * 30 : 30;
   } else if (lower.includes('year') || lower.includes('yearly') || lower.includes('annually')) {
     unit = 'DAYS';
-    const match = lower.match(/(\d+)/);
-    days = match ? parseInt(match[1]) * 365 : 365;
+    days = numberMatch ? (parseInt(numberMatch[1], 10) || 1) * 365 : 365;
   }
-  
+
   return { days, unit };
 }
 
 function parsePlanString(planString: string) {
-  const parts = planString.split(' ');
-  
+  const parts = planString.trim().split(/\s+/);
+
+  if (parts.length < 4) {
+    throw new Error(`Plan string too short: "${planString}"`);
+  }
+
   const code = parts[0];
-  
-  // Find network
-  let networkIndex = 1;
-  let network = '';
+  if (!/^\d+$/.test(code)) {
+    throw new Error(`Invalid plan code "${code}" in: "${planString}"`);
+  }
+
+  // Network
   const networkKeywords = ['MTN', 'GLO', 'AIRTEL', '9MOBILE'];
-  
+  let network: string | null = null;
+  let networkIndex = -1;
   for (let i = 1; i < Math.min(parts.length, 4); i++) {
     const part = parts[i].toUpperCase();
-    if (networkKeywords.some(keyword => part.includes(keyword) || keyword.includes(part))) {
-      network = parts[i];
+    if (networkKeywords.includes(part)) {
+      network = part;
       networkIndex = i;
       break;
     }
   }
-  
-  // Get plan type
-  let planType = 'GIFTING';
-  let typeIndex = networkIndex + 1;
-  
-  const typeCheck = parts.slice(networkIndex + 1, networkIndex + 4).join(' ').toUpperCase();
-  if (typeCheck.includes('SME')) {
-    planType = 'SME';
-    typeIndex = networkIndex + 1;
-  } else if (typeCheck.includes('COOPERATE GIFTING') || typeCheck.includes('COOPERATE')) {
-    planType = 'COOPERATE GIFTING';
-    typeIndex = networkIndex + 1;
-  } else if (typeCheck.includes('GIFTING') || typeCheck.includes('GIFT')) {
-    planType = 'GIFTING';
-    typeIndex = networkIndex + 1;
+  if (!network || networkIndex === -1) {
+    throw new Error(`Could not detect network in: "${planString}"`);
   }
-  
-  // Get amount
+
+  // Plan type
+  let planType = 'GIFTING';
+  let afterTypeIndex = networkIndex + 1;
+  const typeWords = parts.slice(networkIndex + 1, networkIndex + 4).map(p => p.toUpperCase());
+
+  if (typeWords[0] === 'SME') {
+    planType = 'SME';
+    afterTypeIndex = networkIndex + 2;
+  } else if (typeWords[0] === 'COOPERATE' && typeWords[1] === 'GIFTING') {
+    planType = 'COOPERATE GIFTING';
+    afterTypeIndex = networkIndex + 3;
+  } else if (typeWords[0] === 'GIFTING' || typeWords[0] === 'GIFT') {
+    planType = 'GIFTING';
+    afterTypeIndex = networkIndex + 2;
+  }
+
+  // Amount
+  const AMOUNT_RE = /^\d+(?:\.\d+)?(MB|GB|TB)$/i;
   let amountStr = '';
-  let amountIndex = typeIndex;
-  
-  for (let i = typeIndex; i < parts.length; i++) {
-    const part = parts[i];
-    if (part.includes('MB') || part.includes('GB') || part.includes('TB')) {
-      amountStr = part;
+  let amountIndex = -1;
+  for (let i = afterTypeIndex; i < parts.length; i++) {
+    if (AMOUNT_RE.test(parts[i])) {
+      amountStr = parts[i];
       amountIndex = i;
       break;
     }
-    if (i + 1 < parts.length && (parts[i+1].includes('MB') || parts[i+1].includes('GB') || parts[i+1].includes('TB'))) {
-      amountStr = parts[i] + parts[i+1];
-      amountIndex = i + 1;
+  }
+  if (!amountStr || amountIndex === -1) {
+    throw new Error(`Could not detect amount in: "${planString}"`);
+  }
+
+  // Price
+  let priceStr = '';
+  let priceIndex = -1;
+  for (let i = amountIndex + 1; i < parts.length; i++) {
+    const part = parts[i];
+    if (/[₦â‚¦â€¦]/.test(part) || /^[Nn]\d/.test(part)) {
+      priceStr = part;
+      priceIndex = i;
       break;
     }
   }
-  
-  if (!amountStr) {
-    for (let i = typeIndex; i < parts.length; i++) {
-      const part = parts[i];
-      if (part.match(/\d+\.?\d*/) && i + 1 < parts.length) {
-        const nextPart = parts[i + 1];
-        if (nextPart.includes('MB') || nextPart.includes('GB') || nextPart.includes('TB')) {
-          amountStr = part + nextPart;
-          amountIndex = i + 1;
+  if (!priceStr) {
+    for (let i = amountIndex + 1; i < parts.length; i++) {
+      const cleaned = parts[i].replace(/[₦Nn,\s]/g, '');
+      if (/^\d+(?:\.\d+)?$/.test(cleaned)) {
+        const num = parseFloat(cleaned);
+        if (!isNaN(num) && num > 0) {
+          priceStr = parts[i];
+          priceIndex = i;
           break;
         }
       }
     }
   }
-  
-  // Get price
-  let priceStr = '';
-  let priceIndex = amountIndex + 1;
-  
-  for (let i = amountIndex + 1; i < parts.length; i++) {
-    if (parts[i].includes('₦')) {
-      priceStr = parts[i];
-      priceIndex = i;
-      break;
-    }
-    if (i + 1 < parts.length && parts[i+1].includes('₦')) {
-      priceStr = parts[i] + parts[i+1];
-      priceIndex = i + 1;
-      break;
-    }
+  if (!priceStr || priceIndex === -1) {
+    throw new Error(`Could not detect price in: "${planString}"`);
   }
-  
-  if (!priceStr) {
-    for (let i = amountIndex + 1; i < parts.length; i++) {
-      const part = parts[i];
-      const num = parseFloat(part.replace(/[^0-9.]/g, ''));
-      if (!isNaN(num) && num > 0) {
-        priceStr = part;
-        priceIndex = i;
-        break;
-      }
-    }
-  }
-  
-  // Get validity
+
+  // Validity
   let validityStr = '30days';
   for (let i = priceIndex + 1; i < parts.length; i++) {
-    const part = parts[i].toLowerCase();
-    if (part.includes('day') || part.includes('month') || part.includes('year') || part.includes('hour')) {
+    const lower = parts[i].toLowerCase();
+    if (/(day|days|night|month|months|year|years|hour|hours|week|weeks)/.test(lower)) {
       validityStr = parts[i];
       break;
     }
-    if (i + 1 < parts.length && 
-        (parts[i+1].toLowerCase().includes('day') || 
-         parts[i+1].toLowerCase().includes('month') || 
-         parts[i+1].toLowerCase().includes('year') ||
-         parts[i+1].toLowerCase().includes('hour'))) {
-      validityStr = parts[i] + ' ' + parts[i+1];
-      break;
-    }
   }
-  
-  validityStr = validityStr.replace(/[^a-zA-Z0-9]/g, ' ').trim();
-  
-  const price = parsePrice(priceStr);
+
   const amountMB = extractAmountMB(amountStr);
+  const price = parsePrice(priceStr);
   const validity = parseValidity(validityStr);
-  
-  // Map network to NetworkProvider enum
-  let networkProvider = 'MTN' as NetworkProvider;
-  const networkUpper = network.toUpperCase();
-  if (networkUpper.includes('GLO')) {
-    networkProvider = 'GLO' as NetworkProvider;
-  } else if (networkUpper.includes('AIRTEL')) {
-    networkProvider = 'AIRTEL' as NetworkProvider;
-  } else if (networkUpper.includes('9MOBILE') || networkUpper.includes('NINE')) {
-    networkProvider = 'NINEMOBILE' as NetworkProvider;
+
+  if (amountMB <= 0) {
+    throw new Error(`amountMB resolved to ${amountMB} for amount="${amountStr}" in: "${planString}"`);
   }
-  
-  // Map plan type
-  let planTypeEnum = 'GIFTING' as PlanType;
-  if (planType === 'SME') {
-    planTypeEnum = 'SME' as PlanType;
-  } else if (planType === 'COOPERATE GIFTING') {
-    planTypeEnum = 'COOPERATE_GIFTING' as PlanType;
+  if (price <= 0) {
+    throw new Error(`price resolved to ${price} for price="${priceStr}" in: "${planString}"`);
   }
-  
-  let planName = `${network} ${planType} ${amountStr} ${validityStr}`;
-  planName = planName.replace(/\b(SME|GIFTING|COOPERATE GIFTING)\s+\1\b/gi, '$1');
-  
+
+  // Enum mapping
+  let networkProvider: NetworkProvider = NetworkProvider.MTN;
+  if (network === 'GLO') networkProvider = NetworkProvider.GLO;
+  else if (network === 'AIRTEL') networkProvider = NetworkProvider.AIRTEL;
+  else if (network === '9MOBILE') networkProvider = NetworkProvider.NINEMOBILE;
+
+  let planTypeEnum: PlanType = PlanType.GIFTING;
+  if (planType === 'SME') planTypeEnum = PlanType.SME;
+  else if (planType === 'COOPERATE GIFTING') planTypeEnum = PlanType.CooperateGifting_placeholder
+    ;
+  // ^ handled below to avoid TS error:
+  if (planType === 'SME') planTypeEnum = PlanType.SME;
+  else if (planType === 'COOPERATE GIFTING') planTypeEnum = PlanType.COOPERATE_GIFTING;
+
+  const validityLabel = validityStr.trim() || '30days';
+  const planName = `${network} ${planType} ${amountStr} ${validityLabel}`.replace(/\s+/g, ' ').trim();
+  const description = `${network} ${planType} ${amountStr} - ${validityLabel}`;
+
   return {
     code,
     network: networkProvider,
@@ -458,11 +484,11 @@ function parsePlanString(planString: string) {
     amountMB,
     price,
     validityDays: validity.days,
-    validityUnit: validity.unit,
+    validityUnit: validity.unit as ValidityUnit,
     vendorPlanId: code,
     vendorNetworkCode: network,
     vendorPlanType: planType,
-    description: `${network} ${planType} ${amountStr} - ${validityStr}`,
+    description,
     importBatch: new Date().toISOString().slice(0, 10),
   };
 }
@@ -479,6 +505,10 @@ export async function POST(request: NextRequest) {
     console.log(`🌱 [Seed] Importing BilalSada plans for ${vendorCode}...`);
     console.log(`📊 [Seed] Total plans to import: ${BILAL_SADA_PLANS.length}`);
 
+    // ✅ STEP 1: Ensure all NetworkConfig records exist (fixes FK violation)
+    await ensureNetworkConfigs();
+
+    // ✅ STEP 2: Find the vendor
     const vendor = await prisma.vendor.findUnique({
       where: { code: vendorCode },
     });
@@ -501,17 +531,15 @@ export async function POST(request: NextRequest) {
     for (const planString of BILAL_SADA_PLANS) {
       try {
         const parsed = parsePlanString(planString);
-        
-        if (parsed.amountMB === 0) {
-          console.log(`⚠️ [Seed] Skipping plan with 0MB: ${planString}`);
-          skipped++;
-          continue;
-        }
-        
-        if (parsed.price === 0) {
-          console.log(`⚠️ [Seed] Skipping plan with 0 price: ${planString}`);
-          skipped++;
-          continue;
+
+        if (created + updated < 3) {
+          console.log(`🔍 [Seed] Parsed "${planString}" →`, {
+            network: parsed.network,
+            type: parsed.planType,
+            amountMB: parsed.amountMB,
+            price: parsed.price,
+            validity: `${parsed.validityDays}${parsed.validityUnit}`,
+          });
         }
 
         const existing = await prisma.dataPlan.findFirst({
@@ -521,19 +549,17 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        const price = parsed.price;
-        
         const planData = {
           network: parsed.network,
           planType: parsed.planType,
           planCategory: 'DATA' as PlanCategory,
           name: parsed.name,
           amountMB: parsed.amountMB,
-          vendorPrice: price,
-          ourPrice: price,
-          agentPrice: price,
+          vendorPrice: parsed.price,
+          ourPrice: parsed.price,
+          agentPrice: parsed.price,
           validity: parsed.validityDays,
-          validityUnit: parsed.validityUnit as ValidityUnit,
+          validityUnit: parsed.validityUnit,
           description: parsed.description,
           vendorId: vendor.id,
           vendorPlanId: parsed.vendorPlanId,
@@ -557,17 +583,18 @@ export async function POST(request: NextRequest) {
           });
           created++;
         }
-        
       } catch (error: any) {
         errors.push({
           plan: planString,
           error: error.message,
         });
-        console.error(`❌ [Seed] Error importing plan: ${planString}`, error.message);
+        console.error(`❌ [Seed] Error importing plan "${planString}":`, error.message);
       }
     }
 
-    console.log(`✅ [Seed] Import complete: ${created} created, ${updated} updated, ${skipped} skipped, ${errors.length} errors`);
+    console.log(
+      `✅ [Seed] Import complete: ${created} created, ${updated} updated, ${skipped} skipped, ${errors.length} errors`
+    );
 
     const [totalPlans, networkStats, priceStats] = await Promise.all([
       prisma.dataPlan.count({
@@ -610,14 +637,13 @@ export async function POST(request: NextRequest) {
             count: n._count,
           })),
           priceStats: {
-            average: priceStats._avg.ourPrice || 0,
-            min: priceStats._min.ourPrice || 0,
-            max: priceStats._max.ourPrice || 0,
+            average: Number(priceStats._avg.ourPrice) || 0,
+            min: Number(priceStats._min.ourPrice) || 0,
+            max: Number(priceStats._max.ourPrice) || 0,
           },
         },
       },
     });
-
   } catch (error: any) {
     console.error('❌ [Seed] Error:', error);
     return NextResponse.json({
@@ -632,8 +658,8 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const vendorCode = searchParams.get('vendorCode') || 'BILAL_SADA';
     const network = searchParams.get('network') as any;
-    const limit = parseInt(searchParams.get('limit') || '100');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const limit = parseInt(searchParams.get('limit') || '100', 10);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
     const vendor = await prisma.vendor.findUnique({
       where: { code: vendorCode },
@@ -651,7 +677,7 @@ export async function GET(request: NextRequest) {
       vendorId: vendor.id,
       isActive: true,
     };
-    
+
     if (network) {
       where.network = network;
     }
@@ -696,13 +722,12 @@ export async function GET(request: NextRequest) {
         plans,
         pricingSummary: {
           totalPlans: plans.length,
-          averageVendorPrice: plans.reduce((sum, p) => sum + Number(p.vendorPrice), 0) / (plans.length || 1),
-          averageOurPrice: plans.reduce((sum, p) => sum + Number(p.ourPrice), 0) / (plans.length || 1),
-          averageAgentPrice: plans.reduce((sum, p) => sum + Number(p.agentPrice), 0) / (plans.length || 1),
+          averageVendorPrice: plans.reduce((s, p) => s + Number(p.vendorPrice), 0) / (plans.length || 1),
+          averageOurPrice: plans.reduce((s, p) => s + Number(p.ourPrice), 0) / (plans.length || 1),
+          averageAgentPrice: plans.reduce((s, p) => s + Number(p.agentPrice), 0) / (plans.length || 1),
         },
       },
     });
-
   } catch (error: any) {
     console.error('❌ [Seed] GET error:', error);
     return NextResponse.json({

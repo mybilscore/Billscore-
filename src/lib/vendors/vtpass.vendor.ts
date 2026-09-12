@@ -97,27 +97,45 @@ export class VTPassVendor extends BaseVendor {
     console.log(`✅ [VTPassVendor] API Base URL: ${config.apiBaseUrl}`);
   }
 
-  async authenticate(): Promise<Record<string, string>> {
+  /**
+   * ✅ FIXED: VTpass API Key Authentication
+   * 
+   * VTpass documentation rules:
+   *   - GET requests  → send `api-key` + `public-key`
+   *   - POST requests → send `api-key` + `secret-key`
+   * 
+   * Sending the wrong combination (e.g. secret-key on a GET) triggers
+   * a 401 "Invalid Credentials." response from the live gateway.
+   */
+  async authenticate(method: string = 'GET'): Promise<Record<string, string>> {
     const auth = this.authConfig;
-    console.log(`🔑 [VTPassVendor] Authenticating with method: ${auth.authMethod} (${this.environment})`);
+    const httpMethod = (method || 'GET').toUpperCase();
+    console.log(`🔑 [VTPassVendor] Authenticating for ${httpMethod} request (${this.environment})`);
     
-    if (auth.authMethod === 'apikey' && auth.apiKey) {
+    // ✅ Primary path: VTpass API Key authentication
+    if (auth.apiKey) {
       const headers: Record<string, string> = {
         'api-key': auth.apiKey,
         'Content-Type': 'application/json',
       };
       
-      if (auth.secretKey) {
-        headers['secret-key'] = auth.secretKey;
-      }
-      if (auth.publicKey) {
-        headers['public-key'] = auth.publicKey;
+      if (httpMethod === 'POST') {
+        // POST → api-key + secret-key
+        if (auth.secretKey) {
+          headers['secret-key'] = auth.secretKey;
+        }
+      } else {
+        // GET → api-key + public-key
+        if (auth.publicKey) {
+          headers['public-key'] = auth.publicKey;
+        }
       }
       
-      console.log(`🔑 [VTPassVendor] Headers: api-key, ${auth.secretKey ? 'secret-key' : ''}, ${auth.publicKey ? 'public-key' : ''}`);
+      console.log(`🔑 [VTPassVendor] Sending headers: ${Object.keys(headers).join(', ')}`);
       return headers;
     }
     
+    // Fallback: Basic auth (username/password)
     if (auth.authMethod === 'basic' && auth.username && auth.password) {
       const credentials = Buffer.from(`${auth.username}:${auth.password}`).toString('base64');
       return {
@@ -126,17 +144,11 @@ export class VTPassVendor extends BaseVendor {
       };
     }
     
+    // Fallback: Header key auth (messaging API style)
     if (auth.authMethod === 'headerkey' && auth.publicKey && auth.secretKey) {
       return {
         'X-Token': auth.publicKey,
         'X-Secret': auth.secretKey,
-        'Content-Type': 'application/json',
-      };
-    }
-    
-    if (auth.apiKey) {
-      return {
-        'api-key': auth.apiKey,
         'Content-Type': 'application/json',
       };
     }
@@ -429,7 +441,8 @@ export class VTPassVendor extends BaseVendor {
     console.log(`🌐 [VTPassVendor] Environment: ${this.environment}`);
     
     try {
-      const headers = await this.authenticate();
+      // ✅ FIXED: pass request.method so authenticate() can pick the right headers
+      const headers = await this.authenticate(request.method);
       console.log(`🔍 [VTPassVendor] Headers:`, Object.keys(headers));
       
       let transformedData = request.data;
